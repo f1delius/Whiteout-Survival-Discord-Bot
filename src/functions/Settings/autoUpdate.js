@@ -22,7 +22,6 @@ const {
 
 const PENDING_UPDATE_PATH = path.join(__dirname, '..', '..', 'database', 'pending_update.json');
 const AUTO_UPDATE_INTERVAL_MS = 5 * 60 * 1000;
-const DOCKER_SOCKET = '/var/run/docker.sock';
 const UPDATE_CHECK_PROXY_URL = process.env.UPDATE_CHECK_PROXY_URL || 'https://wosland.com/api/updates/latest';
 const PLUGIN_UPDATE_PROXY_URL = process.env.PLUGIN_UPDATE_CHECK_PROXY_URL
     || new URL('/api/updates/plugins', UPDATE_CHECK_PROXY_URL).toString();
@@ -111,89 +110,13 @@ function savePendingUpdateReference(payload) {
     }
 }
 
-// -------------------------------------------------------
-// Docker Engine API (direct Unix socket communication)
-// -------------------------------------------------------
-
 /**
  * Checks whether the Docker socket is available for self-hosted Docker updates.
  * @returns {boolean}
  */
 function hasDockerSocket() {
-    return global.isDocker && fs.existsSync(DOCKER_SOCKET);
-}
-
-/**
- * Makes an HTTP request to the Docker Engine API via Unix socket.
- * @param {string} method - HTTP method
- * @param {string} apiPath - API path (e.g. /containers/json)
- * @param {object|null} body - JSON body for POST/PUT
- * @returns {Promise<{statusCode: number, data: any}>}
- */
-function dockerApi(method, apiPath, body = null) {
-    const httpModule = require('http');
-    return new Promise((resolve, reject) => {
-        const options = {
-            socketPath: DOCKER_SOCKET,
-            path: apiPath,
-            method,
-            headers: {},
-            timeout: 30000
-        };
-
-        if (body) {
-            const bodyStr = JSON.stringify(body);
-            options.headers['Content-Type'] = 'application/json';
-            options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
-        }
-
-        const req = httpModule.request(options, (res) => {
-            const chunks = [];
-            res.on('data', chunk => chunks.push(chunk));
-            res.on('end', () => {
-                const raw = Buffer.concat(chunks).toString();
-                let data;
-                try { data = JSON.parse(raw); } catch { data = raw; }
-                resolve({ statusCode: res.statusCode, data });
-            });
-        });
-
-        req.on('error', reject);
-        req.on('timeout', () => { req.destroy(); reject(new Error('Docker API timeout')); });
-        if (body) req.write(JSON.stringify(body));
-        req.end();
-    });
-}
-
-/**
- * Pulls an image via Docker Engine API (consumes the streaming response).
- * @param {string} image - Image name without tag
- * @param {string} tag - Image tag
- * @returns {Promise<boolean>}
- */
-function pullDockerImage(image, tag = 'latest') {
-    const httpModule = require('http');
-    return new Promise((resolve, reject) => {
-        const encodedImage = encodeURIComponent(image);
-        const encodedTag = encodeURIComponent(tag);
-
-        const req = httpModule.request({
-            socketPath: DOCKER_SOCKET,
-            path: `/images/create?fromImage=${encodedImage}&tag=${encodedTag}`,
-            method: 'POST',
-            timeout: 120000
-        }, (res) => {
-            res.on('data', () => {});
-            res.on('end', () => {
-                if (res.statusCode === 200) resolve(true);
-                else reject(new Error(`Image pull failed with HTTP ${res.statusCode}`));
-            });
-        });
-
-        req.on('error', reject);
-        req.on('timeout', () => { req.destroy(); reject(new Error('Image pull timeout')); });
-        req.end();
-    });
+    const dockerSelfUpdate = require('./dockerSelfUpdate');
+    return dockerSelfUpdate.hasDockerSocket();
 }
 
 /**
@@ -202,79 +125,31 @@ function pullDockerImage(image, tag = 'latest') {
  * @returns {Promise<{available: boolean, current: string|null, latest: string|null}>}
  */
 async function checkDockerUpdate() {
+    const dockerSelfUpdate = require('./dockerSelfUpdate');
     const botContainer = process.env.BOT_CONTAINER || 'woslandjs';
     const botImage = process.env.BOT_IMAGE || 'ghcr.io/whiteout-project/whiteout-survival-discord-bot';
 
-    const { statusCode: cStatus, data: cData } = await dockerApi('GET', `/containers/${botContainer}/json`);
-    if (cStatus !== 200) throw new Error(`Cannot inspect container: HTTP ${cStatus}`);
-
-    const currentImageId = cData.Image;
-    const currentVersion = cData.Config?.Labels?.['org.opencontainers.image.version'] || null;
-
-    await pullDockerImage(botImage, 'latest');
-
-    const encodedRef = encodeURIComponent(`${botImage}:latest`);
-    const { statusCode: iStatus, data: iData } = await dockerApi('GET', `/images/${encodedRef}/json`);
-    if (iStatus !== 200) throw new Error(`Cannot inspect image: HTTP ${iStatus}`);
-
-    const latestImageId = iData.Id;
-    const latestVersion = iData.Config?.Labels?.['org.opencontainers.image.version'] || null;
-
-    return {
-        available: currentImageId !== null && latestImageId !== null && currentImageId !== latestImageId,
-        current: currentVersion,
-        latest: latestVersion || currentVersion
-    };
+    return dockerSelfUpdate.checkDockerUpdate({
+        targetContainer: botContainer,
+        targetImage: botImage
+    });
 }
 
 /**
- * Pulls the latest image, stops the old container, and recreates it
- * with the same configuration but the new image.
+ * Pulls the latest image and schedules an external helper container to
+ * replace this bot container. The helper is required because this process
+ * cannot stop its own container and then continue recreating it.
  * @returns {Promise<{success: boolean, message: string}>}
  */
 async function applyDockerUpdate() {
+    const { scheduleDockerUpdate } = require('./dockerSelfUpdate');
     const botContainer = process.env.BOT_CONTAINER || 'woslandjs';
     const botImage = process.env.BOT_IMAGE || 'ghcr.io/whiteout-project/whiteout-survival-discord-bot';
 
-    console.log('[AUTO-UPDATE] Pulling latest Docker image...');
-    await pullDockerImage(botImage, 'latest');
-
-    console.log('[AUTO-UPDATE] Inspecting current container...');
-    const { statusCode: inspectStatus, data: containerInfo } = await dockerApi('GET', `/containers/${botContainer}/json`);
-    if (inspectStatus !== 200) throw new Error(`Failed to inspect container: HTTP ${inspectStatus}`);
-
-    console.log('[AUTO-UPDATE] Stopping bot container...');
-    const { statusCode: stopStatus } = await dockerApi('POST', `/containers/${botContainer}/stop`);
-    if (stopStatus !== 204 && stopStatus !== 304) throw new Error(`Failed to stop container: HTTP ${stopStatus}`);
-
-    console.log('[AUTO-UPDATE] Removing old container...');
-    const { statusCode: rmStatus } = await dockerApi('DELETE', `/containers/${botContainer}`);
-    if (rmStatus !== 204) throw new Error(`Failed to remove container: HTTP ${rmStatus}`);
-
-    const createBody = {
-        ...containerInfo.Config,
-        Image: `${botImage}:latest`,
-        HostConfig: containerInfo.HostConfig,
-        NetworkingConfig: { EndpointsConfig: {} }
-    };
-
-    for (const [networkName, networkConfig] of Object.entries(containerInfo.NetworkSettings?.Networks || {})) {
-        createBody.NetworkingConfig.EndpointsConfig[networkName] = {
-            IPAMConfig: networkConfig.IPAMConfig,
-            Aliases: networkConfig.Aliases
-        };
-    }
-
-    console.log('[AUTO-UPDATE] Creating updated container...');
-    const { statusCode: createStatus, data: createData } = await dockerApi('POST', `/containers/create?name=${botContainer}`, createBody);
-    if (createStatus !== 201) throw new Error(`Failed to create container: HTTP ${createStatus} - ${JSON.stringify(createData)}`);
-
-    console.log('[AUTO-UPDATE] Starting updated container...');
-    const { statusCode: startStatus } = await dockerApi('POST', `/containers/${createData.Id}/start`);
-    if (startStatus !== 204 && startStatus !== 304) throw new Error(`Failed to start container: HTTP ${startStatus}`);
-
-    console.log('[AUTO-UPDATE] Bot container updated and started.');
-    return { success: true, message: 'Update applied successfully.' };
+    return scheduleDockerUpdate({
+        targetContainer: botContainer,
+        targetImage: botImage
+    });
 }
 
 /**

@@ -32,6 +32,65 @@ function getConfiguredBotHeapMb() {
         || 256;
 }
 
+const RESTART_REQUEST_MAX_AGE_MS = 5 * 60 * 1000;
+const RESTART_REQUEST_PATH = path.join(__dirname, 'temp', 'restart-request.json');
+
+function writeRestartRequest(exitCode, reason = 'restart') {
+    try {
+        fs.mkdirSync(path.dirname(RESTART_REQUEST_PATH), { recursive: true });
+        fs.writeFileSync(RESTART_REQUEST_PATH, JSON.stringify({
+            pid: process.pid,
+            exitCode,
+            reason,
+            createdAt: Date.now()
+        }), 'utf8');
+    } catch (error) {
+        console.warn(`[LAUNCHER] Could not write restart request: ${error.message}`);
+    }
+}
+
+function readRestartRequest(expectedPid = null) {
+    try {
+        if (!fs.existsSync(RESTART_REQUEST_PATH)) return null;
+
+        const request = JSON.parse(fs.readFileSync(RESTART_REQUEST_PATH, 'utf8'));
+        const ageMs = Date.now() - Number(request.createdAt || 0);
+        if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > RESTART_REQUEST_MAX_AGE_MS) {
+            return null;
+        }
+
+        if (expectedPid && request.pid && Number(request.pid) !== Number(expectedPid)) {
+            return null;
+        }
+
+        return request;
+    } catch {
+        return null;
+    }
+}
+
+function clearRestartRequest() {
+    try {
+        if (fs.existsSync(RESTART_REQUEST_PATH)) {
+            fs.unlinkSync(RESTART_REQUEST_PATH);
+        }
+    } catch {
+        // Best effort only.
+    }
+}
+
+if (process.argv.includes('--docker-update-helper') || process.env.WOS_DOCKER_UPDATE_HELPER === '1') {
+    (async () => {
+        const { runDockerUpdateHelper } = require('./src/functions/Settings/dockerSelfUpdate');
+        await runDockerUpdateHelper();
+        process.exit(0);
+    })().catch((error) => {
+        console.error('[DOCKER-UPDATE] Helper failed:', error.message);
+        process.exit(1);
+    });
+    return;
+}
+
 // ============================================================
 // PARENT / CHILD WRAPPER
 // When running as the parent (no STARTER_CHILD env), spawn self
@@ -93,16 +152,25 @@ if (!process.env.STARTER_CHILD) {
             });
 
             activeChild.on('exit', (code, signal) => {
+                const childPid = activeChild?.pid;
+                const restartRequest = readRestartRequest(childPid);
                 activeChild = null;
 
                 if (parentShuttingDown) {
                     process.exit(code ?? 0);
                 }
                 if (code === 42) {
+                    clearRestartRequest();
                     console.log('[LAUNCHER] Respawning with updated code...\n');
                     spawnChild();
                 } else if (code === 43) {
+                    clearRestartRequest();
                     console.log('[LAUNCHER] starter.js updated — restarting child from disk...\n');
+                    spawnChild();
+                } else if (restartRequest) {
+                    clearRestartRequest();
+                    const detail = signal ? `signal ${signal}` : `exit code ${code ?? 'unknown'}`;
+                    console.warn(`[LAUNCHER] Child stopped with ${detail} during requested restart; respawning from disk...\n`);
                     spawnChild();
                 } else if (signal) {
                     process.exit(1);
@@ -1848,6 +1916,48 @@ function cleanupAllSchedulers() {
     } catch { /* not loaded */ }
 }
 
+function runCachedModuleCleanup(modulePath, cleanupExportName) {
+    try {
+        const resolvedPath = require.resolve(modulePath);
+        const cachedModule = require.cache[resolvedPath];
+        const cleanupFn = cachedModule?.exports?.[cleanupExportName];
+        if (typeof cleanupFn === 'function') {
+            cleanupFn();
+        }
+    } catch {
+        // Module was not loaded, or cleanup is unavailable.
+    }
+}
+
+let databasesClosed = false;
+function flushAndCloseDatabases() {
+    if (databasesClosed) return;
+    databasesClosed = true;
+
+    try {
+        const { db } = require('./src/functions/utility/database');
+        if (db.open) {
+            db.pragma('wal_checkpoint(TRUNCATE)');
+            db.close();
+            console.log('[SHUTDOWN] Database closed cleanly (WAL checkpointed).');
+        }
+    } catch { /* database module not loaded or already closed */ }
+
+    try {
+        const pluginDb = require('./plugins/web-panel/pluginDb');
+        pluginDb.close();
+        console.log('[SHUTDOWN] Web panel database closed cleanly (WAL checkpointed).');
+    } catch { /* plugin not loaded or already closed */ }
+}
+
+function prepareForLauncherRespawn(exitCode) {
+    writeRestartRequest(exitCode, exitCode === 43 ? 'starter-update' : 'restart');
+    cleanupAllSchedulers();
+    runCachedModuleCleanup('./src/functions/GiftCode/redeemFunction', 'cleanupNativeResources');
+    flushAndCloseDatabases();
+    if (global.gc) global.gc();
+}
+
 /**
  * Full restart - destroys client, clears ALL cache, and restarts
  * This fixes issues with cached function references
@@ -1863,6 +1973,16 @@ async function restartBot(exitCode = 42) {
 
     try {
         console.log('Restarting bot...\n');
+
+        // When the launcher wrapper is active, the safest restart is to let the
+        // child process exit and let the parent spawn a fresh process. Destroying
+        // Discord/native resources during macOS teardown can abort before exitCode
+        // is delivered, so a restart marker gives the parent a reliable signal.
+        if (process.env.FULL_SELF_UPDATE === '1') {
+            prepareForLauncherRespawn(exitCode);
+            console.log('Handing restart to launcher...\n');
+            process.exit(exitCode);
+        }
 
         cleanupAllSchedulers();
 
@@ -1905,6 +2025,7 @@ async function restartBot(exitCode = 42) {
         // with updated files instead of keeping a partially-torn in-memory process alive.
         if (process.env.FULL_SELF_UPDATE === '1') {
             console.log('Forcing launcher respawn after restart failure...\n');
+            writeRestartRequest(exitCode, 'restart-fallback');
             process.exit(exitCode);
         }
         console.log('Attempting emergency in-process restart...\n');
@@ -2018,24 +2139,8 @@ async function gracefulShutdown(exitCode = 0) {
         botClient = null;
     }
 
-    // 6. Flush WAL to main database file and close the connection.
-    //    This prevents leftover .db-wal / .db-shm files and avoids
-    //    potential corruption on unclean container shutdowns.
-    try {
-        const { db } = require('./src/functions/utility/database');
-        if (db.open) {
-            db.pragma('wal_checkpoint(TRUNCATE)');
-            db.close();
-            console.log('[SHUTDOWN] Database closed cleanly (WAL checkpointed).');
-        }
-    } catch { /* database module not loaded or already closed */ }
-
-    // 7. Checkpoint and close the web panel plugin database (WAL mode).
-    try {
-        const pluginDb = require('./plugins/web-panel/pluginDb');
-        pluginDb.close();
-        console.log('[SHUTDOWN] Web panel database closed cleanly (WAL checkpointed).');
-    } catch { /* plugin not loaded or already closed */ }
+    // 6. Flush WAL to main database files and close open SQLite handles.
+    flushAndCloseDatabases();
 
     process.exit(exitCode);
 }
@@ -2307,18 +2412,7 @@ process.on('SIGTERM', async () => {
 // having closed the database, checkpoint and close it here. better-sqlite3 calls
 // are synchronous so this works inside the 'exit' event.
 process.on('exit', () => {
-    try {
-        const { db } = require('./src/functions/utility/database');
-        if (db.open) {
-            db.pragma('wal_checkpoint(TRUNCATE)');
-            db.close();
-        }
-    } catch { /* already closed or not loaded */ }
-
-    try {
-        const pluginDb = require('./plugins/web-panel/pluginDb');
-        pluginDb.close();
-    } catch { /* plugin not loaded or already closed */ }
+    flushAndCloseDatabases();
 });
 
 // Expose functions globally for programmatic use (e.g., settings panel auto-update)

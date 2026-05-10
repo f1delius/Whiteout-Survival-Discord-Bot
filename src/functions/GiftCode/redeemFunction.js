@@ -265,6 +265,16 @@ class CaptchaSolver {
 
 const captchaSolver = new CaptchaSolver();
 
+function cleanupNativeResources() {
+    try {
+        captchaSolver.unload();
+    } catch {
+        // Best effort during process shutdown.
+    }
+    onnx = null;
+    sharp = null;
+}
+
 function fileExists(targetPath) {
     return fs
         .access(targetPath)
@@ -2070,5 +2080,6 @@ module.exports = {
     redeemGiftCodeForPlayer,
     makeGiftCodeAPIRequest,
     analyzeAPIResponse,
-    handleVipTracking
+    handleVipTracking,
+    cleanupNativeResources
 };

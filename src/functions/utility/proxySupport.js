@@ -6,11 +6,28 @@ let cachedProxyUrl;
 let proxyWasLogged = false;
 
 function readCliProxyUrl(argv = process.argv.slice(2)) {
-    const proxyFlagIndex = argv.indexOf('--proxy');
-    if (proxyFlagIndex === -1) return null;
+    let rawProxyUrl = null;
+    const inlineArg = argv.find(arg => /^--proxy=/i.test(arg));
+    if (inlineArg) {
+        rawProxyUrl = inlineArg.slice(inlineArg.indexOf('=') + 1).trim();
+    } else {
+        const proxyFlagIndex = argv.indexOf('--proxy');
+        if (proxyFlagIndex !== -1) {
+            const nextArg = argv[proxyFlagIndex + 1];
+            rawProxyUrl = (nextArg && !nextArg.startsWith('--')) ? nextArg : 'http://localhost:18080';
+        }
+    }
 
-    const nextArg = argv[proxyFlagIndex + 1];
-    const rawProxyUrl = (nextArg && !nextArg.startsWith('--')) ? nextArg : 'http://localhost:18080';
+    if (!rawProxyUrl) {
+        rawProxyUrl = process.env.WOS_GAME_PROXY_URL
+            || process.env.npm_config_proxy
+            || process.env.npm_config_https_proxy
+            || process.env.HTTP_PROXY
+            || process.env.HTTPS_PROXY
+            || null;
+    }
+
+    if (!rawProxyUrl) return null;
 
     try {
         const parsed = new URL(rawProxyUrl);
