@@ -55,6 +55,86 @@ const FK_SAFE_DELETE_ORDER = [
 ];
 
 /**
+ * Build a parent -> child table map from the live SQLite schema.
+ * This keeps migration cleanup aligned with real foreign key constraints.
+ * @returns {Map<string, Set<string>>}
+ */
+function getForeignKeyDependents() {
+	const dependents = new Map();
+	const tables = db.prepare(`
+		SELECT name
+		FROM sqlite_master
+		WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+	`).all();
+
+	for (const { name } of tables) {
+		const foreignKeys = db.prepare(`PRAGMA foreign_key_list(${name})`).all();
+		for (const foreignKey of foreignKeys) {
+			if (!dependents.has(foreignKey.table)) {
+				dependents.set(foreignKey.table, new Set());
+			}
+			dependents.get(foreignKey.table).add(name);
+		}
+	}
+
+	return dependents;
+}
+
+/**
+ * Include all child tables that reference the selected tables, recursively.
+ * @param {Set<string>} initialTables
+ * @returns {Set<string>}
+ */
+function expandTablesWithFkDependents(initialTables) {
+	const dependents = getForeignKeyDependents();
+	const expandedTables = new Set(initialTables);
+	const queue = [...initialTables];
+
+	while (queue.length > 0) {
+		const table = queue.shift();
+		for (const childTable of dependents.get(table) || []) {
+			if (!expandedTables.has(childTable)) {
+				expandedTables.add(childTable);
+				queue.push(childTable);
+			}
+		}
+	}
+
+	return expandedTables;
+}
+
+/**
+ * Derive a child-first delete order for the selected tables.
+ * @param {Set<string>} tablesToClear
+ * @returns {string[]}
+ */
+function getFkAwareDeleteOrder(tablesToClear) {
+	const dependents = getForeignKeyDependents();
+	const visited = new Set();
+	const visiting = new Set();
+	const deleteOrder = [];
+
+	function visit(table) {
+		if (!tablesToClear.has(table) || visited.has(table)) return;
+		if (visiting.has(table)) return;
+
+		visiting.add(table);
+		for (const childTable of dependents.get(table) || []) {
+			visit(childTable);
+		}
+		visiting.delete(table);
+		visited.add(table);
+		deleteOrder.push(table);
+	}
+
+	for (const table of [...FK_SAFE_DELETE_ORDER, ...tablesToClear]) {
+		visit(table);
+	}
+
+	return deleteOrder;
+}
+
+/**
  * Detect available migration types from extracted DB file names
  * @param {string[]} foundDbFileNames - Relative file paths from extraction
  * @returns {string[]} Array of migration type keys
@@ -89,11 +169,12 @@ function clearSelectedData(selectedTypes) {
 		}
 	}
 
+	const expandedTablesToClear = expandTablesWithFkDependents(tablesToClear);
+	const deleteOrder = getFkAwareDeleteOrder(expandedTablesToClear);
+
 	db.transaction(() => {
-		for (const table of FK_SAFE_DELETE_ORDER) {
-			if (tablesToClear.has(table)) {
-				db.prepare(`DELETE FROM ${table}`).run();
-			}
+		for (const table of deleteOrder) {
+			db.prepare(`DELETE FROM ${table}`).run();
 		}
 	})();
 }

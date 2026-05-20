@@ -32,7 +32,44 @@ function validateManifest(manifest, pluginDir) {
     if (!/^[a-zA-Z0-9_-]+$/.test(manifest.name)) {
         return { valid: false, error: `Plugin name "${manifest.name}" contains invalid characters (use a-z, 0-9, _, -)` };
     }
+
+    const isStringArray = (value) => Array.isArray(value) && value.every(item => typeof item === 'string');
+    const preserve = manifest.preserveOnUpdate;
+    if (preserve !== undefined) {
+        if (!preserve || typeof preserve !== 'object' || Array.isArray(preserve)) {
+            return { valid: false, error: `Plugin "${manifest.name}" field "preserveOnUpdate" must be an object` };
+        }
+        if (preserve.dirs !== undefined && !isStringArray(preserve.dirs)) {
+            return { valid: false, error: `Plugin "${manifest.name}" field "preserveOnUpdate.dirs" must be an array of strings` };
+        }
+        if (preserve.files !== undefined && !isStringArray(preserve.files)) {
+            return { valid: false, error: `Plugin "${manifest.name}" field "preserveOnUpdate.files" must be an array of strings` };
+        }
+        if (preserve.extensions !== undefined && !isStringArray(preserve.extensions)) {
+            return { valid: false, error: `Plugin "${manifest.name}" field "preserveOnUpdate.extensions" must be an array of strings` };
+        }
+    }
+
     return { valid: true };
+}
+
+function normalizeRelativePath(input) {
+    if (typeof input !== 'string') return '';
+    return input
+        .replace(/\\/g, '/')
+        .split('/')
+        .filter(Boolean)
+        .join('/');
+}
+
+function getPluginPreserveConfig(manifest = {}) {
+    const preserve = manifest.preserveOnUpdate || {};
+
+    return {
+        dirs: new Set((preserve.dirs || []).map(normalizeRelativePath).filter(Boolean)),
+        files: new Set((preserve.files || []).map(normalizeRelativePath).filter(Boolean)),
+        extensions: new Set((preserve.extensions || []).map(ext => ext.toLowerCase()).filter(Boolean))
+    };
 }
 
 // ============================================================
@@ -225,6 +262,7 @@ module.exports = {
     PLUGINS_DIR,
     loadedPlugins,
     validateManifest,
+    getPluginPreserveConfig,
     registerPluginModules,
     loadPlugins,
     rebuildPluginMap,

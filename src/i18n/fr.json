@@ -1854,6 +1854,10 @@
                     "name": "- **Suppression automatique des joueurs supprimés**",
                     "value": "  - Supprimer automatiquement les joueurs qui n'existent plus après 3 vérifications.\n  - Statut actuel : **{autoDelete}**."
                 },
+                "autoRemoveTransferredField": {
+                    "name": "- **Suppression automatique des joueurs transférés**",
+                    "value": "  - Supprimer automatiquement les joueurs lorsqu'ils transfèrent vers un autre État.\n  - Statut actuel : **{autoRemoveTransferred}**."
+                },
                 "mergeField": {
                     "name": "- **Fusionner**",
                     "value": "  - Fusionner les données de votre ancien bot Python avec cette nouvelle version pour conserver vos statistiques et votre historique."
@@ -1881,6 +1885,7 @@
                 "language": "Langue",
                 "manageAdmins": "Gérer",
                 "autoDelete": "Suppression",
+                "autoRemoveTransferred": "Retrait État",
                 "theme": "Thèmes",
                 "merge": "Fusionner",
                 "backup": "Sauvegarder",
@@ -3028,6 +3033,10 @@
         "fullAccess": {
             "name": "Accès Complet",
             "description": "Accès administratif complet"
+        },
+        "guides": {
+        "name": "Guides",
+        "description": "Créer/Modifier/Publier/Assigner du contenu guide"
         }
     },
     "common": {

@@ -1854,6 +1854,10 @@
 					"name": "- **Auto remove deleted Players**",
 					"value": "  - Auto-remove players that no longer exist after 3 checks.\n  - Status: **{autoDelete}**."
 				},
+				"autoRemoveTransferredField": {
+					"name": "- **Auto remove transferred Players**",
+					"value": "  - Automatically remove players when they transfer to a different state.\n  - Status: **{autoRemoveTransferred}**."
+				},
 				"mergeField": {
 					"name": "- **Merge**",
 					"value": "  - Import data from the old Python bot to keep your stats and history."
@@ -1881,6 +1885,7 @@
 				"language": "Language",
 				"manageAdmins": "Admins",
 				"autoDelete": "Auto Delete",
+				"autoRemoveTransferred": "Transfer Remove",
 				"theme": "Themes",
 				"merge": "Merge",
 				"backup": "Backup",
@@ -3028,6 +3033,10 @@
 		"fullAccess": {
 			"name": "Full Access",
 			"description": "Complete Administrative Access"
+		},
+		"guides": {
+			"name": "Guides",
+			"description": "Create/Edit/Publish/Assign Guide Content"
 		}
 	},
 	"common": {

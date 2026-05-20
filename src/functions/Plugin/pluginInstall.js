@@ -16,7 +16,7 @@ const { getUserInfo, handleError, assertUserMatches, updateComponentsV2AfterSepa
 const { getComponentEmoji, getEmojiMapForUser } = require('../utility/emojis');
 const { createUniversalPaginationButtons } = require('../Pagination/universalPagination');
 const {
-    PLUGINS_DIR, loadedPlugins, validateManifest, registerPluginModules
+    PLUGINS_DIR, loadedPlugins, validateManifest, registerPluginModules, getPluginPreserveConfig
 } = require('./pluginsLoader');
 const {
     acquireUpdateLock,
@@ -116,34 +116,31 @@ function copyDirRecursive(src, dest) {
     }
 }
 
-/** File extensions that must survive a plugin update (database files only).
- *  WAL/SHM files are excluded — the plugin is unloaded before staging so SQLite
- *  checkpoints all pending WAL data into the .db file before it is copied). */
-const PRESERVE_EXTENSIONS = new Set(['.db', '.sqlite']);
-/** Subdirectory names to preserve wholesale across plugin updates (downloaded binaries, user data). */
-const PRESERVE_DIR_NAMES = new Set(['bin', 'data']);
-
 /**
  * Recursively scans a plugin directory and copies files/dirs that must survive updates
  * to a staging directory, preserving relative paths.
  * @param {string} baseDir - Root plugin directory
  * @param {string} currentDir - Current scan directory
  * @param {string} stageDir - Staging destination
+ * @param {{ dirs: Set<string>, files: Set<string>, extensions: Set<string> }} preserveConfig
  */
-function scanAndStagePluginData(baseDir, currentDir, stageDir) {
+function scanAndStagePluginData(baseDir, currentDir, stageDir, preserveConfig) {
     if (!fs.existsSync(currentDir)) return;
     const entries = fs.readdirSync(currentDir, { withFileTypes: true });
     for (const entry of entries) {
         const srcPath = path.join(currentDir, entry.name);
-        const relPath = path.relative(baseDir, srcPath);
+        const relPath = path.relative(baseDir, srcPath).replace(/\\/g, '/');
         const destPath = path.join(stageDir, relPath);
         if (entry.isDirectory()) {
-            if (PRESERVE_DIR_NAMES.has(entry.name)) {
+            if (preserveConfig.dirs.has(relPath)) {
                 copyDirRecursive(srcPath, destPath);
             } else {
-                scanAndStagePluginData(baseDir, srcPath, stageDir);
+                scanAndStagePluginData(baseDir, srcPath, stageDir, preserveConfig);
             }
-        } else if (PRESERVE_EXTENSIONS.has(path.extname(entry.name))) {
+        } else if (
+            preserveConfig.files.has(relPath) ||
+            preserveConfig.extensions.has(path.extname(entry.name).toLowerCase())
+        ) {
             fs.mkdirSync(path.dirname(destPath), { recursive: true });
             fs.copyFileSync(srcPath, destPath);
         }
@@ -621,6 +618,17 @@ async function updatePlugin(pluginName, registrar) {
 
     const pluginDir = path.join(PLUGINS_DIR, pluginName);
     const stageDir = path.join(os.tmpdir(), `wos_plugin_${pluginName}_preserve_${Date.now()}`);
+    const pluginManifestPath = path.join(pluginDir, 'plugin.json');
+    let preserveConfig = { dirs: new Set(), files: new Set(), extensions: new Set() };
+
+    if (fs.existsSync(pluginManifestPath)) {
+        try {
+            const manifest = JSON.parse(fs.readFileSync(pluginManifestPath, 'utf8'));
+            preserveConfig = getPluginPreserveConfig(manifest);
+        } catch (e) {
+            console.warn(`[PLUGINS] Warning: could not read preserve rules for ${pluginName}: ${e.message}`);
+        }
+    }
 
     // Unload the plugin first so that any open SQLite connections are closed
     // and WAL data is checkpointed back into the .db file before we stage it.
@@ -629,7 +637,7 @@ async function updatePlugin(pluginName, registrar) {
     // Stage important files after unload (DB connections closed = WAL flushed to .db)
     if (fs.existsSync(pluginDir)) {
         try {
-            scanAndStagePluginData(pluginDir, pluginDir, stageDir);
+            scanAndStagePluginData(pluginDir, pluginDir, stageDir, preserveConfig);
         } catch (e) {
             console.warn(`[PLUGINS] Warning: could not stage data for ${pluginName}: ${e.message}`);
         }

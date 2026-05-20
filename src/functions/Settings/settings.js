@@ -11,7 +11,7 @@ const {
 const { settingsQueries } = require('../utility/database');
 const { createChangeLanguageButton } = require('./language');
 const { createManageAdminsButton } = require('./admin');
-const { createAutoDeleteButton } = require('./autoClean');
+const { createAutoDeleteButton, createAutoRemoveTransferredPlayersButton } = require('./autoClean');
 const { createFeatureAccessButton } = require('./featureAccess');
 const { createEmojiThemeButton } = require('./theme/emojis');
 const { createDBMigrationButton } = require('./migration');
@@ -144,6 +144,7 @@ function createFeaturesCategory(userId, adminData, lang) {
     const hasFullAccess = hasPermission(adminData);
     const settings = settingsQueries.getSettings.get();
     const autoDelete = settings?.auto_delete ?? 1;
+    const autoRemoveTransferredPlayers = settings?.auto_remove_transferred_players ?? 0;
 
     const manageAdminsButton = createManageAdminsButton(userId, lang);
     if (!hasFullAccess) manageAdminsButton.setDisabled(true);
@@ -154,6 +155,9 @@ function createFeaturesCategory(userId, adminData, lang) {
     const autoDeleteButton = createAutoDeleteButton(userId, lang, autoDelete);
     if (!hasFullAccess) autoDeleteButton.setDisabled(true);
 
+    const autoRemoveTransferredPlayersButton = createAutoRemoveTransferredPlayersButton(userId, lang, autoRemoveTransferredPlayers);
+    if (!hasFullAccess) autoRemoveTransferredPlayersButton.setDisabled(true);
+
     const container = new ContainerBuilder()
         .setAccentColor(0xe67e22)
         .addTextDisplayComponents(
@@ -161,7 +165,8 @@ function createFeaturesCategory(userId, adminData, lang) {
                 `${lang.settings.mainPage.categories.features.title}\n` +
                 `${content.adminManagementField.name}\n${content.adminManagementField.value}\n` +
                 `${content.featureAccessField.name}\n${content.featureAccessField.value}\n` +
-                `${content.autoDeleteField.name}\n${content.autoDeleteField.value.replace('{autoDelete}', autoDelete ? content.enabled : content.disabled)}\n`
+                `${content.autoDeleteField.name}\n${content.autoDeleteField.value.replace('{autoDelete}', autoDelete ? content.enabled : content.disabled)}\n` +
+                `${content.autoRemoveTransferredField.name}\n${content.autoRemoveTransferredField.value.replace('{autoRemoveTransferred}', autoRemoveTransferredPlayers ? content.enabled : content.disabled)}\n`
             )
         )
         .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
@@ -170,6 +175,7 @@ function createFeaturesCategory(userId, adminData, lang) {
                 manageAdminsButton,
                 featureAccessButton,
                 autoDeleteButton,
+                autoRemoveTransferredPlayersButton,
                 createBackToSettingsButton(userId, lang)
             )
         );

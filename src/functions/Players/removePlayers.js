@@ -13,6 +13,7 @@ const {
     SeparatorSpacingSize,
     LabelBuilder
 } = require('discord.js');
+const { randomBytes } = require('node:crypto');
 const { allianceQueries, playerQueries, adminLogQueries } = require('../utility/database');
 const { LOG_CODES } = require('../utility/AdminLogs');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
@@ -20,6 +21,28 @@ const { createUniversalPaginationButtons, parsePaginationCustomId } = require('.
 const { getFurnaceReadable } = require('./furnaceReadable');
 const { getUserInfo, assertUserMatches, handleError, hasPermission, getAlliancesForUser, updateComponentsV2AfterSeparator, createAllianceSelectionComponents } = require('../utility/commonFunctions');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
+
+function createRemovePlayersSessionToken() {
+    return randomBytes(6).toString('base64url');
+}
+
+function setRemovePlayersSession(client, userId, sessionData) {
+    client.tempRemoveData = client.tempRemoveData || {};
+    const token = createRemovePlayersSessionToken();
+    client.tempRemoveData[userId] = {
+        ...sessionData,
+        token,
+        createdAt: Date.now()
+    };
+    return client.tempRemoveData[userId];
+}
+
+function getRemovePlayersSession(client, userId, token) {
+    const session = client.tempRemoveData?.[userId];
+    if (!session) return null;
+    if (token && session.token !== token) return null;
+    return session;
+}
 
 /**
  * Creates the remove players button for the player management panel
@@ -241,19 +264,17 @@ function createRemovalConfirmationEmbed(players, alliance, interaction, lang) {
     const truncatedPlayerList = playerList.length > 1000 ?
         playerList.substring(0, 997) + '...' : playerList;
 
-    // Encode player IDs in custom ID (comma-separated, limit to avoid exceeding 100 char limit)
-    const playerIds = players.map(p => p.fid).join(',');
-    const encodedIds = Buffer.from(playerIds).toString('base64').replace(/=/g, '');
+    const sessionToken = interaction.client.tempRemoveData?.[interaction.user.id]?.token || createRemovePlayersSessionToken();
 
     const actionRow = new ActionRowBuilder()
         .addComponents(
             new ButtonBuilder()
-                .setCustomId(`remove_players_confirm_${interaction.user.id}_${alliance.id}_${encodedIds}`)
+                .setCustomId(`remove_players_confirm_${interaction.user.id}_${sessionToken}`)
                 .setLabel(lang.players.removePlayer.buttons.accept)
                 .setStyle(ButtonStyle.Danger)
                 .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1004')),
             new ButtonBuilder()
-                .setCustomId(`remove_players_cancel_${interaction.user.id}_${alliance.id}`)
+                .setCustomId(`remove_players_cancel_${interaction.user.id}_${sessionToken}`)
                 .setLabel(lang.players.removePlayer.buttons.cancel)
                 .setStyle(ButtonStyle.Secondary)
                 .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1051'))
@@ -421,12 +442,12 @@ async function handleRemovePlayersPlayerSelection(interaction) {
             return playerQueries.getPlayerByFid(playerId);
         }).filter(Boolean);
 
-        // Store selected players and current total temporarily
-        interaction.client.tempRemoveData = interaction.client.tempRemoveData || {};
-        interaction.client.tempRemoveData[interaction.user.id] = {
+        // Store selected players temporarily so confirmation uses a short tokenized custom ID.
+        setRemovePlayersSession(interaction.client, interaction.user.id, {
             players: selectedPlayers,
+            allianceId,
             currentTotal: currentTotalRemoved
-        };
+        });
 
         // Show confirmation embed
         const { components } = createRemovalConfirmationEmbed(selectedPlayers, alliance, interaction, lang);
@@ -451,30 +472,23 @@ async function handleRemovePlayersConfirm(interaction) {
 
     try {
         const customIdParts = interaction.customId.split('_');
-        const expectedUserId = customIdParts[3]; // remove_players_confirm_userId_allianceId_encodedIds
-        const allianceId = parseInt(customIdParts[4]);
-        const encodedIds = customIdParts[5];
+        const expectedUserId = customIdParts[3]; // remove_players_confirm_userId_sessionToken
+        const sessionToken = customIdParts[4];
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const alliance = allianceQueries.getAllianceById(allianceId);
-
-        // Decode player IDs from custom ID (persistent across restarts)
-        let playerIds = [];
-        try {
-            const decodedIds = Buffer.from(encodedIds, 'base64').toString('utf-8');
-            playerIds = decodedIds.split(',').map(id => parseInt(id));
-        } catch (decodeError) {
-            await handleError(interaction, lang, decodeError, 'handleRemovePlayersConfirm - decoding IDs');
-            return;
+        const session = getRemovePlayersSession(interaction.client, interaction.user.id, sessionToken);
+        if (!session?.players?.length || !session.allianceId) {
+            return await interaction.reply({
+                content: lang.common.error,
+                ephemeral: true
+            });
         }
 
-        // Fetch fresh player data from database in batch
+        const alliance = allianceQueries.getAllianceById(session.allianceId);
+        const playerIds = session.players.map(player => player.fid);
         const playersToRemove = playerQueries.getPlayersByFids(playerIds);
-
-        // Get current total from temp data if available (for cumulative count), otherwise start at 0
-        const tempData = interaction.client.tempRemoveData?.[interaction.user.id] || {};
-        const currentTotal = tempData.currentTotal || 0;
+        const currentTotal = session.currentTotal || 0;
 
         if (playersToRemove.length === 0) {
             return await interaction.reply({
@@ -521,7 +535,7 @@ async function handleRemovePlayersConfirm(interaction) {
         );
 
         // Show success message and return to player selection
-        const remainingPlayers = playerQueries.getPlayersByAllianceId(allianceId);
+        const remainingPlayers = playerQueries.getPlayersByAllianceId(session.allianceId);
 
         if (remainingPlayers.length === 0) {
             const newSection = [
@@ -671,12 +685,12 @@ async function handleRemovePlayersIdsModal(interaction) {
             });
         }
 
-        // Store selected players temporarily with consistent structure
-        interaction.client.tempRemoveData = interaction.client.tempRemoveData || {};
-        interaction.client.tempRemoveData[interaction.user.id] = {
+        // Store selected players temporarily so confirmation uses a short tokenized custom ID.
+        setRemovePlayersSession(interaction.client, interaction.user.id, {
             players: foundPlayers,
+            allianceId,
             currentTotal: 0
-        };
+        });
 
         // Show confirmation embed
         const { components } = createRemovalConfirmationEmbed(foundPlayers, alliance, interaction, lang);
@@ -722,18 +736,27 @@ async function handleRemovePlayersCancel(interaction) {
 
     try {
         const customIdParts = interaction.customId.split('_');
-        const expectedUserId = customIdParts[3]; // remove_players_cancel_userId_allianceId
-        const allianceId = parseInt(customIdParts[4]);
+        const expectedUserId = customIdParts[3]; // remove_players_cancel_userId_sessionToken
+        const sessionToken = customIdParts[4];
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const session = getRemovePlayersSession(interaction.client, interaction.user.id, sessionToken);
 
         // Clear temp data
         if (interaction.client.tempRemoveData?.[interaction.user.id]) {
             delete interaction.client.tempRemoveData[interaction.user.id];
         }
 
-        const alliance = allianceQueries.getAllianceById(allianceId);
-        const players = playerQueries.getPlayersByAllianceId(allianceId);
+        if (!session?.allianceId) {
+            return await interaction.reply({
+                content: lang.common.error,
+                ephemeral: true
+            });
+        }
+
+        const alliance = allianceQueries.getAllianceById(session.allianceId);
+        const players = playerQueries.getPlayersByAllianceId(session.allianceId);
 
         // Return to player selection
         const { components } = createPlayerSelectionEmbed(interaction, players, lang, alliance, 0, '');

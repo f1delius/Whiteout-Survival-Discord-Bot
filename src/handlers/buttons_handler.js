@@ -86,6 +86,7 @@ const buttonHandlers = [
     { pattern: /^settings_cat_/, fn: settings.handleSettingsCategoryButton },
     { pattern: /^settings_/, fn: settings.handleSettingsButton },
     { pattern: /^toggle_auto_delete_/, fn: autoClean.handleToggleAutoDelete },
+    { pattern: /^toggle_auto_remove_transferred_/, fn: autoClean.handleToggleAutoRemoveTransferredPlayers },
     { pattern: /^feature_access_feat_/, fn: featureAccess.handleFeatureAccessFeatureButton },
     { pattern: /^feature_access_set_/, fn: featureAccess.handleSetFeatureAccess },
     { pattern: /^feature_access_privateNotifications_(confirm|cancel)_/, fn: featureAccess.handlePrivateNotificationsConfirmCancel },

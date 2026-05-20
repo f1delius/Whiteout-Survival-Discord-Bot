@@ -389,6 +389,16 @@ try {
         console.error('Database migration: failed to add auto_update column to settings', e);
     }
 
+    // Ensure auto-remove-transferred-players column exists in settings (defaults to disabled)
+    try {
+        const settingsColsTransfer = db.prepare('PRAGMA table_info(settings)').all();
+        if (!settingsColsTransfer.some(c => c.name === 'auto_remove_transferred_players')) {
+            db.exec('ALTER TABLE settings ADD COLUMN auto_remove_transferred_players BOOLEAN DEFAULT 0');
+        }
+    } catch (e) {
+        console.error('Database migration: failed to add auto_remove_transferred_players column to settings', e);
+    }
+
     // Create indexes for notification_messages table
     db.exec('CREATE INDEX IF NOT EXISTS idx_notif_msgs_trigger ON notification_messages (trigger_time)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_notif_msgs_channel ON notification_messages (channel_id)');
@@ -1205,7 +1215,9 @@ const settingsQueries = {
     // Update notification auto-clean frequency (in seconds)
     updateNotifAutoCleanFreq: db.prepare('UPDATE settings SET notif_auto_clean_freq = ? WHERE id = 1'),
     // Update auto-update enabled/disabled
-    updateAutoUpdate: db.prepare('UPDATE settings SET auto_update = ? WHERE id = 1')
+    updateAutoUpdate: db.prepare('UPDATE settings SET auto_update = ? WHERE id = 1'),
+    // Update auto-remove-transferred-players enabled/disabled
+    updateAutoRemoveTransferredPlayers: db.prepare('UPDATE settings SET auto_remove_transferred_players = ? WHERE id = 1')
 };
 
 // Initialize settings on startup

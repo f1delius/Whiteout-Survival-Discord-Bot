@@ -23,6 +23,21 @@ function createAutoDeleteButton(userId, lang, isEnabled) {
 }
 
 /**
+ * Creates an auto-remove-transferred-players toggle button
+ * @param {string} userId - ID of the user who can interact with this button
+ * @param {Object} lang - Language object for localized text
+ * @param {boolean} isEnabled - Current state of auto-remove-transferred-players
+ * @returns {ButtonBuilder} The toggle button
+ */
+function createAutoRemoveTransferredPlayersButton(userId, lang, isEnabled) {
+    return new ButtonBuilder()
+        .setCustomId(`toggle_auto_remove_transferred_${userId}`)
+        .setLabel(lang.settings.mainPage.buttons.autoRemoveTransferred)
+        .setStyle(isEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+        .setEmoji(isEnabled ? getComponentEmoji(getEmojiMapForUser(userId), '1004') : getComponentEmoji(getEmojiMapForUser(userId), '1051'));
+}
+
+/**
  * Handles auto-delete toggle button interaction
  * @param {import('discord.js').ButtonInteraction} interaction 
  */
@@ -60,7 +75,42 @@ async function handleToggleAutoDelete(interaction) {
     }
 }
 
+/**
+ * Handles auto-remove-transferred-players toggle button interaction
+ * @param {import('discord.js').ButtonInteraction} interaction
+ */
+async function handleToggleAutoRemoveTransferredPlayers(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // toggle_auto_remove_transferred_userId
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        if (!adminData.is_owner) {
+            await interaction.reply({
+                content: lang.common.noPermission,
+                flags: MessageFlags.Ephemeral
+            });
+            return;
+        }
+
+        const currentSettings = settingsQueries.getSettings.get();
+        const newValue = currentSettings.auto_remove_transferred_players ? 0 : 1;
+        settingsQueries.updateAutoRemoveTransferredPlayers.run(newValue);
+
+        const { createFeaturesCategory } = require('./settings');
+        const featuresComponents = createFeaturesCategory(interaction.user.id, adminData, lang);
+        await interaction.update({
+            components: featuresComponents,
+            flags: MessageFlags.IsComponentsV2
+        });
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleToggleAutoRemoveTransferredPlayers');
+    }
+}
+
 module.exports = {
     createAutoDeleteButton,
-    handleToggleAutoDelete
+    createAutoRemoveTransferredPlayersButton,
+    handleToggleAutoDelete,
+    handleToggleAutoRemoveTransferredPlayers
 };

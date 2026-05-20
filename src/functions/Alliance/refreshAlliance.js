@@ -309,6 +309,7 @@ class AutoRefreshManager {
             // Get auto_delete setting once outside the loop
             const settings = settingsQueries.getSettings.get();
             const autoDelete = settings?.auto_delete ?? 1; // Default to true
+            const autoRemoveTransferredPlayers = settings?.auto_remove_transferred_players ?? 0; // Default to false
 
             // Process each player
             for (let i = 0; i < playerIds.length; i++) {
@@ -395,9 +396,14 @@ class AutoRefreshManager {
 
                     // Compare data for changes (nickname, furnace_level, state)
                     const playerChanges = this.comparePlayerData(currentPlayer, apiData, lang);
+                    const hasStateChange = playerChanges.some(change => change.field === 'state');
 
                     // Always update player data (ensures avatar_image and other fields stay current)
                     await this.updatePlayerData(playerId, apiData, alliance.id, playerChanges);
+
+                    if (autoRemoveTransferredPlayers && hasStateChange) {
+                        playerQueries.deletePlayer(playerId);
+                    }
 
                     if (playerChanges.length > 0) {
                         // Track changes in memory
