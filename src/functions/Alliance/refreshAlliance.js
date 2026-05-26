@@ -3,11 +3,12 @@ const { getProcessById, updateProcessStatus, updateProcessProgress, createProces
 const { queueManager } = require('../Processes/queueManager');
 const { allianceQueries, playerQueries, furnaceChangeQueries, nicknameChangeQueries, settingsQueries } = require('../utility/database');
 const languages = require('../../i18n');
-const { getFurnaceReadable } = require('../Players/furnaceReadable');
+const { getFurnaceReadable, getSettlementLevelLabel } = require('../Players/furnaceReadable');
 const { handleError, getRefreshTimeout, formatRefreshInterval } = require('../utility/commonFunctions');
 const { replaceEmojiPlaceholders, getGlobalEmojiMap } = require('./../utility/emojis');
 const { API_CONFIG } = require('../utility/apiConfig');
-const { fetchPlayerData: fetchPlayerFromAPIShared, playerApiManager } = require('../utility/apiClient');
+const { fetchPlayerData: fetchPlayerFromAPIShared, getPlayerApiManager } = require('../utility/apiClient');
+const { isGameEnabled } = require('../utility/gameRuntime');
 
 /**
  * Auto-refresh system for alliance data monitoring
@@ -17,6 +18,14 @@ class AutoRefreshManager {
         this.activeRefreshes = new Map(); // Track active refresh processes per alliance
         this.client = null;
         this.scheduledRefreshes = new Map(); // Track scheduled timeouts per alliance
+    }
+
+    resolveAllianceGameType(alliance = null, processData = null) {
+        return alliance?.game_type || processData?.details?.game_type || 'wos';
+    }
+
+    isAllianceGameEnabled(alliance = null, processData = null) {
+        return isGameEnabled(this.resolveAllianceGameType(alliance, processData));
     }
 
     /**
@@ -29,8 +38,9 @@ class AutoRefreshManager {
             this.client = client;
 
             // Get all alliances that have refresh intervals set
-            const alliances = allianceQueries.getAllAlliances();
+            const alliances = allianceQueries.getAllAlliancesAny();
             const refreshableAlliances = alliances.filter(alliance => {
+                if (!this.isAllianceGameEnabled(alliance)) return false;
                 const interval = alliance.interval;
                 if (!interval) return false;
                 // Time-based (@HH:MM) format
@@ -52,10 +62,19 @@ class AutoRefreshManager {
 
             // Filter to only auto-refresh processes and get their alliance IDs
             // Convert target to number since alliance.id is a number but p.target is stored as TEXT
+            const recoveredAutoRefreshProcesses = allProcesses.filter(p =>
+                p.action === 'auto_refresh' && this.isAllianceGameEnabled(null, p)
+            );
+            const staleAutoRefreshProcesses = allProcesses.filter(p =>
+                p.action === 'auto_refresh' && !this.isAllianceGameEnabled(null, p)
+            );
+
+            for (const staleProcess of staleAutoRefreshProcesses) {
+                await updateProcessStatus(staleProcess.id, 'completed');
+            }
+
             const alliancesWithRecoveredProcesses = new Set(
-                allProcesses
-                    .filter(p => p.action === 'auto_refresh')
-                    .map(p => parseInt(p.target, 10))
+                recoveredAutoRefreshProcesses.map(p => parseInt(p.target, 10))
             );
 
             // Start auto-refresh for each alliance that doesn't have a recovered process
@@ -69,7 +88,7 @@ class AutoRefreshManager {
             }
 
             // After client is set and schedules are configured, start any queued auto-refresh processes
-            if (queuedProcesses.filter(p => p.action === 'auto_refresh').length > 0) {
+            if (queuedProcesses.filter(p => p.action === 'auto_refresh' && this.isAllianceGameEnabled(null, p)).length > 0) {
                 await queueManager.startNextProcess();
             }
 
@@ -85,6 +104,10 @@ class AutoRefreshManager {
      */
     async startAutoRefresh(alliance) {
         try {
+            if (!this.isAllianceGameEnabled(alliance)) {
+                return;
+            }
+
             const { id: allianceId, name: allianceName, interval, channel_id } = alliance;
 
             // Clear any existing scheduled refresh for this alliance
@@ -94,7 +117,7 @@ class AutoRefreshManager {
             }
 
             // Check if alliance has any players to refresh
-            const players = playerQueries.getPlayersByAlliance(allianceId);
+            const players = playerQueries.getPlayersByAlliance(allianceId, alliance.game_type);
             if (players.length === 0) {
                 return;
             }
@@ -112,10 +135,10 @@ class AutoRefreshManager {
      * Use this in ALL error/early-exit paths to prevent the refresh chain from dying.
      * @param {number} allianceId - Alliance ID
      */
-    _cleanupAndReschedule(allianceId) {
+    _cleanupAndReschedule(allianceId, gameType = 'wos') {
         this.activeRefreshes.delete(allianceId);
         try {
-            const alliance = allianceQueries.getAllianceById(allianceId);
+            const alliance = allianceQueries.getAllianceById(allianceId, gameType);
             if (alliance) {
                 const interval = alliance.interval;
                 const hasInterval = interval && (
@@ -137,6 +160,10 @@ class AutoRefreshManager {
      * @returns {void}
      */
     scheduleNextRefresh(alliance) {
+        if (!this.isAllianceGameEnabled(alliance)) {
+            return;
+        }
+
         const { id: allianceId, interval } = alliance;
 
         // Clear any existing scheduled refresh to prevent duplicate chains
@@ -155,7 +182,7 @@ class AutoRefreshManager {
 
                 // For time-based schedules, we need to recalculate the next occurrence
                 // Get fresh alliance data in case interval was changed
-                const freshAlliance = allianceQueries.getAllianceById(allianceId);
+                const freshAlliance = allianceQueries.getAllianceById(allianceId, alliance.game_type);
                 if (freshAlliance) {
                     this.scheduleNextRefresh(freshAlliance);
                 } else {
@@ -180,6 +207,10 @@ class AutoRefreshManager {
      */
     async createRefreshProcess(alliance) {
         try {
+            if (!this.isAllianceGameEnabled(alliance)) {
+                return;
+            }
+
             const { id: allianceId, name: allianceName } = alliance;
 
             // Check if there's already an active refresh for this alliance
@@ -188,7 +219,7 @@ class AutoRefreshManager {
             }
 
             // Get all players for this alliance
-            const players = playerQueries.getPlayersByAlliance(allianceId);
+            const players = playerQueries.getPlayersByAlliance(allianceId, alliance.game_type);
             if (players.length === 0) {
                 return;
             }
@@ -201,7 +232,8 @@ class AutoRefreshManager {
                 admin_id: 'AUTO_REFRESH', // Special identifier for auto-refresh
                 alliance_id: allianceId,
                 player_ids: playerIds,
-                action: 'auto_refresh'
+                action: 'auto_refresh',
+                game_type: alliance.game_type
             });
 
             // Mark as active
@@ -235,7 +267,7 @@ class AutoRefreshManager {
             }
 
             // Get fresh alliance data to ensure we have the latest channel_id
-            const alliance = allianceQueries.getAllianceById(processData.target);
+            const alliance = allianceQueries.getAllianceByIdAny(processData.target);
             if (!alliance) {
                 throw new Error(`Alliance ${processData.target} not found`);
             }
@@ -271,7 +303,7 @@ class AutoRefreshManager {
                 const processData = await getProcessById(processId);
                 const allianceId = processData ? processData.target : null;
                 if (allianceId) {
-                    this._cleanupAndReschedule(parseInt(allianceId, 10));
+                    this._cleanupAndReschedule(parseInt(allianceId, 10), processData?.details?.game_type || 'wos');
                 }
             } catch (cleanupError) {
                 await handleError(null, null, cleanupError, 'executeAutoRefresh_cleanup', false);
@@ -292,10 +324,12 @@ class AutoRefreshManager {
         try {
             const progress = processData.progress || { pending: [], done: [], failed: [], changed: [], unchanged: [], detectedChanges: [] };
             const playerIds = progress.pending;
+            const gameType = this.resolveAllianceGameType(alliance, processData);
+            const playerApiManager = getPlayerApiManager(gameType);
 
             if (playerIds.length === 0) {
                 // Clean up active refresh tracking and reschedule
-                this._cleanupAndReschedule(alliance.id);
+                this._cleanupAndReschedule(alliance.id, gameType);
                 return; // Process will be completed by executeProcesses.js
             }
 
@@ -320,7 +354,7 @@ class AutoRefreshManager {
                 const currentProcess = await getProcessById(processId);
                 if (currentProcess.status === 'completed') {
                     // Process was completed externally - clean up and reschedule
-                    this._cleanupAndReschedule(alliance.id);
+                    this._cleanupAndReschedule(alliance.id, gameType);
                     return; // Exit without trying to complete again
                 } else if (currentProcess.status !== 'active') {
                     // Process was preempted - break out of loop without error
@@ -332,7 +366,7 @@ class AutoRefreshManager {
                 try {
 
                     // Get current player data from database
-                    const currentPlayer = playerQueries.getPlayer(playerId);
+                    const currentPlayer = playerQueries.getPlayer(playerId, gameType);
                     if (!currentPlayer) {
                         // console.warn(`Player ${playerId} not found in database during refresh. This may indicate a race condition (player removed after process creation). Skipping this player.`);
                         await this.movePlayerToStatus(processId, playerId, 'pending', 'failed');
@@ -342,20 +376,20 @@ class AutoRefreshManager {
                     }
 
                     // Fetch latest data from API
-                    const apiData = await this.fetchPlayerFromAPI(playerId);
+                    const apiData = await this.fetchPlayerFromAPI(playerId, gameType);
 
                     // Handle player not exist error (increment exist counter)
                     if (apiData && apiData.error === 'ROLE NOT EXIST' && apiData.playerNotExist === true) {
                         try {
-                            playerQueries.incrementPlayerExist(playerId);
+                            playerQueries.incrementPlayerExist(playerId, gameType);
 
                             // Check if player reached 3 exist count
-                            const playerData = playerQueries.getPlayer(playerId);
+                            const playerData = playerQueries.getPlayer(playerId, gameType);
                             if (playerData && playerData.exist >= 3) {
                                 if (autoDelete) {
                                     // Delete player if auto_delete is enabled
                                     // console.log(`Player ${playerId} does not exist (exist count: ${playerData.exist}), auto-deleting from database...`);
-                                    playerQueries.deletePlayer(playerId);
+                                    playerQueries.deletePlayer(playerId, gameType);
                                 } else {
                                     // console.log(`Player ${playerId} does not exist (exist count: ${playerData.exist}), keeping in database (auto_delete disabled)`);
                                 }
@@ -388,7 +422,7 @@ class AutoRefreshManager {
                     // Reset exist counter if player returned valid data (false positive detection)
                     if (currentPlayer.exist > 0) {
                         try {
-                            playerQueries.resetPlayerExist(playerId);
+                            playerQueries.resetPlayerExist(playerId, gameType);
                         } catch (dbError) {
                             await handleError(null, null, dbError, 'executeAutoRefresh', false);
                         }
@@ -399,10 +433,10 @@ class AutoRefreshManager {
                     const hasStateChange = playerChanges.some(change => change.field === 'state');
 
                     // Always update player data (ensures avatar_image and other fields stay current)
-                    await this.updatePlayerData(playerId, apiData, alliance.id, playerChanges);
+                    await this.updatePlayerData(playerId, apiData, alliance.id, playerChanges, gameType);
 
                     if (autoRemoveTransferredPlayers && hasStateChange) {
-                        playerQueries.deletePlayer(playerId);
+                        playerQueries.deletePlayer(playerId, gameType);
                     }
 
                     if (playerChanges.length > 0) {
@@ -476,7 +510,7 @@ class AutoRefreshManager {
 
             // If this was a manual refresh (not auto-refresh), reschedule auto-refresh if enabled
             if (processData.action === 'refresh') {
-                const freshAlliance = allianceQueries.getAllianceById(alliance.id);
+                const freshAlliance = allianceQueries.getAllianceById(alliance.id, gameType);
                 if (freshAlliance && freshAlliance.interval > 0 && freshAlliance.channel_id) {
                     this.scheduleNextRefresh(freshAlliance);
                 }
@@ -495,13 +529,13 @@ class AutoRefreshManager {
      * @param {number} newLevel - New furnace level
      * @returns {Promise<void>}
      */
-    async saveFurnaceChange(playerId, oldLevel, newLevel) {
+    async saveFurnaceChange(playerId, oldLevel, newLevel, gameType) {
         try {
             furnaceChangeQueries.addFurnaceChange(
                 playerId,
                 oldLevel,
                 newLevel,
-                new Date().toISOString()
+                gameType
             );
         } catch (error) {
             await handleError(null, null, error, 'saveFurnaceChange', false);
@@ -515,13 +549,13 @@ class AutoRefreshManager {
      * @param {string} newNickname - New nickname
      * @returns {Promise<void>}
      */
-    async saveNicknameChange(playerId, oldNickname, newNickname) {
+    async saveNicknameChange(playerId, oldNickname, newNickname, gameType) {
         try {
             nicknameChangeQueries.addNicknameChange(
                 playerId,
                 oldNickname,
                 newNickname,
-                new Date().toISOString()
+                gameType
             );
         } catch (error) {
             await handleError(null, null, error, 'saveNicknameChange', false);
@@ -537,6 +571,7 @@ class AutoRefreshManager {
      */
     comparePlayerData(currentPlayer, apiData, lang = null) {
         const changes = [];
+        const gameType = currentPlayer.game_type || 'wos';
 
         // Check nickname change
         if (currentPlayer.nickname !== (apiData.nickname || 'Unknown')) {
@@ -557,8 +592,8 @@ class AutoRefreshManager {
                 field: 'furnace_level',
                 oldValue: oldLevel,
                 newValue: newLevel,
-                formattedOldValue: getFurnaceReadable(oldLevel, lang),
-                formattedNewValue: getFurnaceReadable(newLevel, lang)
+                formattedOldValue: getFurnaceReadable(oldLevel, lang, gameType),
+                formattedNewValue: getFurnaceReadable(newLevel, lang, gameType)
             });
         }
 
@@ -584,16 +619,16 @@ class AutoRefreshManager {
      * @param {Array} changes - Array of detected changes
      * @returns {Promise<void>}
      */
-    async updatePlayerData(playerId, apiData, allianceId, changes) {
+    async updatePlayerData(playerId, apiData, allianceId, changes, gameType) {
         try {
             // Save change history to database first
             for (const change of changes) {
                 switch (change.field) {
                     case 'nickname':
-                        await this.saveNicknameChange(playerId, change.oldValue, change.newValue);
+                        await this.saveNicknameChange(playerId, change.oldValue, change.newValue, gameType);
                         break;
                     case 'furnace_level':
-                        await this.saveFurnaceChange(playerId, change.oldValue, change.newValue);
+                        await this.saveFurnaceChange(playerId, change.oldValue, change.newValue, gameType);
                         break;
                     // State changes don't have a dedicated table yet, but we could add one if needed
                 }
@@ -607,7 +642,8 @@ class AutoRefreshManager {
                 apiData.kid || 0,                           // state
                 apiData.avatar_image || '',                 // image_url (update from API, no notification)
                 allianceId,                                 // alliance_id
-                playerId                                    // fid (WHERE clause)
+                playerId,                                   // fid (WHERE clause)
+                gameType
             );
 
 
@@ -656,6 +692,7 @@ class AutoRefreshManager {
             const embeds = [];
             const maxDescriptionLength = 4096; // Discord embed description limit
             const globalEmojiMap = getGlobalEmojiMap();
+            const settlementLevelLabel = getSettlementLevelLabel(alliance.game_type, lang);
 
             // Create embeds for each change type
             if (changesByType.nickname.length > 0) {
@@ -671,7 +708,7 @@ class AutoRefreshManager {
 
             if (changesByType.furnace_level.length > 0) {
                 const furnaceEmbeds = this.createChangeEmbeds(
-                    replaceEmojiPlaceholders(`{emoji.1012} ${alliance.name} Furnace Level Changes`, globalEmojiMap),
+                    replaceEmojiPlaceholders(`{emoji.1012} ${alliance.name} ${settlementLevelLabel} Changes`, globalEmojiMap),
                     changesByType.furnace_level,
                     (item) => `\u200E**${item.player.nickname}:** ${item.change.formattedOldValue} → **${item.change.formattedNewValue}**`,
                     0xe74c3c,
@@ -703,7 +740,7 @@ class AutoRefreshManager {
                         value: [
                             `**Total Changes:** ${totalChangesCount}`,
                             `**Nickname Changes:** ${changesByType.nickname.length}`,
-                            `**Furnace Level Changes:** ${changesByType.furnace_level.length}`,
+                            `**${settlementLevelLabel} Changes:** ${changesByType.furnace_level.length}`,
                             `**State Changes:** ${changesByType.state.length}`
                         ].join('\n'),
                          
@@ -868,11 +905,12 @@ class AutoRefreshManager {
      * @param {string} playerId - Player ID to fetch
      * @returns {Promise<Object>} Player data object or error object { error: string, playerNotExist: boolean }
      */
-    async fetchPlayerFromAPI(playerId) {
+    async fetchPlayerFromAPI(playerId, gameType) {
         return fetchPlayerFromAPIShared(playerId, {
             onError: (error, context) => handleError(null, null, error, context, false),
             delay: (ms) => this.delay(ms),
-            returnErrorObject: true
+            returnErrorObject: true,
+            gameType
         });
     }
 
@@ -912,7 +950,7 @@ class AutoRefreshManager {
      */
     async restartAutoRefresh(allianceId) {
         try {
-            const alliance = allianceQueries.getAllianceById(allianceId);
+            const alliance = allianceQueries.getAllianceByIdAny(allianceId);
             if (!alliance) {
                 await handleError(null, null, new Error(`Alliance ${allianceId} not found for restart`), 'restartAutoRefresh', false);
                 return;
@@ -920,6 +958,10 @@ class AutoRefreshManager {
 
             // Stop existing refresh
             await this.stopAutoRefresh(allianceId);
+
+            if (!this.isAllianceGameEnabled(alliance)) {
+                return;
+            }
 
             // Start new refresh if configured
             if (alliance.interval > 0 && alliance.channel_id) {
@@ -938,8 +980,12 @@ class AutoRefreshManager {
      */
     async enableAutoRefreshAfterAddingPlayers(allianceId) {
         try {
-            const alliance = allianceQueries.getAllianceById(allianceId);
+            const alliance = allianceQueries.getAllianceByIdAny(allianceId);
             if (!alliance) {
+                return;
+            }
+
+            if (!this.isAllianceGameEnabled(alliance)) {
                 return;
             }
 
@@ -949,7 +995,7 @@ class AutoRefreshManager {
             }
 
             // Check if alliance now has players
-            const players = playerQueries.getPlayersByAlliance(allianceId);
+            const players = playerQueries.getPlayersByAlliance(allianceId, alliance.game_type);
             if (players.length === 0) {
                 return;
             }

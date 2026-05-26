@@ -1,3 +1,5 @@
+const { normalizeGameType } = require('../utility/gameProfiles');
+
 /**
  * Furnace level mapping for user-friendly display
  */
@@ -15,24 +17,66 @@ const FURNACE_LEVEL_MAPPING = {
     81: "FC 10 - 1", 82: "FC 10 - 2", 83: "FC 10 - 3", 84: "FC 10 - 4"
 };
 
+function getLocalizedCommonValue(lang, key, fallback) {
+    return lang?.common?.[key] || fallback;
+}
+
+function getSettlementName(gameType = 'wos', lang = null) {
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+
+    if (resolvedGameType === 'ks') {
+        return getLocalizedCommonValue(lang, 'townCenter', 'Town Center');
+    }
+
+    return getLocalizedCommonValue(lang, 'furnace', 'Furnace');
+}
+
+function getSettlementLevelLabel(gameType = 'wos', lang = null) {
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+
+    if (resolvedGameType === 'ks') {
+        return getLocalizedCommonValue(lang, 'townCenterLevel', 'Town Center Level');
+    }
+
+    return getLocalizedCommonValue(lang, 'furnaceLevel', 'Furnace Level');
+}
+
+function resolveReadableArgs(langOrGameType = null, explicitGameType = 'wos') {
+    if (typeof langOrGameType === 'string' && explicitGameType === 'wos') {
+        return {
+            lang: null,
+            gameType: langOrGameType
+        };
+    }
+
+    return {
+        lang: langOrGameType,
+        gameType: explicitGameType
+    };
+}
+
 /**
  * Converts a furnace level number to a readable format with i18n support
  * @param {number} level - The furnace level number
- * @param {Object} lang - Language object from i18n (optional, defaults to English)
+ * @param {Object|string} langOrGameType - Language object or game type
+ * @param {string} gameType - Game type when language object is provided
  * @returns {string} Readable furnace level (e.g., "FC 5 - 2" for level 57, or "25" for unmapped levels)
  * 
  * @example
  * getFurnaceReadable(57)  // Returns "FC 5 - 2"
  * getFurnaceReadable(57, lang)  // Returns "كريستال 5 - 2" (if Arabic)
+ * getFurnaceReadable(57, null, 'ks')  // Returns "TG 5 - 2"
  * getFurnaceReadable(35)  // Returns "FC 1"
  * getFurnaceReadable(25)  // Returns "25"
  * getFurnaceReadable(0)   // Returns "0"
  */
-function getFurnaceReadable(level, lang = null) {
+function getFurnaceReadable(level, langOrGameType = null, gameType = 'wos') {
     // Handle invalid input
     if (level === null || level === undefined || (typeof level === 'number' && Number.isNaN(level))) {
         return 'Unknown';
     }
+
+    const { lang, gameType: resolvedGameType } = resolveReadableArgs(langOrGameType, gameType);
 
     // Convert to number if string
     const furnaceLevel = typeof level === 'string' ? parseInt(level, 10) : level;
@@ -45,13 +89,11 @@ function getFurnaceReadable(level, lang = null) {
     // Check if level is in mapping
     if (FURNACE_LEVEL_MAPPING.hasOwnProperty(furnaceLevel)) {
         const mappedValue = FURNACE_LEVEL_MAPPING[furnaceLevel];
+        const crystalPrefix = normalizeGameType(resolvedGameType, 'wos') === 'ks'
+            ? getLocalizedCommonValue(lang, 'townCenterGold', 'TG')
+            : getLocalizedCommonValue(lang, 'furnaceCrystal', 'FC');
 
-        // Replace "FC" with localized version if lang is provided
-        if (lang && lang.common && lang.common.furnaceCrystal) {
-            return mappedValue.replace(/^FC/, lang.common.furnaceCrystal);
-        }
-
-        return mappedValue;
+        return mappedValue.replace(/^FC/, crystalPrefix);
     }
 
     // For levels not in mapping, return as string
@@ -59,6 +101,8 @@ function getFurnaceReadable(level, lang = null) {
 }
 
 module.exports = {
+    getSettlementName,
+    getSettlementLevelLabel,
     getFurnaceReadable,
     FURNACE_LEVEL_MAPPING  // Export the mapping too in case I need direct access
 };

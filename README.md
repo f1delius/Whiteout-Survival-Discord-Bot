@@ -1,6 +1,6 @@
-# Whiteout Survival Discord Bot
+# WOSLand Discord Bot
 
-A powerful Discord bot for managing Whiteout Survival game data, alliances, players, gift codes, and automated notifications.
+A powerful Discord bot for managing Whiteout Survival and Kingshot game data, alliances, players, gift codes, calculators, and automated notifications.
 
 ---
 
@@ -8,7 +8,7 @@ A powerful Discord bot for managing Whiteout Survival game data, alliances, play
 
 1. [Features](#features)
 2. [Quick Start](#quick-start)
-2. [Usage](#usage)
+3. [Usage](#usage)
 4. [Hosting Options](#hosting-options)
 5. [About](#about)
 
@@ -16,10 +16,13 @@ A powerful Discord bot for managing Whiteout Survival game data, alliances, play
 
 ## Features
 
-- **Player Tracking** - Add players and monitor furnace level, nickname and state changes
+- **Multi-Game Support** - Run the bot in `wos`, `ks`, or `both` mode
+- **Player Tracking** - Add players and monitor level, nickname and state changes
 - **Gift Code System** - Add and auto-redeem gift codes
 - **Notification Scheduler** - Create scheduled notifications with embeds, patterns, and mentions
 - **Admin System** - Multi-admin support with granular permissions
+- **Web Panel** - Manage the bot from the browser with game-aware pages and calculators
+- **Calculators** - Includes Buildings and War Academy calculators for supported games
 - **Backup & Restore** - Google Drive integration for automated backups
 - **Multi-Language** - i18n setup with custom emoji themes
 - **Process Queue** - Priority-based task queue with preemption and crash recovery
@@ -31,7 +34,7 @@ A powerful Discord bot for managing Whiteout Survival game data, alliances, play
 
 ### Prerequisites
 
-- **Node.js**: Version 18.x, 20.x, 22.x is the only supported versions ([Install from here](https://nodejs.org/en/download))
+- **Node.js**: Versions 18.x, 20.x, and 22.x are the only supported versions ([Install from here](https://nodejs.org/en/download))
 - A **Discord Bot Token** ([Create one here](https://discord.com/developers/applications))
 
 ### One-Click Install
@@ -45,8 +48,17 @@ Steps:
 # Place starter.js in an empty directory and run:
 node starter.js
 
+# Start in Kingshot mode
+node starter.js --type=ks
+
+# Start in both mode
+node starter.js --type=both
+
 # Optional: cap bot and installer heap size
 node starter.js --ram=512
+
+# You can combine both
+node starter.js --type=both --ram=512
 ```
 
 If you prefer manual installation or need to customize the setup, you can still clone the repository and install dependencies yourself:
@@ -59,8 +71,13 @@ cd Whiteout-Survival-JS-Discord-Bot
 # Install dependencies
 npm install
 
-# Start the bot
+# Start the bot (defaults to WOS)
 npm start
+
+# Start specific runtime modes
+node starter.js --type=wos
+node starter.js --type=ks
+node starter.js --type=both
 ```
 
 On first run, the bot will prompt you to enter your Discord bot token. It will be saved to `src/.env` automatically.
@@ -94,6 +111,29 @@ When inviting the bot to your server, ensure it has these permissions:
 
 ## Usage
 
+### Runtime Modes
+
+The bot supports three runtime modes:
+
+| Mode | Description |
+|------|-------------|
+| `wos` | Whiteout Survival only |
+| `ks` | Kingshot only |
+| `both` | Whiteout Survival and Kingshot in the same bot |
+
+Notes:
+- If you do not pass `--type`, the bot defaults to `wos`
+- In `both` mode, the bot and web panel will ask for game context where needed
+- Game-aware pages and actions in the web panel follow the currently selected game context
+
+Examples:
+
+```bash
+node starter.js --type=wos
+node starter.js --type=ks
+node starter.js --type=both
+```
+
 ### Slash Commands
 
 | Command | Description |
@@ -114,6 +154,10 @@ The bot includes a CLI with hot-reload capabilities:
 | `token [TOKEN]` | Update Discord bot token |
 | `update` | Check for and apply updates from GitHub |
 | `exit` | Shutdown the bot |
+
+Runtime args available from the launcher:
+- `--type=wos|ks|both`
+- `--ram=<MB>`
 
 ---
 

@@ -1,5 +1,7 @@
 const { adminQueries, userQueries, systemLogQueries, settingsQueries, allianceQueries } = require('./database');
 const { SeparatorBuilder, SeparatorSpacingSize, PermissionFlagsBits } = require('discord.js');
+const { getActiveGameTypes } = require('./gameRuntime');
+const { getGameProfile, normalizeGameType } = require('./gameProfiles');
 const languages = require('../../i18n');
 const { getEmojiMapForUser, wrapLangWithEmojis, getComponentEmoji } = require('./emojis');
 const path = require('path');
@@ -232,7 +234,7 @@ function getAlliancesForUser(adminData) {
     const { PERMISSIONS } = require('../Settings/admin/permissions');
     try {
         if (hasPermission(adminData, PERMISSIONS.FULL_ACCESS)) {
-            return allianceQueries.getAllAlliances();
+            return allianceQueries.getAllAlliancesAny();
         }
 
         if (hasPermission(adminData, PERMISSIONS.PLAYER_MANAGEMENT)) {
@@ -240,13 +242,46 @@ function getAlliancesForUser(adminData) {
             if (assignedAllianceIds.length === 0) return [];
 
             return assignedAllianceIds
-                .map(id => allianceQueries.getAllianceById(id))
+                .map(id => allianceQueries.getAllianceByIdAny(id))
                 .filter(Boolean);
         }
 
         return [];
     } catch (error) {
         console.error('Error getting alliances for user:', error);
+        return [];
+    }
+}
+
+/**
+ * Gets alliances accessible to a user for a specific game.
+ * Full-access users see all alliances for that game; scoped users see only their assigned alliances for that game.
+ * @param {Object} adminData - Admin data from database
+ * @param {string} gameType - Game type such as wos or ks
+ * @param {number} scopedPermission - Permission flag required for non-full-access users
+ * @returns {Array} Array of alliance objects
+ */
+function getAlliancesForUserByGame(adminData, gameType, scopedPermission) {
+    const { PERMISSIONS } = require('../Settings/admin/permissions');
+    const resolvedGameType = normalizeGameType(gameType);
+
+    try {
+        if (hasPermission(adminData, PERMISSIONS.FULL_ACCESS)) {
+            return allianceQueries.getAllAlliances(resolvedGameType);
+        }
+
+        if (scopedPermission && hasPermission(adminData, scopedPermission)) {
+            const assignedAllianceIds = JSON.parse(adminData?.alliances || '[]');
+            if (assignedAllianceIds.length === 0) return [];
+
+            return assignedAllianceIds
+                .map(id => allianceQueries.getAllianceByIdAny(id))
+                .filter(alliance => alliance && alliance.game_type === resolvedGameType);
+        }
+
+        return [];
+    } catch (error) {
+        console.error('Error getting alliances for user by game:', error);
         return [];
     }
 }
@@ -267,6 +302,7 @@ function getAlliancesForUser(adminData) {
  * @param {number} [options.accentColor=0x3498db] - Accent color (default blue)
  * @param {Function} [options.optionMapper] - Custom function to map alliance to option object
  * @param {boolean} [options.showAll=true] - If true, show all alliances. If false, filter to assigned alliances only
+ * @param {Array<string|number>} [options.contextData=[]] - Extra context to persist in select menu + pagination IDs
  * @returns {Object} { components } ready for interaction.update()
  */
 function createAllianceSelectionComponents(options) {
@@ -283,7 +319,8 @@ function createAllianceSelectionComponents(options) {
         description,
         accentColor = 0x3498db,
         optionMapper = null,
-        showAll = true
+        showAll = true,
+        contextData = []
     } = options;
 
     const { StringSelectMenuBuilder, ActionRowBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = require('discord.js');
@@ -320,9 +357,13 @@ function createAllianceSelectionComponents(options) {
     const mapperFn = optionMapper || defaultMapper;
     const selectOptions = currentPageAlliances.map(mapperFn);
 
+    const contextSuffix = contextData.length > 0
+        ? `_${contextData.join('_')}`
+        : '';
+
     // Create dropdown menu
     const allianceSelect = new StringSelectMenuBuilder()
-        .setCustomId(`${customIdPrefix}_${interaction.user.id}_${page}`)
+        .setCustomId(`${customIdPrefix}_${interaction.user.id}_${page}${contextSuffix}`)
         .setPlaceholder(placeholder)
         .addOptions(selectOptions);
 
@@ -335,7 +376,8 @@ function createAllianceSelectionComponents(options) {
         userId: interaction.user.id,
         currentPage: page,
         totalPages,
-        lang
+        lang,
+        contextData
     };
     if (subtype) paginationConfig.subtype = subtype;
 
@@ -361,6 +403,76 @@ function createAllianceSelectionComponents(options) {
                 new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
             )
             .addActionRowComponents(components)
+    ];
+
+    return { components: updateComponentsV2AfterSeparator(interaction, container) };
+}
+
+/**
+ * Creates a game selection section for both-mode flows.
+ * @param {Object} options - Configuration options
+ * @param {Object} options.interaction - Discord interaction object
+ * @param {Object} options.lang - Language object
+ * @param {string} options.customIdPrefix - Custom ID prefix for the select menu
+ * @param {string} options.title - Section title
+ * @param {string} options.description - Section description
+ * @param {string} options.placeholder - Select menu placeholder
+ * @param {Object} options.optionLabels - Localized labels keyed by game type
+ * @param {number} [options.accentColor=0x3498db] - Accent color
+ * @returns {Object} { components } ready for interaction.update()
+ */
+function createGameSelectionComponents(options) {
+    const {
+        interaction,
+        lang,
+        customIdPrefix,
+        title,
+        description,
+        placeholder,
+        optionLabels,
+        accentColor = 0x3498db
+    } = options;
+
+    const {
+        StringSelectMenuBuilder,
+        StringSelectMenuOptionBuilder,
+        ActionRowBuilder,
+        ContainerBuilder,
+        TextDisplayBuilder
+    } = require('discord.js');
+
+    const gameSelectionLang = lang?.common?.gameSelection || {};
+    const resolvedPlaceholder = placeholder || gameSelectionLang.placeholder || 'Pick a game';
+    const resolvedOptionLabels = optionLabels || gameSelectionLang.options || {};
+
+    const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId(`${customIdPrefix}_${interaction.user.id}`)
+        .setPlaceholder(resolvedPlaceholder)
+        .setMinValues(1)
+        .setMaxValues(1);
+
+    getActiveGameTypes().forEach((gameType) => {
+        const profile = getGameProfile(gameType);
+        selectMenu.addOptions(
+            new StringSelectMenuOptionBuilder()
+                .setLabel(resolvedOptionLabels?.[gameType] || profile.displayName)
+                .setValue(gameType)
+                .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1001'))
+        );
+    });
+
+    const container = [
+        new ContainerBuilder()
+            .setAccentColor(accentColor)
+            .addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(`${title}\n${description}`)
+            )
+            .addSeparatorComponents(
+                new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+            )
+            .addActionRowComponents(
+                new ActionRowBuilder().addComponents(selectMenu)
+            )
     ];
 
     return { components: updateComponentsV2AfterSeparator(interaction, container) };
@@ -516,6 +628,9 @@ function encodeExportSelection(selections) {
     if (selections.furnaceLevels && selections.furnaceLevels.length > 0) {
         parts.push('f:' + compressRanges(selections.furnaceLevels));
     }
+    if (selections.gameType) {
+        parts.push('g:' + selections.gameType);
+    }
 
     if (parts.length === 0) return 'none';
 
@@ -541,19 +656,19 @@ function decodeExportSelection(encodedStr) {
     const ascii85 = require('ascii85');
 
     if (!encodedStr || encodedStr === 'none') {
-        return { states: [], allianceIds: [], furnaceLevels: [] };
+        return { states: [], allianceIds: [], furnaceLevels: [], gameType: null };
     }
 
     // Decode base85 if prefixed
     let decoded = encodedStr;
-    if (encodedStr.startsWith('b85:')) {
-        try {
-            const b85Data = encodedStr.substring(4);
-            decoded = ascii85.decode(b85Data).toString('utf8');
-        } catch (err) {
-            return { states: [], allianceIds: [], furnaceLevels: [] };
+        if (encodedStr.startsWith('b85:')) {
+            try {
+                const b85Data = encodedStr.substring(4);
+                decoded = ascii85.decode(b85Data).toString('utf8');
+            } catch (err) {
+            return { states: [], allianceIds: [], furnaceLevels: [], gameType: null };
+            }
         }
-    }
 
     // Helper to expand ranges (e.g., "1-4,6,8-10" -> [1,2,3,4,6,8,9,10])
     function expandRanges(str) {
@@ -574,15 +689,16 @@ function decodeExportSelection(encodedStr) {
         return result;
     }
 
-    const selections = { states: [], allianceIds: [], furnaceLevels: [] };
-    const sections = decoded.split('|');
+      const selections = { states: [], allianceIds: [], furnaceLevels: [], gameType: null };
+      const sections = decoded.split('|');
 
-    for (const section of sections) {
-        const [prefix, data] = section.split(':');
-        if (prefix === 's') selections.states = expandRanges(data);
-        else if (prefix === 'a') selections.allianceIds = expandRanges(data);
-        else if (prefix === 'f') selections.furnaceLevels = expandRanges(data);
-    }
+      for (const section of sections) {
+          const [prefix, data] = section.split(':');
+          if (prefix === 's') selections.states = expandRanges(data);
+          else if (prefix === 'a') selections.allianceIds = expandRanges(data);
+          else if (prefix === 'f') selections.furnaceLevels = expandRanges(data);
+          else if (prefix === 'g') selections.gameType = data || null;
+      }
 
     return selections;
 }
@@ -628,7 +744,9 @@ module.exports = {
     shouldIgnoreError,
     hasPermission,
     getAlliancesForUser,
+    getAlliancesForUserByGame,
     updateComponentsV2AfterSeparator,
+    createGameSelectionComponents,
     createAllianceSelectionComponents,
     parseRefreshInterval,
     calculateMillisecondsUntilTime,

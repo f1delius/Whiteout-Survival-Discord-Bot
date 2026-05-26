@@ -11,11 +11,21 @@ const {
 const { allianceQueries, playerQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
-const { getFurnaceReadable } = require('./furnaceReadable');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, getAlliancesForUser, updateComponentsV2AfterSeparator, createAllianceSelectionComponents } = require('../utility/commonFunctions');
+const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, createAllianceSelectionComponents, createGameSelectionComponents, getAlliancesForUserByGame } = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
 
 const PLAYERS_PER_PAGE = 10;
+
+function buildPlayerCountMap(alliances) {
+    const playerCountMap = {};
+    for (const alliance of alliances) {
+        playerCountMap[alliance.id] = playerQueries.getPlayersByAllianceId(alliance.id, alliance.game_type).length;
+    }
+    return playerCountMap;
+}
 
 /**
  * Creates the view players button for the player management panel
@@ -40,7 +50,9 @@ function createViewPlayersButton(userId, lang = {}) {
  * @param {number} page - Current page (default 0)
  * @returns {{ components: Array }}
  */
-function createAllianceSelectionContainer(interaction, alliances, lang, playerCountMap, page = 0) {
+function createAllianceSelectionContainer(interaction, alliances, lang, playerCountMap, page = 0, gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, null);
+
     return createAllianceSelectionComponents({
         interaction,
         alliances,
@@ -54,6 +66,7 @@ function createAllianceSelectionContainer(interaction, alliances, lang, playerCo
         description: lang.players.viewPlayers.content.description.base,
         accentColor: 2417109, // Blue
         showAll: false,
+        contextData: resolvedGameType ? [resolvedGameType] : [],
         optionMapper: (alliance) => ({
             label: alliance.name,
             value: alliance.id.toString(),
@@ -84,13 +97,17 @@ function createPlayerListContainer(interaction, players, lang, alliance, page = 
     const totalPages = Math.max(1, Math.ceil(sortedPlayers.length / PLAYERS_PER_PAGE));
     const startIndex = page * PLAYERS_PER_PAGE;
     const currentPagePlayers = sortedPlayers.slice(startIndex, startIndex + PLAYERS_PER_PAGE);
+    const settlementName = getSettlementName(alliance.game_type, lang);
+    const defaultSettlementName = getSettlementName('wos', lang);
 
     // Build player list text
     const playerLines = currentPagePlayers.map(player =>
         lang.players.viewPlayers.content.playerField.value
             .replace('{nickname}', player.nickname || `Player ${player.fid}`)
             .replace('{fid}', player.fid)
-            .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang) || 'Unknown')
+            .replace('Furnace', settlementName)
+            .replace(defaultSettlementName, settlementName)
+            .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang, alliance.game_type) || 'Unknown')
             .replace('{state}', player.state || 'Unknown')
     );
 
@@ -155,7 +172,22 @@ async function handleViewPlayersButton(interaction) {
             });
         }
 
-        const allAlliances = getAlliancesForUser(adminData);
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_view_players_game',
+                title: lang.players.viewPlayers.content.title.base,
+                description: lang.players.viewPlayers.content.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
+        const allAlliances = getAlliancesForUserByGame(adminData, getDefaultGameType(), PERMISSIONS.PLAYER_MANAGEMENT);
         if (allAlliances.length === 0) {
             return await interaction.reply({
                 content: lang.players.viewPlayers.errors.noAssignedAlliances,
@@ -164,10 +196,7 @@ async function handleViewPlayersButton(interaction) {
         }
 
         // Filter to alliances that have at least one player
-        const allianceIds = allAlliances.map(a => a.id);
-        const playerCounts = playerQueries.getPlayerCountsByAllianceIds(allianceIds);
-        const playerCountMap = {};
-        playerCounts.forEach(row => { playerCountMap[row.alliance_id] = row.player_count; });
+        const playerCountMap = buildPlayerCountMap(allAlliances);
 
         const alliancesWithPlayers = allAlliances.filter(a => (playerCountMap[a.id] || 0) > 0);
         if (alliancesWithPlayers.length === 0) {
@@ -177,7 +206,14 @@ async function handleViewPlayersButton(interaction) {
             });
         }
 
-        const { components } = createAllianceSelectionContainer(interaction, alliancesWithPlayers, lang, playerCountMap, 0);
+        const { components } = createAllianceSelectionContainer(
+            interaction,
+            alliancesWithPlayers,
+            lang,
+            playerCountMap,
+            0,
+            getDefaultGameType()
+        );
         await interaction.update({
             components,
             flags: MessageFlags.IsComponentsV2
@@ -195,19 +231,36 @@ async function handleViewPlayersButton(interaction) {
 async function handleViewPlayersAlliancePagination(interaction) {
     const { lang, adminData } = getUserInfo(interaction.user.id);
     try {
-        const { userId: expectedUserId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId: expectedUserId, newPage, contextData } = parsePaginationCustomId(
+            interaction.customId,
+            isMultiGameModeEnabled() ? 1 : 0
+        );
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const allAlliances = getAlliancesForUser(adminData);
-        const allianceIds = allAlliances.map(a => a.id);
-        const playerCounts = playerQueries.getPlayerCountsByAllianceIds(allianceIds);
-        const playerCountMap = {};
-        playerCounts.forEach(row => { playerCountMap[row.alliance_id] = row.player_count; });
+        const gameType = normalizeGameType(contextData[0] || getDefaultGameType());
+        const allAlliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (allAlliances.length === 0) {
+            return await interaction.reply({
+                content: isMultiGameModeEnabled()
+                    ? lang.players.viewPlayers.errors.noAssignedAlliancesForGame
+                    : lang.players.viewPlayers.errors.noAssignedAlliances,
+                ephemeral: true
+            });
+        }
+        const playerCountMap = buildPlayerCountMap(allAlliances);
 
         const alliancesWithPlayers = allAlliances.filter(a => (playerCountMap[a.id] || 0) > 0);
+        if (alliancesWithPlayers.length === 0) {
+            return await interaction.reply({
+                content: isMultiGameModeEnabled()
+                    ? lang.players.viewPlayers.errors.noAvailableAlliancesForGame
+                    : lang.players.viewPlayers.errors.noAvailableAlliances,
+                ephemeral: true
+            });
+        }
 
-        const { components } = createAllianceSelectionContainer(interaction, alliancesWithPlayers, lang, playerCountMap, newPage);
+        const { components } = createAllianceSelectionContainer(interaction, alliancesWithPlayers, lang, playerCountMap, newPage, gameType);
         await interaction.update({
             components,
             flags: MessageFlags.IsComponentsV2
@@ -219,20 +272,82 @@ async function handleViewPlayersAlliancePagination(interaction) {
 }
 
 /**
+ * Handles game selection before alliance selection in both mode
+ * @param {import('discord.js').StringSelectMenuInteraction} interaction
+ */
+async function handleViewPlayersGameSelection(interaction) {
+    const { lang, adminData } = getUserInfo(interaction.user.id);
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_view_players_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const selectedGameType = normalizeGameType(interaction.values[0], null);
+        if (!selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.viewPlayers.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const allAlliances = getAlliancesForUserByGame(adminData, selectedGameType, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (allAlliances.length === 0) {
+            return await interaction.reply({
+                content: lang.players.viewPlayers.errors.noAssignedAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        const playerCountMap = buildPlayerCountMap(allAlliances);
+        const alliancesWithPlayers = allAlliances.filter(a => (playerCountMap[a.id] || 0) > 0);
+        if (alliancesWithPlayers.length === 0) {
+            return await interaction.reply({
+                content: lang.players.viewPlayers.errors.noAvailableAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        const { components } = createAllianceSelectionContainer(
+            interaction,
+            alliancesWithPlayers,
+            lang,
+            playerCountMap,
+            0,
+            selectedGameType
+        );
+        await interaction.update({
+            components,
+            flags: MessageFlags.IsComponentsV2
+        });
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleViewPlayersGameSelection');
+    }
+}
+
+/**
  * Handles alliance selection from the dropdown — shows player list (page 0)
  * @param {import('discord.js').StringSelectMenuInteraction} interaction
  */
 async function handleViewPlayersAllianceSelection(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        // customId: view_players_alliance_select_{userId}_{page}
+        // customId: view_players_alliance_select_{userId}_{page}_{gameType?}
         const customIdParts = interaction.customId.split('_');
         const expectedUserId = customIdParts[4];
+        const selectedGameType = normalizeGameType(customIdParts[6], null);
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const allianceId = parseInt(interaction.values[0]);
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         if (!alliance) {
             return await interaction.reply({
                 content: lang.common.error,
@@ -240,7 +355,14 @@ async function handleViewPlayersAllianceSelection(interaction) {
             });
         }
 
-        const players = playerQueries.getPlayersByAllianceId(allianceId);
+        if (selectedGameType && alliance.game_type !== selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.viewPlayers.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const players = playerQueries.getPlayersByAllianceId(allianceId, alliance.game_type);
         if (players.length === 0) {
             return await interaction.reply({
                 content: lang.players.viewPlayers.errors.noPlayersInAlliance,
@@ -272,8 +394,8 @@ async function handleViewPlayersPlayerPagination(interaction) {
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const allianceId = parseInt(contextData[0]);
-        const alliance = allianceQueries.getAllianceById(allianceId);
-        const players = playerQueries.getPlayersByAllianceId(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
+        const players = playerQueries.getPlayersByAllianceId(allianceId, alliance.game_type);
 
         const { components } = createPlayerListContainer(interaction, players, lang, alliance, newPage);
         await interaction.update({
@@ -289,6 +411,7 @@ async function handleViewPlayersPlayerPagination(interaction) {
 module.exports = {
     createViewPlayersButton,
     handleViewPlayersButton,
+    handleViewPlayersGameSelection,
     handleViewPlayersAlliancePagination,
     handleViewPlayersAllianceSelection,
     handleViewPlayersPlayerPagination

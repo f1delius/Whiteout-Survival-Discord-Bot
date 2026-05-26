@@ -4,7 +4,9 @@ const { LOG_CODES } = require('../utility/AdminLogs');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { restartAutoRefresh } = require('./refreshAlliance');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, parseRefreshInterval, formatRefreshInterval } = require('../utility/commonFunctions');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, parseRefreshInterval, formatRefreshInterval, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
 
 /**
@@ -46,36 +48,34 @@ async function handleEditAllianceButton(interaction) {
             });
         }
 
-        // Get alliances based on permissions
-        let alliances;
-        if (hasFullAccess) {
-            // Owner and full access admins can see all alliances
-            alliances = allianceQueries.getAllAlliances();
-        } else if (hasAccess) {
-            // Regular admins with alliance management can only see assigned alliances
-            const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
-            if (assignedAllianceIds.length === 0) {
-                return await interaction.reply({
-                    content: lang.alliance.editAlliance.errors.noAssignedAlliances,
-                    ephemeral: true
-                });
-            }
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_edit_alliance_game',
+                title: lang.alliance.editAlliance.content.title.base,
+                description: lang.alliance.editAlliance.content.selectGameDescription
+            });
 
-            // Get only assigned alliances
-            alliances = allianceQueries.getAllAlliances().filter(alliance =>
-                assignedAllianceIds.includes(alliance.id)
-            );
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
         }
+
+        const alliances = getAlliancesForUserByGame(adminData, getDefaultGameType(), PERMISSIONS.ALLIANCE_MANAGEMENT);
 
         if (!alliances || alliances.length === 0) {
             return await interaction.reply({
-                content: lang.alliance.editAlliance.errors.noAlliances,
+                content: hasFullAccess
+                    ? lang.alliance.editAlliance.errors.noAlliances
+                    : lang.alliance.editAlliance.errors.noAssignedAlliances,
                 ephemeral: true
             });
         }
 
         // Show alliance selection with pagination (page 0)
-        await showAllianceSelection(interaction, 0, lang, alliances);
+        await showAllianceSelection(interaction, 0, lang, alliances, getDefaultGameType());
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleEditAllianceButton');
@@ -89,23 +89,12 @@ async function handleEditAllianceButton(interaction) {
  * @param {Object} lang - Language object
  * @param {Array} alliances - Array of alliances to display (filtered based on permissions)
  */
-async function showAllianceSelection(interaction, page = 0, lang = {}, alliances = null) {
+async function showAllianceSelection(interaction, page = 0, lang = {}, alliances = null, gameType = getDefaultGameType()) {
+    const resolvedGameType = normalizeGameType(gameType);
     // If alliances not provided, get them based on user permissions
     if (!alliances) {
         const adminData = adminQueries.getAdmin(interaction.user.id);
-        const hasFullAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS);
-        const hasAccess = hasPermission(adminData, PERMISSIONS.ALLIANCE_MANAGEMENT);
-
-        if (hasFullAccess) {
-            alliances = allianceQueries.getAllAlliances();
-        } else if (hasAccess) {
-            const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
-            alliances = allianceQueries.getAllAlliances().filter(alliance =>
-                assignedAllianceIds.includes(alliance.id)
-            );
-        } else {
-            alliances = [];
-        }
+        alliances = getAlliancesForUserByGame(adminData, resolvedGameType, PERMISSIONS.ALLIANCE_MANAGEMENT);
     }
     const itemsPerPage = 24;
     const totalPages = Math.ceil(alliances.length / itemsPerPage);
@@ -116,7 +105,7 @@ async function showAllianceSelection(interaction, page = 0, lang = {}, alliances
     // Fetch all player counts in a single query (fixes N+1 query pattern)
     const allianceIds = currentPageAlliances.map(a => a.id);
     const playerCountResults = allianceIds.length > 0
-        ? playerQueries.getPlayerCountsByAllianceIds(allianceIds)
+        ? playerQueries.getPlayerCountsByAllianceIds(allianceIds, resolvedGameType)
         : [];
 
     // Convert to Map for O(1) lookup
@@ -127,7 +116,7 @@ async function showAllianceSelection(interaction, page = 0, lang = {}, alliances
 
     // Create dropdown menu with alliances
     const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId(`select_alliance_edit_${interaction.user.id}_${page}`)
+        .setCustomId(`select_alliance_edit_${interaction.user.id}_${page}_${resolvedGameType}`)
         .setPlaceholder(lang.alliance.editAlliance.selectMenu.selectAlliance.placeholder)
         .setMinValues(1)
         .setMaxValues(1);
@@ -158,7 +147,8 @@ async function showAllianceSelection(interaction, page = 0, lang = {}, alliances
         userId: interaction.user.id,
         currentPage: page,
         totalPages: totalPages,
-        lang: lang
+        lang: lang,
+        contextData: [resolvedGameType]
     });
 
     components.push(selectRow);
@@ -206,16 +196,62 @@ async function handleEditAlliancePagination(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
         // Extract user ID and page from custom ID
-        const { userId: expectedUserId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId: expectedUserId, newPage, contextData } = parsePaginationCustomId(interaction.customId, 1);
+        const gameType = contextData[0] || getDefaultGameType();
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         // Show new page
-        await showAllianceSelection(interaction, newPage, lang);
+        await showAllianceSelection(interaction, newPage, lang, null, gameType);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleEditAlliancePagination');
+    }
+}
+
+/**
+ * Handles game selection before alliance selection in both mode
+ * @param {import('discord.js').StringSelectMenuInteraction} interaction
+ */
+async function handleEditAllianceGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_edit_alliance_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasFullAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS);
+        const hasAccess = hasPermission(adminData, PERMISSIONS.ALLIANCE_MANAGEMENT);
+
+        if (!hasFullAccess && !hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const selectedGameType = normalizeGameType(interaction.values[0], null);
+        if (!selectedGameType) {
+            return await interaction.reply({
+                content: lang.alliance.editAlliance.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const alliances = getAlliancesForUserByGame(adminData, selectedGameType, PERMISSIONS.ALLIANCE_MANAGEMENT);
+        if (!alliances || alliances.length === 0) {
+            return await interaction.reply({
+                content: hasFullAccess
+                    ? lang.alliance.editAlliance.errors.noAlliancesForGame
+                    : lang.alliance.editAlliance.errors.noAssignedAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        await showAllianceSelection(interaction, 0, lang, alliances, selectedGameType);
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleEditAllianceGameSelection');
     }
 }
 
@@ -229,16 +265,18 @@ async function handleEditAllianceSelection(interaction) {
     try {
         // Extract user ID from custom ID
         const customIdParts = interaction.customId.split('_');
-        const expectedUserId = customIdParts[3]; // select_alliance_edit_userId_page
+        const expectedUserId = customIdParts[3]; // select_alliance_edit_userId_page_gameType
+        const selectedGameType = customIdParts[5] || getDefaultGameType();
+        const resolvedGameType = normalizeGameType(selectedGameType);
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         // Get selected alliance ID
         const allianceId = parseInt(interaction.values[0]);
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
 
-        if (!alliance) {
+        if (!alliance || alliance.game_type !== resolvedGameType) {
             return await interaction.reply({
                 content: lang.common.error,
                 ephemeral: true
@@ -341,7 +379,7 @@ async function handleEditAllianceModal(interaction) {
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         // Get current alliance data
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         if (!alliance) {
             return await interaction.reply({
                 content: lang.common.error,
@@ -372,7 +410,8 @@ async function handleEditAllianceModal(interaction) {
                 alliance.channel_id,    // Keep same channel_id (will be updated separately)
                 newRefreshRate,         // New refresh rate
                 alliance.auto_redeem,   // Keep same auto_redeem
-                allianceId             // WHERE id = allianceId
+                allianceId,             // WHERE id = allianceId
+                alliance.game_type
             );
 
             // Log the alliance update
@@ -511,7 +550,7 @@ async function handleEditAllianceChannelSelection(interaction) {
         const channelId = selectedChannel.id;
 
         // Get current alliance data
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         if (!alliance) {
             return await interaction.update({
                 content: lang.common.error,
@@ -529,7 +568,8 @@ async function handleEditAllianceChannelSelection(interaction) {
                 channelId,              // New channel ID
                 alliance.interval,
                 alliance.auto_redeem,
-                allianceId
+                allianceId,
+                alliance.game_type
             );
 
             // Log the channel update
@@ -585,6 +625,7 @@ module.exports = {
     createEditAllianceButton,
     handleEditAllianceButton,
     handleEditAlliancePagination,
+    handleEditAllianceGameSelection,
     handleEditAllianceSelection,
     handleEditAllianceModal,
     handleEditAllianceChannelSelection

@@ -1,5 +1,5 @@
 /**
- * Shared API client for Whiteout Survival game API
+ * Shared API client for game APIs
  * Centralizes sign building, HTTP requests, and player data fetching
  * Used by: fetchPlayerData.js, refreshAlliance.js, redeemFunction.js
  */
@@ -7,11 +7,12 @@
 const crypto = require('crypto');
 const fetch = require('node-fetch');
 const { getGameProxyAgent } = require('./proxySupport');
+const { getDefaultGameType } = require('./gameRuntime');
 
 const isDevMode = process.env.WOSLAND_DEV_MODE === '1';
 const http = require('http');
 const https = require('https');
-const { API_CONFIG } = require('./apiConfig');
+const { API_CONFIG, getApiConfig } = require('./apiConfig');
 const httpAgent = new http.Agent({ keepAlive: false });
 const httpsAgent = new https.Agent({ keepAlive: false });
 
@@ -99,10 +100,21 @@ function generateBrowserHeaders(origin = API_CONFIG.ORIGIN) {
  * @param {string} playerId - Player FID
  * @returns {string} Signed form data string
  */
-function buildPlayerPayload(playerId) {
+function resolveApiConfig(gameTypeOrConfig = null) {
+    if (gameTypeOrConfig && typeof gameTypeOrConfig === 'object' && gameTypeOrConfig.PLAYER_URL) {
+        return gameTypeOrConfig;
+    }
+    if (typeof gameTypeOrConfig === 'string') {
+        return getApiConfig(gameTypeOrConfig);
+    }
+    return getApiConfig(getDefaultGameType());
+}
+
+function buildPlayerPayload(playerId, gameTypeOrConfig = null) {
+    const apiConfig = resolveApiConfig(gameTypeOrConfig);
     const currentTime = Date.now();
     const form = `fid=${playerId}&time=${currentTime}`;
-    const sign = crypto.createHash('md5').update(form + API_CONFIG.SECRET).digest('hex');
+    const sign = crypto.createHash('md5').update(form + apiConfig.SECRET).digest('hex');
     return `sign=${sign}&${form}`;
 }
 
@@ -112,14 +124,15 @@ function buildPlayerPayload(playerId) {
  * @param {Object} data - Key-value pairs to encode
  * @returns {string} Signed form data string
  */
-function encodeData(data) {
+function encodeData(data, gameTypeOrConfig = null) {
+    const apiConfig = resolveApiConfig(gameTypeOrConfig);
     const sortedKeys = Object.keys(data).sort();
     const encodedData = sortedKeys
         .map(key => `${key}=${typeof data[key] === 'object' ? JSON.stringify(data[key]) : data[key]}`)
         .join('&');
 
     const sign = crypto.createHash('md5')
-        .update(encodedData + API_CONFIG.SECRET)
+        .update(encodedData + apiConfig.SECRET)
         .digest('hex');
 
     return `sign=${sign}&${encodedData}`;
@@ -166,12 +179,13 @@ async function fetchPost(url, body, origin = API_CONFIG.ORIGIN) {
  * @param {string} [cookies] - Optional cookie string to send with the request
  * @returns {Promise<{ok: boolean, status: number, data: Object, raw: string, cookies: string[]}>} Response
  */
-async function nativePost(url, payload, label, cookies) {
+async function nativePost(url, payload, label, cookies, gameTypeOrConfig = null) {
+    const apiConfig = resolveApiConfig(gameTypeOrConfig);
     return new Promise((resolve, reject) => {
-        const postData = encodeData(payload);
+        const postData = encodeData(payload, apiConfig);
 
         const urlObject = new URL(url);
-        const browserHeaders = generateBrowserHeaders();
+        const browserHeaders = generateBrowserHeaders(apiConfig.ORIGIN);
         const isHttps = urlObject.protocol === 'https:';
         const agent = getAgentForGameRequest(url, true);
         const headers = {
@@ -255,15 +269,19 @@ async function nativePost(url, payload, label, cookies) {
  * single-API mode (1 player/2 seconds) when only one API is available.
  */
 class PlayerApiManager {
-    constructor() {
+    constructor(gameType = getDefaultGameType()) {
+        this.gameType = gameType;
+        this.apiConfig = getApiConfig(gameType);
         /** @type {{url: string, origin: string}[]} index 0 = API 1, index 1 = API 2 */
         this.apis = [
-            { url: API_CONFIG.PLAYER_URL,   origin: API_CONFIG.ORIGIN },
-            { url: API_CONFIG.PLAYER_URL_2, origin: API_CONFIG.ORIGIN_2 }
-        ];
+            { url: this.apiConfig.PLAYER_URL, origin: this.apiConfig.ORIGIN },
+            this.apiConfig.PLAYER_URL_2
+                ? { url: this.apiConfig.PLAYER_URL_2, origin: this.apiConfig.ORIGIN_2 || this.apiConfig.ORIGIN }
+                : null
+        ].filter(Boolean);
 
         // Per-API request timestamp windows (rolling 60-second window)
-        this.requestTimestamps = [[], []]; // index 0 = API 1, index 1 = API 2
+        this.requestTimestamps = this.apis.map(() => []);
         this.rateLimitPerApi   = 30;
         this.rateLimitWindow   = 60000; // ms
 
@@ -283,7 +301,7 @@ class PlayerApiManager {
     async checkAvailability(testFid = '46765089') {
         const results = await Promise.allSettled(
             this.apis.map(async (api) => {
-                const body = buildPlayerPayload(testFid);
+                const body = buildPlayerPayload(testFid, this.apiConfig);
                 const response = await fetch(api.url, {
                     method: 'POST',
                     headers: {
@@ -305,18 +323,22 @@ class PlayerApiManager {
         if (this.availableApis.length >= 2) {
             this.dualApiMode  = true;
             this.requestDelay = 1000; // 1s — alternating across two APIs
-            console.log('[PlayerApiManager] Dual-API mode active (1 player/second)');
+            console.log(`[PlayerApiManager:${this.gameType}] Dual-API mode active (1 player/second)`);
         } else if (this.availableApis.length === 1) {
             this.dualApiMode  = false;
             this.requestDelay = 2000; // 2s — 30 req/min on single API
             const unavailableIndex = this.availableApis[0] === 0 ? 1 : 0;
-            console.log(`[PlayerApiManager] Single-API mode — API ${unavailableIndex + 1} unavailable (1 player/2 seconds)`);
+            if (this.apis.length >= 2) {
+                console.log(`[PlayerApiManager:${this.gameType}] Single-API mode — API ${unavailableIndex + 1} unavailable (1 player/2 seconds)`);
+            } else {
+                console.log(`[PlayerApiManager:${this.gameType}] Single-API mode active (1 player/2 seconds)`);
+            }
         } else {
             // No APIs reachable; fall back to API 1 with conservative delay
             this.availableApis = [0];
             this.dualApiMode   = false;
             this.requestDelay  = 2000;
-            console.warn('[PlayerApiManager] No player APIs reachable — defaulting to API 1');
+            console.warn(`[PlayerApiManager:${this.gameType}] No player APIs reachable — defaulting to API 1`);
         }
     }
 
@@ -329,7 +351,7 @@ class PlayerApiManager {
         const now = Date.now();
 
         // Clean stale timestamps outside the rolling window
-        for (let i = 0; i < 2; i++) {
+        for (let i = 0; i < this.requestTimestamps.length; i++) {
             this.requestTimestamps[i] = this.requestTimestamps[i].filter(t => now - t < this.rateLimitWindow);
         }
 
@@ -379,13 +401,25 @@ class PlayerApiManager {
         if (this.dualApiMode) {
             return 'Dual-API mode active (1 player/second)';
         }
+        if (this.apis.length < 2) {
+            return 'Single-API mode active (1 player/2 seconds)';
+        }
         const unavailable = this.availableApis[0] === 0 ? 2 : 1;
         return `Single-API mode (1 player/2 seconds) — API ${unavailable} unavailable`;
     }
 }
 
 /** Singleton instance shared across the entire bot process. */
-const playerApiManager = new PlayerApiManager();
+const playerApiManagers = new Map();
+
+function getPlayerApiManager(gameType = getDefaultGameType()) {
+    if (!playerApiManagers.has(gameType)) {
+        playerApiManagers.set(gameType, new PlayerApiManager(gameType));
+    }
+    return playerApiManagers.get(gameType);
+}
+
+const playerApiManager = getPlayerApiManager();
 
 /**
  * Fetches player data from the game API with retry logic
@@ -397,14 +431,16 @@ const playerApiManager = new PlayerApiManager();
  * @returns {Promise<Object|null>} Player data, error object, or null
  */
 async function fetchPlayerData(playerId, options = {}) {
-    const { onError, delay, returnErrorObject = false } = options;
+    const { onError, delay, returnErrorObject = false, gameType } = options;
+    const apiConfig = resolveApiConfig(gameType);
+    const apiManager = getPlayerApiManager(apiConfig.GAME_TYPE);
     const delayFn = delay || ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
     let retries = 0;
 
-    while (retries < API_CONFIG.MAX_RETRIES) {
+    while (retries < apiConfig.MAX_RETRIES) {
         try {
-            const body = buildPlayerPayload(playerId);
-            const { url: apiUrl, origin: apiOrigin } = playerApiManager.getNextApi();
+            const body = buildPlayerPayload(playerId, apiConfig);
+            const { url: apiUrl, origin: apiOrigin } = apiManager.getNextApi();
             const { data } = await fetchPost(apiUrl, body, apiOrigin);
 
             // Check for player not exist
@@ -412,11 +448,8 @@ async function fetchPlayerData(playerId, options = {}) {
                 if (returnErrorObject) {
                     return { error: 'ROLE NOT EXIST', playerNotExist: true };
                 }
-                // For fetchPlayerData.js style: report and return null
-                const errorMsg = data.msg || 'ROLE NOT EXIST';
-                if (onError) {
-                    await onError(new Error(`Invalid player ID ${playerId}: ${errorMsg}`), 'fetchPlayerFromAPI');
-                }
+                // Known API response for invalid/non-existent player IDs.
+                // Treat as an expected failure so process flows can count it without noisy error logging.
                 return null;
             }
 
@@ -426,9 +459,7 @@ async function fetchPlayerData(playerId, options = {}) {
                 if (returnErrorObject) {
                     return { error: data.msg || 'Unknown error', playerNotExist: true };
                 }
-                if (onError) {
-                    await onError(new Error(`Invalid player ID ${playerId}: ${data.msg}`), 'fetchPlayerFromAPI');
-                }
+                // Same expected invalid-player outcome as ROLE NOT EXIST above.
                 return null;
             }
 
@@ -450,8 +481,8 @@ async function fetchPlayerData(playerId, options = {}) {
                 await onError(error, 'fetchPlayerFromAPI');
             }
 
-            if (retries < API_CONFIG.MAX_RETRIES) {
-                await delayFn(API_CONFIG.RETRY_DELAY);
+            if (retries < apiConfig.MAX_RETRIES) {
+                await delayFn(apiConfig.RETRY_DELAY);
             }
         }
     }
@@ -469,5 +500,6 @@ module.exports = {
     fetchPost,
     nativePost,
     fetchPlayerData,
+    getPlayerApiManager,
     playerApiManager
 };

@@ -19,7 +19,8 @@ const { queueManager } = require('../Processes/queueManager');
 const { processExecutor } = require('../Processes/executeProcesses');
 const { systemLogQueries, giftCodeQueries, playerQueries, giftCodeUsageQueries, settingsQueries, processQueries: processDbQueries } = require('../utility/database');
 const { getTestIdForValidation } = require('./setTestId');
-const { API_CONFIG } = require('../utility/apiConfig');
+const { API_CONFIG, getApiConfig } = require('../utility/apiConfig');
+const { getDefaultGameType } = require('../utility/gameRuntime');
 const { encodeData, nativePost } = require('../utility/apiClient');
 
 const MODEL_CONFIG = {
@@ -356,6 +357,10 @@ function createErrorResult(status, message, giftCodeActive = false) {
 // postForm is aliased as nativePost in the import above
 const postForm = nativePost;
 
+function resolveRedeemApiConfig(gameType = getDefaultGameType()) {
+    return getApiConfig(gameType);
+}
+
 /**
  * Merges new Set-Cookie headers into an existing cookie string.
  * Extracts name=value pairs from Set-Cookie headers and combines
@@ -392,21 +397,22 @@ function mergeCookies(existing, setCookies) {
     return Array.from(cookieMap.values()).join('; ');
 }
 
-async function authenticatePlayer(fid) {
+async function authenticatePlayer(fid, apiConfig = API_CONFIG) {
     let lastError = null;
     let sessionCookies = '';
 
     // Retry authentication up to 3 times
-    for (let attempt = 1; attempt <= API_CONFIG.MAX_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= apiConfig.MAX_RETRIES; attempt++) {
         try {
             const response = await postForm(
-                API_CONFIG.PLAYER_URL,
+                apiConfig.PLAYER_URL,
                 {
                     fid: String(fid),
                     time: Math.floor(Date.now() / 1000).toString()
                 },
                 'Player authentication',
-                sessionCookies || undefined
+                sessionCookies || undefined,
+                apiConfig
             );
 
             // Accumulate cookies from each response
@@ -432,9 +438,9 @@ async function authenticatePlayer(fid) {
 
             // Rate limit detected - wait longer
             if (response.status === 429 || msgLower.includes('too frequent') || msgLower.includes('timeout')) {
-                lastError = `Rate limited (attempt ${attempt}/${API_CONFIG.MAX_RETRIES})`;
-                devLog(`Auth rate-limited for FID ${fid} (attempt ${attempt}/${API_CONFIG.MAX_RETRIES}) — waiting ${(API_CONFIG.RATE_LIMIT_DELAY/1000).toFixed(1)}s`);
-                await wait(API_CONFIG.RATE_LIMIT_DELAY);
+                lastError = `Rate limited (attempt ${attempt}/${apiConfig.MAX_RETRIES})`;
+                devLog(`Auth rate-limited for FID ${fid} (attempt ${attempt}/${apiConfig.MAX_RETRIES}) — waiting ${(apiConfig.RATE_LIMIT_DELAY/1000).toFixed(1)}s`);
+                await wait(apiConfig.RATE_LIMIT_DELAY);
                 continue;
             }
 
@@ -449,38 +455,43 @@ async function authenticatePlayer(fid) {
 
             // Other error - shorter retry delay
             lastError = `Auth failed: ${response.data?.msg || 'Unknown error'} (HTTP ${response.status})`;
-            if (attempt < API_CONFIG.MAX_RETRIES) {
-                devLog(`Auth failed for FID ${fid} (attempt ${attempt}/${API_CONFIG.MAX_RETRIES}), retrying in ${API_CONFIG.RETRY_DELAY}ms`);
-                await wait(API_CONFIG.RETRY_DELAY);
+            if (attempt < apiConfig.MAX_RETRIES) {
+                devLog(`Auth failed for FID ${fid} (attempt ${attempt}/${apiConfig.MAX_RETRIES}), retrying in ${apiConfig.RETRY_DELAY}ms`);
+                await wait(apiConfig.RETRY_DELAY);
             }
 
         } catch (error) {
             lastError = error.message;
-            devLog(`Auth exception for FID ${fid} (attempt ${attempt}/${API_CONFIG.MAX_RETRIES}): ${error.message}`);
-            if (attempt < API_CONFIG.MAX_RETRIES) {
-                await wait(API_CONFIG.RETRY_DELAY);
+            devLog(`Auth exception for FID ${fid} (attempt ${attempt}/${apiConfig.MAX_RETRIES}): ${error.message}`);
+            if (attempt < apiConfig.MAX_RETRIES) {
+                await wait(apiConfig.RETRY_DELAY);
             }
         }
     }
 
     // All retries exhausted
-    console.error(`Player authentication failed for FID ${fid} after ${API_CONFIG.MAX_RETRIES} attempts. Last error: ${lastError}`);
-    devLog(`Auth FAILED — FID ${fid}, ${API_CONFIG.MAX_RETRIES} attempts exhausted, last: ${lastError}`);
+    console.error(`Player authentication failed for FID ${fid} after ${apiConfig.MAX_RETRIES} attempts. Last error: ${lastError}`);
+    devLog(`Auth FAILED — FID ${fid}, ${apiConfig.MAX_RETRIES} attempts exhausted, last: ${lastError}`);
     return { authFailed: true, message: lastError };
 }
 
-async function fetchCaptchaImage(fid, cookies) {
+async function fetchCaptchaImage(fid, cookies, apiConfig = API_CONFIG) {
+    if (!apiConfig.HAS_CAPTCHA || !apiConfig.CAPTCHA_URL) {
+        return { error: 'CAPTCHA_DISABLED', authError: false, cookies };
+    }
+
     let response;
     try {
         response = await postForm(
-            API_CONFIG.CAPTCHA_URL,
+            apiConfig.CAPTCHA_URL,
             {
                 fid: String(fid),
                 time: Date.now().toString(),
                 init: '0'
             },
             'Captcha fetch',
-            cookies || undefined
+            cookies || undefined,
+            apiConfig
         );
     } catch (networkError) {
         // nativePost already retried, but if it ultimately throws we'll handle it here
@@ -551,7 +562,7 @@ async function fetchCaptchaImage(fid, cookies) {
  * @param {string} giftCode - Gift code to check
  * @returns {Object} { itemsToProcess, preFilteredResults }
  */
-function preFilterAlreadyRedeemed(redeemItems, giftCode) {
+function preFilterAlreadyRedeemed(redeemItems, giftCode, gameType = getDefaultGameType()) {
     const preFilteredResults = [];
 
     if (redeemItems.length === 0) {
@@ -559,14 +570,14 @@ function preFilterAlreadyRedeemed(redeemItems, giftCode) {
     }
 
     try {
-        const redeemedFidsList = giftCodeUsageQueries.getFidsWhoRedeemedCode(giftCode);
+        const redeemedFidsList = giftCodeUsageQueries.getFidsWhoRedeemedCode(giftCode, gameType);
         const alreadyRedeemedFids = new Set(redeemedFidsList.map(fid => String(fid)));
 
         if (alreadyRedeemedFids.size > 0) {
 
             for (const item of redeemItems) {
                 if (alreadyRedeemedFids.has(String(item.id))) {
-                    const previousUsage = giftCodeUsageQueries.checkUsage(item.id, giftCode);
+                    const previousUsage = giftCodeUsageQueries.checkUsage(item.id, giftCode, gameType);
                     const previousStatus = previousUsage?.status || 'RECEIVED';
 
                     preFilteredResults.push({
@@ -609,7 +620,8 @@ async function createRedeemProcess(redeemData, options = {}) {
 
         const {
             adminId: providedAdminId,
-            allianceContext: providedAllianceContext
+            allianceContext: providedAllianceContext,
+            gameType: providedGameType
         } = options;
 
         const allianceContext = providedAllianceContext
@@ -628,12 +640,15 @@ async function createRedeemProcess(redeemData, options = {}) {
             index
         }));
 
+        const adminId = providedAdminId || 'SYSTEM_AUTO_REDEEM';
+        const gameType = providedGameType || providedAllianceContext?.gameType || getDefaultGameType();
+
         // PRE-FILTER: Check who already redeemed this gift code BEFORE starting the process
         const giftCode = normalisedItems[0].giftCode;
         const redeemItems = normalisedItems.filter(item => item.status === 'redeem' && item.id);
 
         const { itemsToProcess: filteredRedeemItems, preFilteredResults } =
-            preFilterAlreadyRedeemed(redeemItems, giftCode);
+            preFilterAlreadyRedeemed(redeemItems, giftCode, gameType);
 
         // Combine validation items FIRST, then redeem items
         // This ensures validation runs before bulk redemption to avoid API rate limit exhaustion
@@ -645,8 +660,6 @@ async function createRedeemProcess(redeemData, options = {}) {
         const existingIdentifiers = identifiers.filter(id => !identifiersToProcess.includes(id));
 
         devLog(`Pre-filter: ${normalisedItems.length} total, ${itemsToProcess.length} to process, ${existingIdentifiers.length} already redeemed, code: ${giftCode}`);
-
-        const adminId = providedAdminId || 'SYSTEM_AUTO_REDEEM';
 
         // Duplicate process guard: skip if a queued/active redeem process already exists
         // for the same alliance + gift code combination
@@ -708,7 +721,8 @@ async function createRedeemProcess(redeemData, options = {}) {
             allItems: normalisedItems, // Keep all items for reference
             giftCode: giftCode,
             createdAt: Date.now(),
-            alliance: allianceContext
+            alliance: allianceContext,
+            gameType
         };
 
         const initialProgress = {
@@ -791,12 +805,12 @@ async function createRedeemProcess(redeemData, options = {}) {
 async function handleVipTracking(playerId, giftCode, outcome, cachedGiftCodeData = null) {
     try {
         // Use the pre-fetched row when available to avoid repeated DB reads in the loop
-        const giftCodeData = cachedGiftCodeData ?? giftCodeQueries.getGiftCode(giftCode);
+        const giftCodeData = cachedGiftCodeData ?? giftCodeQueries.getGiftCode(giftCode, outcome.gameType || getDefaultGameType());
         if (!giftCodeData || !giftCodeData.is_vip) {
             return; // Not a VIP code, no tracking needed
         }
 
-        const player = playerQueries.getPlayer(playerId);
+        const player = playerQueries.getPlayer(playerId, outcome.gameType || getDefaultGameType());
         if (!player) {
             devLog(`Player ${playerId} not found for VIP tracking`);
             return;
@@ -852,7 +866,7 @@ async function handlePostRedemption(playerId, giftCode, outcome, cachedGiftCodeD
 
     // Track gift code usage for this player
     try {
-        giftCodeUsageQueries.addUsage(playerId, giftCode, outcome.status || 'UNKNOWN');
+        giftCodeUsageQueries.addUsage(playerId, giftCode, outcome.status || 'UNKNOWN', outcome.gameType || getDefaultGameType());
     } catch (usageError) {
         // Ignore duplicate entry errors (player already has this usage tracked)
         if (!usageError.message.includes('UNIQUE constraint')) {
@@ -866,15 +880,15 @@ async function handlePostRedemption(playerId, giftCode, outcome, cachedGiftCodeD
  * @param {Object} item - Redeem item with id, giftCode, status (validation/redeem)
  * @returns {Promise<Object>} Outcome with success, status, message, etc.
  */
-async function processSingleRedeemItem(item) {
+async function processSingleRedeemItem(item, gameType = getDefaultGameType()) {
     try {
         if (item.status === 'validation') {
-            return await validateGiftCode(item.giftCode);
+            return await validateGiftCode(item.giftCode, gameType);
         } else if (item.status === 'redeem') {
             if (!item.id) {
                 throw new Error('Missing player ID for redeem operation');
             }
-            return await redeemGiftCodeForPlayer(item.id, item.giftCode);
+            return await redeemGiftCodeForPlayer(item.id, item.giftCode, gameType);
         } else {
             throw new Error(`Unknown operation status: ${item.status}`);
         }
@@ -1004,7 +1018,7 @@ async function executeRedeemOperation(processId) {
         // Fetch gift code data once for the entire loop — passed to handlePostRedemption
         // to avoid 1 DB read per player for the same unchanging row.
         // Declared with let so it can be updated if VIP status is detected dynamically.
-        let loopGiftCodeData = giftCodeQueries.getGiftCode(redeemContext.giftCode) || null;
+        let loopGiftCodeData = giftCodeQueries.getGiftCode(redeemContext.giftCode, redeemContext.gameType) || null;
 
         // Process only items that are still pending (handles crash recovery correctly)
         // This prevents re-processing items that were already completed before a crash
@@ -1076,7 +1090,7 @@ async function executeRedeemOperation(processId) {
             }
 
             // Process this redeem item
-            const outcome = await processSingleRedeemItem(item);
+            const outcome = await processSingleRedeemItem(item, redeemContext.gameType);
 
             // Rate-limited: put in retry queue and immediately process the next player
             // Rate limits don't increment cycle — they aren't the player's fault
@@ -1124,7 +1138,7 @@ async function executeRedeemOperation(processId) {
 
                 // Update gift code to VIP in database
                 try {
-                    giftCodeQueries.updateGiftCodeVipStatus(true, item.giftCode);
+                    giftCodeQueries.updateGiftCodeVipStatus(true, item.giftCode, redeemContext.gameType);
                     loopGiftCodeData = loopGiftCodeData
                         ? { ...loopGiftCodeData, is_vip: 1 }
                         : { is_vip: 1 };
@@ -1147,7 +1161,7 @@ async function executeRedeemOperation(processId) {
 
                     for (const fid of remainingPlayers) {
                         try {
-                            const player = playerQueries.getPlayer(fid);
+                            const player = playerQueries.getPlayer(fid, processData.details?.game_type || getDefaultGameType());
                             if (!player) continue;
 
                             const isVipEligible = player.is_rich === 1 ||
@@ -1285,7 +1299,7 @@ async function executeRedeemOperation(processId) {
 
                 if (outcome.status === 'USED' || outcome.status === 'TIME ERROR' || outcome.status === 'CDK NOT FOUND') {
                     try {
-                        giftCodeQueries.removeGiftCode(item.giftCode);
+                        giftCodeQueries.removeGiftCode(item.giftCode, redeemContext.gameType);
                     } catch (updateError) {
                         await handleError(null, null, updateError, 'removeInvalidGiftCode', false);
                     }
@@ -1414,10 +1428,10 @@ async function executeRedeemOperation(processId) {
  * @param {string} giftCode - Gift code to validate
  * @returns {Promise<Object>} Validation result with is_vip flag
  */
-async function validateGiftCode(giftCode) {
+async function validateGiftCode(giftCode, gameType = getDefaultGameType()) {
     try {
         // Get test ID for validation
-        const testId = getTestIdForValidation();
+        const testId = getTestIdForValidation(gameType);
 
         if (!testId) {
             return {
@@ -1429,7 +1443,7 @@ async function validateGiftCode(giftCode) {
 
 
         // Make API call to validate gift code
-        const result = await makeGiftCodeAPIRequest(testId, giftCode, 'validation');
+        const result = await makeGiftCodeAPIRequest(testId, giftCode, 'validation', { gameType });
 
         // Detect if this is a VIP code based on validation result
         const isVipCode = VIP_RESTRICTION_STATUSES.includes(result.status);
@@ -1438,7 +1452,7 @@ async function validateGiftCode(giftCode) {
         // This marks the test ID as "already redeemed" for this gift code
         if (result.status && result.status !== 'UNHANDLED_ERROR' && result.status !== 'ANALYSIS_ERROR') {
             try {
-                giftCodeUsageQueries.addUsage(testId, giftCode, result.status);
+                giftCodeUsageQueries.addUsage(testId, giftCode, result.status, gameType);
             } catch (usageError) {
                 // Ignore duplicate entry errors (test ID already has this usage tracked)
                 if (!usageError.message.includes('UNIQUE constraint')) {
@@ -1450,6 +1464,7 @@ async function validateGiftCode(giftCode) {
         // Add is_vip flag to result
         return {
             ...result,
+            gameType,
             is_vip: isVipCode
         };
 
@@ -1469,19 +1484,20 @@ async function validateGiftCode(giftCode) {
  * @param {string} giftCode - Gift code to redeem
  * @returns {Promise<Object>} Redeem result
  */
-async function redeemGiftCodeForPlayer(playerId, giftCode) {
+async function redeemGiftCodeForPlayer(playerId, giftCode, gameType = getDefaultGameType()) {
     try {
         devLog(`Redeeming code "${giftCode}" for player ${playerId}`);
 
         // Make API call to redeem gift code
-        const result = await makeGiftCodeAPIRequest(playerId, giftCode, 'redeem');
+        const result = await makeGiftCodeAPIRequest(playerId, giftCode, 'redeem', { gameType });
+        result.gameType = gameType;
 
         // Reset exist counter if player returned valid data (false positive detection)
         if (result.success) {
             try {
-                const playerData = playerQueries.getPlayer(playerId);
+                const playerData = playerQueries.getPlayer(playerId, gameType);
                 if (playerData && playerData.exist > 0) {
-                    playerQueries.resetPlayerExist(playerId);
+                    playerQueries.resetPlayerExist(playerId, gameType);
                 }
             } catch (dbError) {
                 console.error(`Error resetting exist counter for player ${playerId}:`, dbError);
@@ -1491,10 +1507,10 @@ async function redeemGiftCodeForPlayer(playerId, giftCode) {
         // Handle ROLE NOT EXIST error - increment exist counter
         if (result.playerNotExist) {
             try {
-                playerQueries.incrementPlayerExist(playerId);
+                playerQueries.incrementPlayerExist(playerId, gameType);
 
                 // Check if player reached 3 exist count
-                const playerData = playerQueries.getPlayer(playerId);
+                const playerData = playerQueries.getPlayer(playerId, gameType);
                 if (playerData && playerData.exist >= 3) {
                     // Get auto_delete setting
                     const settings = settingsQueries.getSettings.get();
@@ -1502,7 +1518,7 @@ async function redeemGiftCodeForPlayer(playerId, giftCode) {
 
                     if (autoDelete) {
                         // Delete player if auto_delete is enabled
-                        playerQueries.deletePlayer(playerId);
+                        playerQueries.deletePlayer(playerId, gameType);
                     }
                 }
             } catch (dbError) {
@@ -1528,10 +1544,11 @@ async function redeemGiftCodeForPlayer(playerId, giftCode) {
  * @param {string} operation - 'validation' or 'redeem'
  * @returns {Promise<Object>} API result
  */
-async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
+async function makeGiftCodeAPIRequest(fid, giftCode, operation, options = {}) {
+    const apiConfig = resolveRedeemApiConfig(options.gameType);
     // IMPORTANT: Authenticate player ONCE before captcha retry loop
     // This prevents duplicate authentication calls on each captcha retry
-    let authInfo = await authenticatePlayer(fid);
+    let authInfo = await authenticatePlayer(fid, apiConfig);
 
     // Capture session cookies from authentication for reuse
     let sessionCookies = authInfo?.cookies || '';
@@ -1558,10 +1575,12 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
     let authRetryCount = 0;
     const MAX_AUTH_RETRIES = 2; // Maximum auth retries to prevent infinite loops
 
-    while (attempt < API_CONFIG.MAX_CAPTCHA_ATTEMPTS) {
+    while (attempt < apiConfig.MAX_CAPTCHA_ATTEMPTS) {
         attempt++;
 
-        const captchaResult = await fetchCaptchaImage(fid, sessionCookies);
+        const captchaResult = apiConfig.HAS_CAPTCHA
+            ? await fetchCaptchaImage(fid, sessionCookies, apiConfig)
+            : { buffer: null, authError: false, cookies: sessionCookies };
 
         // Update session cookies from captcha response
         if (captchaResult?.cookies) {
@@ -1569,7 +1588,7 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
         }
 
         // Handle captcha fetch failure
-        if (!captchaResult || !captchaResult.buffer) {
+        if (apiConfig.HAS_CAPTCHA && (!captchaResult || !captchaResult.buffer)) {
             // Check if this is an authentication error (session expired)
             if (captchaResult?.authError) {
                 authRetryCount++;
@@ -1579,7 +1598,7 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
                 }
 
                 // Re-authenticate player and refresh session cookies
-                authInfo = await authenticatePlayer(fid);
+                authInfo = await authenticatePlayer(fid, apiConfig);
                 sessionCookies = authInfo?.cookies || '';
                 if (!authInfo || authInfo.authFailed || authInfo.playerNotExist) {
                     if (authInfo?.playerNotExist) {
@@ -1604,7 +1623,7 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
             const statusConfig = getStatusConfig(errorMsg);
 
             if (statusConfig?.retry?.type === 'rate') {
-                const adjustedDelay = statusConfig.retry.delay ?? API_CONFIG.RATE_LIMIT_DELAY;
+                const adjustedDelay = statusConfig.retry.delay ?? apiConfig.RATE_LIMIT_DELAY;
 
                 // Return immediately so the outer loop can process other players
                 // instead of blocking everything for the full rate limit delay
@@ -1620,44 +1639,53 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
             }
 
             // Other non-auth, non-rate-limit error, treat as normal retry
-            devLog(`Captcha fetch error for FID ${fid}: ${errorMsg} — retrying in ${(API_CONFIG.RETRY_DELAY/1000).toFixed(1)}s (attempt ${attempt}/${API_CONFIG.MAX_CAPTCHA_ATTEMPTS})`);
+            devLog(`Captcha fetch error for FID ${fid}: ${errorMsg} — retrying in ${(apiConfig.RETRY_DELAY/1000).toFixed(1)}s (attempt ${attempt}/${apiConfig.MAX_CAPTCHA_ATTEMPTS})`);
             lastResult = createErrorResult('CAPTCHA_FETCH_FAILED', 'Unable to fetch captcha image', false);
-            await wait(API_CONFIG.RETRY_DELAY);
+            await wait(apiConfig.RETRY_DELAY);
             continue;
         }
 
         // Successfully got captcha image - reset auth retry counter
         authRetryCount = 0;
-        let captchaImage = captchaResult.buffer;
+        let captchaImage = apiConfig.HAS_CAPTCHA ? captchaResult.buffer : null;
 
-        let solved;
-        try {
-            solved = await captchaSolver.solve(captchaImage);
-        } catch (error) {
-            console.error('Captcha solving failed:', error.message);
-            devLog(`Captcha solve FAILED for FID ${fid}: ${error.message}`);
-            lastResult = createErrorResult('CAPTCHA_SOLVE_FAILED', error.message, false);
+        let solved = null;
+        if (apiConfig.HAS_CAPTCHA) {
+            try {
+                solved = await captchaSolver.solve(captchaImage);
+            } catch (error) {
+                console.error('Captcha solving failed:', error.message);
+                devLog(`Captcha solve FAILED for FID ${fid}: ${error.message}`);
+                lastResult = createErrorResult('CAPTCHA_SOLVE_FAILED', error.message, false);
 
-            // Clean up captcha buffer to free memory
-            captchaImage = null;
+                // Clean up captcha buffer to free memory
+                captchaImage = null;
 
-            await wait(API_CONFIG.RETRY_DELAY);
-            continue;
+                await wait(apiConfig.RETRY_DELAY);
+                continue;
+            }
         }
 
         // Clean up captcha buffer after solving to free memory
         captchaImage = null;
 
         const response = await postForm(
-            API_CONFIG.GIFT_CODE_URL,
-            {
-                fid: String(fid),
-                cdk: giftCode,
-                captcha_code: solved.text,
-                time: Date.now().toString()
-            },
+            apiConfig.GIFT_CODE_URL,
+            apiConfig.HAS_CAPTCHA
+                ? {
+                    fid: String(fid),
+                    cdk: giftCode,
+                    captcha_code: solved.text,
+                    time: Date.now().toString()
+                }
+                : {
+                    fid: String(fid),
+                    cdk: giftCode,
+                    time: Date.now().toString()
+                },
             'Gift code',
-            sessionCookies || undefined
+            sessionCookies || undefined,
+            apiConfig
         );
 
         // Log rate limit headers
@@ -1675,15 +1703,15 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
                 return {
                     ...createErrorResult('HTTP_ERROR', 'HTTP 429 Too Many Requests', false),
                     rateLimited: true,
-                    retryDelay: API_CONFIG.RATE_LIMIT_DELAY,
+                    retryDelay: apiConfig.RATE_LIMIT_DELAY,
                     attempts: attempt
                 };
             }
 
-            devLog(`Redeem HTTP error for FID ${fid}: status ${response.status} — retrying in ${(API_CONFIG.RETRY_DELAY/1000).toFixed(1)}s (attempt ${attempt}/${API_CONFIG.MAX_CAPTCHA_ATTEMPTS})`);
+            devLog(`Redeem HTTP error for FID ${fid}: status ${response.status} — retrying in ${(apiConfig.RETRY_DELAY/1000).toFixed(1)}s (attempt ${attempt}/${apiConfig.MAX_CAPTCHA_ATTEMPTS})`);
             lastResult = createErrorResult('HTTP_ERROR', `HTTP ${response.status}`, false);
 
-            await wait(API_CONFIG.RETRY_DELAY);
+            await wait(apiConfig.RETRY_DELAY);
             continue;
         }
 
@@ -1691,20 +1719,20 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
         const result = {
             ...analysis,
             success: analysis.success,
-            captchaText: solved.text,
-            captchaConfidence: solved.confidence,
+            captchaText: solved?.text || null,
+            captchaConfidence: solved?.confidence || null,
             attempts: attempt
         };
 
-        devLog(`API response — FID ${fid}, op: ${operation}, status: ${analysis.status}, success: ${analysis.success}, attempt: ${attempt}/${API_CONFIG.MAX_CAPTCHA_ATTEMPTS}`);
+        devLog(`API response — FID ${fid}, op: ${operation}, status: ${analysis.status}, success: ${analysis.success}, attempt: ${attempt}/${apiConfig.MAX_CAPTCHA_ATTEMPTS}`);
 
         // Clean up solved captcha data
         solved = null;
 
-        if (analysis.retry?.type === 'captcha') {
-            devLog(`Captcha rejected for FID ${fid}: ${analysis.status} — re-solving (attempt ${attempt}/${API_CONFIG.MAX_CAPTCHA_ATTEMPTS})`);
+        if (apiConfig.HAS_CAPTCHA && analysis.retry?.type === 'captcha') {
+            devLog(`Captcha rejected for FID ${fid}: ${analysis.status} — re-solving (attempt ${attempt}/${apiConfig.MAX_CAPTCHA_ATTEMPTS})`);
             lastResult = result;
-            await wait(API_CONFIG.RETRY_DELAY);
+            await wait(apiConfig.RETRY_DELAY);
             continue;
         }
 
@@ -1714,7 +1742,7 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
             return {
                 ...result,
                 rateLimited: true,
-                retryDelay: analysis.retry.delay ?? API_CONFIG.RATE_LIMIT_DELAY
+                retryDelay: analysis.retry.delay ?? apiConfig.RATE_LIMIT_DELAY
             };
         }
 
@@ -1724,10 +1752,10 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation) {
     // Clean up resources before returning
     authInfo = null;
 
-    const finalResult = lastResult || createErrorResult('MAX_ATTEMPTS_EXCEEDED', 'Maximum captcha attempts exceeded', false);
-    finalResult.captchaExhausted = true;
+    const finalResult = lastResult || createErrorResult('MAX_ATTEMPTS_EXCEEDED', apiConfig.HAS_CAPTCHA ? 'Maximum captcha attempts exceeded' : 'Maximum redeem attempts exceeded', false);
+    finalResult.captchaExhausted = apiConfig.HAS_CAPTCHA;
     finalResult.attempts = attempt;
-    devLog(`All ${API_CONFIG.MAX_CAPTCHA_ATTEMPTS} captcha attempts exhausted for FID ${fid} — last status: ${finalResult.status}`);
+    devLog(`All ${apiConfig.MAX_CAPTCHA_ATTEMPTS} attempts exhausted for FID ${fid} — last status: ${finalResult.status}`);
 
     // Idle timer in CaptchaSolver handles cleanup — no explicit unload needed
 

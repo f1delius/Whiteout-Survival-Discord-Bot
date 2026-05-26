@@ -13,8 +13,25 @@ const { adminQueries, allianceQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');;
 const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { getGameProfile } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
 const { adminUsernameCache } = require('../utility/adminUsernameCache');
+
+function getAssignableAlliances() {
+    return isMultiGameModeEnabled()
+        ? allianceQueries.getAllAlliancesAny()
+        : allianceQueries.getAllAlliances(getDefaultGameType());
+}
+
+function formatAllianceLabel(alliance) {
+    if (!isMultiGameModeEnabled()) {
+        return alliance.name;
+    }
+
+    const profile = getGameProfile(alliance.game_type);
+    return `[${profile.shortLabel}] ${alliance.name}`;
+}
 
 
 /**
@@ -211,7 +228,7 @@ async function handleAssignAdminSelection(interaction) {
         }
 
         // Get all alliances
-        const allAlliances = allianceQueries.getAllAlliances();
+        const allAlliances = getAssignableAlliances();
 
         if (allAlliances.length === 0) {
             return await interaction.reply({
@@ -240,7 +257,7 @@ async function showAllianceSelection(interaction, page = 0, lang = {}, selectedA
     const emojiMap = getEmojiMapForUser(interaction.user.id);
     // If allAlliances not provided, get them
     if (!allAlliances) {
-        allAlliances = allianceQueries.getAllAlliances();
+        allAlliances = getAssignableAlliances();
     }
 
     // Get target admin
@@ -263,7 +280,7 @@ async function showAllianceSelection(interaction, page = 0, lang = {}, selectedA
         const isAssigned = assignedAllianceIds.includes(alliance.id);
 
         return {
-            label: `${alliance.name}`,
+            label: formatAllianceLabel(alliance),
             description: isAssigned
                 ? lang.alliance.assignAlliance.selectMenu.selectAlliances.description.add.replace('{alliancePriority}', alliance.priority)
                 : lang.alliance.assignAlliance.selectMenu.selectAlliances.description.remove.replace('{alliancePriority}', alliance.priority),
@@ -310,7 +327,7 @@ async function showAllianceSelection(interaction, page = 0, lang = {}, selectedA
                     (assignedAllianceIds.length > 0
                         ? assignedAllianceIds.map(id => {
                             const alliance = allAlliances.find(a => a.id == id);
-                            return alliance ? `  - ${alliance.name}` : `  - ${id}`;
+                            return alliance ? `  - ${formatAllianceLabel(alliance)}` : `  - ${id}`;
                         }).join('\n')
                         : lang.alliance.assignAlliance.content.currentlyAssignedField.value) +
                     `\n` +
@@ -410,14 +427,14 @@ async function handleAssignAlliancesSelection(interaction) {
         adminQueries.updateAdminAlliances(JSON.stringify(newAssignedIds), targetAdminUserId);
 
         // Get alliance names for reporting
-        const allAlliances = allianceQueries.getAllAlliances();
+        const allAlliances = getAssignableAlliances();
         const addedNames = toAdd.map(id => {
             const alliance = allAlliances.find(a => a.id === id);
-            return alliance ? alliance.name : `ID ${id}`;
+            return alliance ? formatAllianceLabel(alliance) : `ID ${id}`;
         });
         const removedNames = toRemove.map(id => {
             const alliance = allAlliances.find(a => a.id === id);
-            return alliance ? alliance.name : `ID ${id}`;
+            return alliance ? formatAllianceLabel(alliance) : `ID ${id}`;
         });
 
         const container = [

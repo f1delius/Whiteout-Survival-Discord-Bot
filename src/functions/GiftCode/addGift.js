@@ -1,9 +1,58 @@
-const { ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder } = require('discord.js');
+const { ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const { giftCodeQueries, allianceQueries, playerQueries } = require('../utility/database');
 const { createRedeemProcess } = require('./redeemFunction');
+const { parseGameScopedGiftCode } = require('./gameScopedGiftCode');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
+
+function buildAddGiftModal(userId, lang = {}) {
+    const modal = new ModalBuilder()
+        .setCustomId(`add_gift_modal_${userId}`)
+        .setTitle(lang.giftCode.addGiftCode.modal.title);
+
+    if (isMultiGameModeEnabled()) {
+        const gameTypeSelect = new StringSelectMenuBuilder()
+            .setCustomId('gift_code_game_type')
+            .setPlaceholder(lang.common.gameSelection.placeholder)
+            .setRequired(true)
+            .setMinValues(1)
+            .setMaxValues(1)
+            .addOptions(
+                new StringSelectMenuOptionBuilder()
+                    .setLabel(lang.common.gameSelection.options.wos)
+                    .setValue('wos'),
+                new StringSelectMenuOptionBuilder()
+                    .setLabel(lang.common.gameSelection.options.ks)
+                    .setValue('ks')
+            );
+
+        const gameTypeLabel = new LabelBuilder()
+            .setLabel(lang.common.gameSelection.label)
+            .setDescription(lang.giftCode.addGiftCode.modal.gameTypeField.description)
+            .setStringSelectMenuComponent(gameTypeSelect);
+
+        modal.addLabelComponents(gameTypeLabel);
+    }
+
+    const giftCodeInput = new TextInputBuilder()
+        .setCustomId('gift_code_value')
+        .setPlaceholder(lang.giftCode.addGiftCode.modal.giftCodeInput.placeholder)
+        .setStyle(TextInputStyle.Short)
+        .setMinLength(1)
+        .setMaxLength(50)
+        .setRequired(true);
+
+    const giftCodeLabel = new LabelBuilder()
+        .setLabel(lang.giftCode.addGiftCode.modal.giftCodeInput.label)
+        .setTextInputComponent(giftCodeInput);
+
+    modal.addLabelComponents(giftCodeLabel);
+
+    return modal;
+}
 
 
 /**
@@ -43,24 +92,7 @@ async function handleAddGiftButton(interaction) {
             });
         }
 
-        // Create and show modal
-        const modal = new ModalBuilder()
-            .setCustomId(`add_gift_modal_${interaction.user.id}`)
-            .setTitle(lang.giftCode.addGiftCode.modal.title);
-
-        const giftCodeInput = new TextInputBuilder()
-            .setCustomId('gift_code_value')
-            .setPlaceholder(lang.giftCode.addGiftCode.modal.giftCodeInput.placeholder)
-            .setStyle(TextInputStyle.Short)
-            .setMinLength(1)
-            .setMaxLength(50)
-            .setRequired(true);
-
-        const giftCodeLabel = new LabelBuilder()
-            .setLabel(lang.giftCode.addGiftCode.modal.giftCodeInput.label)
-            .setTextInputComponent(giftCodeInput);
-
-        modal.addLabelComponents(giftCodeLabel);
+        const modal = buildAddGiftModal(interaction.user.id, lang);
 
         await interaction.showModal(modal);
 
@@ -95,17 +127,49 @@ async function handleGiftCodeModal(interaction) {
         }
 
         // Get the gift code from the modal
-        const giftCode = interaction.fields.getTextInputValue('gift_code_value').trim();
+        const selectedGameType = isMultiGameModeEnabled()
+            ? interaction.fields.getStringSelectValues('gift_code_game_type')?.[0]
+            : getDefaultGameType();
+        const gameType = normalizeGameType(selectedGameType, null);
+        if (!gameType) {
+            return await interaction.reply({
+                content: lang.giftCode.addGiftCode.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
 
-        if (!giftCode) {
+        const rawGiftCodeInput = interaction.fields.getTextInputValue('gift_code_value').trim();
+        const parsedGiftCode = parseGameScopedGiftCode(rawGiftCodeInput, {
+            strictBothMode: false,
+            fallbackGameType: gameType
+        });
+
+        if (!rawGiftCodeInput) {
             return await interaction.reply({
                 content: lang.giftCode.addGiftCode.errors.invalidGiftCode,
                 ephemeral: true
             });
         }
 
+        if (parsedGiftCode.error) {
+            return await interaction.reply({
+                content: parsedGiftCode.error,
+                ephemeral: true
+            });
+        }
+
+        const inputGameType = normalizeGameType(parsedGiftCode.gameType, null);
+        if (inputGameType && inputGameType !== gameType) {
+            return await interaction.reply({
+                content: lang.giftCode.addGiftCode.errors.gameTypeMismatch,
+                ephemeral: true
+            });
+        }
+
+        const giftCode = parsedGiftCode.giftCode;
+
         // Check if gift code already exists
-        const existingCode = await giftCodeQueries.getGiftCode(giftCode);
+        const existingCode = await giftCodeQueries.getGiftCode(giftCode, gameType);
         if (existingCode) {
             return await interaction.reply({
                 content: lang.giftCode.addGiftCode.errors.giftCodeExists,
@@ -137,7 +201,8 @@ async function handleGiftCodeModal(interaction) {
                 status: 'validation'
             }
         ], {
-            adminId: interaction.user.id
+            adminId: interaction.user.id,
+            gameType
         });
 
         if (validationOutcome?.success) {
@@ -147,14 +212,14 @@ async function handleGiftCodeModal(interaction) {
                 const isVipCode = validationOutcome.results?.[0]?.is_vip || false;
 
                 // addGiftCode(giftCode, status, addedBy, source, apiPushed, isVip)
-                await giftCodeQueries.addGiftCode(giftCode, 'active', interaction.user.id, 'manual', false, isVipCode);
+                await giftCodeQueries.addGiftCode(giftCode, 'active', interaction.user.id, 'manual', false, isVipCode, gameType);
 
                 // Set last_validated timestamp to prevent re-validation by validateExistingCodes
-                giftCodeQueries.updateLastValidated(giftCode);
+                giftCodeQueries.updateLastValidated(giftCode, gameType);
 
                 // Start auto-redeem for alliances
                 setImmediate(() => {
-                    startAutoRedeemForAlliances(giftCode, interaction.user.id, lang).catch(async error => {
+                    startAutoRedeemForAlliances(giftCode, interaction.user.id, lang, gameType).catch(async error => {
                         await handleError(interaction, lang, error, 'startAutoRedeemForAlliances', false);
                     });
                 });
@@ -192,10 +257,10 @@ async function handleGiftCodeModal(interaction) {
  * @param {string} adminId - Admin who initiated the process
  * @param {Object} lang - Language object
  */
-async function startAutoRedeemForAlliances(giftCode, adminId, lang) {
+async function startAutoRedeemForAlliances(giftCode, adminId, lang, gameType) {
     try {
         // Get all alliances with auto-redeem enabled, ordered by priority
-        const alliances = await allianceQueries.getAlliancesWithAutoRedeem();
+        const alliances = await allianceQueries.getAlliancesWithAutoRedeem(gameType);
 
         if (alliances.length === 0) {
             return;
@@ -206,7 +271,7 @@ async function startAutoRedeemForAlliances(giftCode, adminId, lang) {
         for (const alliance of alliances) {
             try {
                 // Get all players for this alliance
-                const players = await playerQueries.getPlayersByAlliance(alliance.id);
+                const players = await playerQueries.getPlayersByAlliance(alliance.id, gameType);
 
                 if (players.length === 0) {
                     // console.log(`ℹ️ Alliance "${alliance.name}" has no players, skipping`);
@@ -223,10 +288,12 @@ async function startAutoRedeemForAlliances(giftCode, adminId, lang) {
 
                 const redeemOptions = {
                     adminId,
+                    gameType,
                     allianceContext: {
                         id: alliance.id,
                         name: alliance.name,
-                        channelId: alliance.channel_id || null
+                        channelId: alliance.channel_id || null,
+                        gameType
                     }
                 };
 
@@ -239,12 +306,12 @@ async function startAutoRedeemForAlliances(giftCode, adminId, lang) {
                 }
 
             } catch (allianceError) {
-                await handleError(interaction, lang, allianceError, 'startAutoRedeemForAlliances_allianceError');
+                await handleError(null, lang, allianceError, 'startAutoRedeemForAlliances_allianceError', false);
             }
         }
 
     } catch (error) {
-        await handleError(interaction, lang, error, 'startAutoRedeemForAlliances');
+        await handleError(null, lang, error, 'startAutoRedeemForAlliances', false);
     }
 }
 

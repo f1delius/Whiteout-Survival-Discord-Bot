@@ -2,8 +2,10 @@ const { ButtonBuilder, ButtonStyle, ContainerBuilder, MessageFlags, TextDisplayB
 const { allianceQueries } = require('../utility/database');
 const { parsePaginationCustomId, createUniversalPaginationButtons } = require('../Pagination/universalPagination');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 
 /**
  * Creates a toggle auto-redeem button
@@ -46,8 +48,25 @@ async function handleToggleAutoRedeemButton(interaction) {
             });
         }
 
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_toggle_auto_redeem_game',
+                title: lang.giftCode.autoRedeem.content.title.base,
+                description: lang.giftCode.autoRedeem.content.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
+        const gameType = getDefaultGameType();
+
         // Get all alliances from database
-        const allAlliances = allianceQueries.getAllAlliances();
+        const allAlliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.ALLIANCE_MANAGEMENT);
 
         if (!allAlliances || allAlliances.length === 0) {
             return await interaction.reply({
@@ -57,10 +76,49 @@ async function handleToggleAutoRedeemButton(interaction) {
         }
 
         // Display the alliance selection
-        await displayToggleAutoRedeemPage(interaction, allAlliances, 0, lang);
+        await displayToggleAutoRedeemPage(interaction, allAlliances, 0, lang, gameType);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleToggleAutoRedeemButton');
+    }
+}
+
+async function handleToggleAutoRedeemGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+
+    try {
+        const expectedUserId = interaction.customId.split('_')[5]; // select_toggle_auto_redeem_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.ALLIANCE_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const gameType = normalizeGameType(interaction.values[0], null);
+        if (!gameType) {
+            return await interaction.reply({
+                content: lang.giftCode.autoRedeem.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const allAlliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.ALLIANCE_MANAGEMENT);
+
+        if (!allAlliances || allAlliances.length === 0) {
+            return await interaction.reply({
+                content: lang.giftCode.autoRedeem.errors.noAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        await displayToggleAutoRedeemPage(interaction, allAlliances, 0, lang, gameType);
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleToggleAutoRedeemGameSelection');
     }
 }
 
@@ -72,7 +130,7 @@ async function handleToggleAutoRedeemButton(interaction) {
  * @param {Object} lang - Language object
  * @returns {Promise<void>}
  */
-async function displayToggleAutoRedeemPage(interaction, allAlliances, page, lang) {
+async function displayToggleAutoRedeemPage(interaction, allAlliances, page, lang, gameType = null) {
     // Filter alliances based on showAll parameter (show only assigned alliances)
     const { adminQueries } = require('../utility/database');
     let filteredAlliances = allAlliances;
@@ -88,7 +146,7 @@ async function displayToggleAutoRedeemPage(interaction, allAlliances, page, lang
     }
 
     const itemsPerPage = 24;
-    const totalPages = Math.ceil(filteredAlliances.length / itemsPerPage);
+    const totalPages = Math.max(1, Math.ceil(filteredAlliances.length / itemsPerPage));
     const startIndex = page * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     const currentPageAlliances = filteredAlliances.slice(startIndex, endIndex);
@@ -105,7 +163,7 @@ async function displayToggleAutoRedeemPage(interaction, allAlliances, page, lang
 
     // Create dropdown menu
     const allianceSelect = new StringSelectMenuBuilder()
-        .setCustomId(`toggle_auto_redeem_select_${interaction.user.id}_${page}`)
+        .setCustomId(`toggle_auto_redeem_select_${interaction.user.id}_${page}${gameType ? `_${gameType}` : ''}`)
         .setPlaceholder(lang.giftCode.autoRedeem.selectMenu.selectAlliances.placeholder)
         .setMaxValues(selectOptions.length) // Cannot exceed the number of available options
         .addOptions(selectOptions);
@@ -119,7 +177,8 @@ async function displayToggleAutoRedeemPage(interaction, allAlliances, page, lang
         userId: interaction.user.id,
         currentPage: page,
         totalPages,
-        lang
+        lang,
+        contextData: gameType ? [gameType] : []
     };
 
     components.push(selectRow);
@@ -165,7 +224,7 @@ async function handleToggleAutoRedeemPagination(interaction) {
     try {
 
         // Parse pagination data from custom ID
-        const { userId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId, newPage, contextData } = parsePaginationCustomId(interaction.customId, isMultiGameModeEnabled() ? 1 : 0);
 
         if (interaction.user.id !== userId) {
             return await interaction.reply({
@@ -184,8 +243,8 @@ async function handleToggleAutoRedeemPagination(interaction) {
             });
         }
 
-        // Get all alliances again
-        const allAlliances = allianceQueries.getAllAlliances();
+        const gameType = normalizeGameType(contextData[0] || getDefaultGameType());
+        const allAlliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.ALLIANCE_MANAGEMENT);
 
         if (!allAlliances || allAlliances.length === 0) {
             return await interaction.reply({
@@ -195,7 +254,7 @@ async function handleToggleAutoRedeemPagination(interaction) {
         }
 
         // Display the new page
-        await displayToggleAutoRedeemPage(interaction, allAlliances, newPage, lang);
+        await displayToggleAutoRedeemPage(interaction, allAlliances, newPage, lang, gameType);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleToggleAutoRedeemPagination');
@@ -215,6 +274,7 @@ async function handleToggleAutoRedeemSelect(interaction) {
         // Extract user ID from custom ID for security check
         const customIdParts = interaction.customId.split('_');
         const expectedUserId = customIdParts[4]; // toggle_auto_redeem_select_userId
+        const gameType = normalizeGameType(customIdParts[6] || getDefaultGameType());
 
         // Security check
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
@@ -237,7 +297,7 @@ async function handleToggleAutoRedeemSelect(interaction) {
 
         for (const allianceIdStr of selectedAllianceIds) {
             const allianceId = parseInt(allianceIdStr);
-            const alliance = allianceQueries.getAllianceById(allianceId);
+            const alliance = allianceQueries.getAllianceById(allianceId, gameType);
             if (!alliance) continue;
 
             const newAutoRedeem = alliance.auto_redeem ? 0 : 1; // Invert
@@ -250,7 +310,8 @@ async function handleToggleAutoRedeemSelect(interaction) {
                 alliance.channel_id,
                 alliance.interval,
                 newAutoRedeem,
-                alliance.id
+                alliance.id,
+                gameType
             );
 
             if (newAutoRedeem) {
@@ -296,6 +357,7 @@ async function handleToggleAutoRedeemSelect(interaction) {
 module.exports = {
     createToggleAutoRedeemButton,
     handleToggleAutoRedeemButton,
+    handleToggleAutoRedeemGameSelection,
     handleToggleAutoRedeemSelect,
     handleToggleAutoRedeemPagination
 };

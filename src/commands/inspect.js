@@ -11,6 +11,16 @@ module.exports = {
                 .setDescription('Player ID or nickname')
                 .setRequired(true)
                 .setAutocomplete(true)
+        )
+        .addStringOption(option =>
+            option
+                .setName('game')
+                .setDescription('Game to inspect')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'Whiteout Survival', value: 'wos' },
+                    { name: 'Kingshot', value: 'ks' }
+                )
         ),
 
     async execute(interaction) {

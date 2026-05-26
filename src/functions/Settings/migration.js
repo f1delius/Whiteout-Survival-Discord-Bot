@@ -34,6 +34,8 @@ const {
 	giftCodeChannelQueries,
 	db
 } = require('../utility/database');
+const { getActiveGameTypes, getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 
 /** Maps migration type keys to their DB file requirements and table dependencies */
 const MIGRATION_TYPES = {
@@ -159,8 +161,9 @@ function detectAvailableTypes(foundDbFileNames) {
 /**
  * Clear tables for selected migration types in FK-safe order
  * @param {string[]} selectedTypes - Array of migration type keys
+ * @param {string|null} gameType - Selected game type for game-scoped imports
  */
-function clearSelectedData(selectedTypes) {
+function clearSelectedData(selectedTypes, gameType = null) {
 	const tablesToClear = new Set();
 	for (const typeKey of selectedTypes) {
 		const config = MIGRATION_TYPES[typeKey];
@@ -169,11 +172,42 @@ function clearSelectedData(selectedTypes) {
 		}
 	}
 
+	if (!gameType) {
+		const expandedTablesToClear = expandTablesWithFkDependents(tablesToClear);
+		const deleteOrder = getFkAwareDeleteOrder(expandedTablesToClear);
+
+		db.transaction(() => {
+			for (const table of deleteOrder) {
+				db.prepare(`DELETE FROM ${table}`).run();
+			}
+		})();
+		return;
+	}
+
+	const resolvedGameType = normalizeGameType(gameType, getDefaultGameType());
 	const expandedTablesToClear = expandTablesWithFkDependents(tablesToClear);
 	const deleteOrder = getFkAwareDeleteOrder(expandedTablesToClear);
+	const gameScopedDeleters = {
+		alliance_logs: db.prepare(`
+			DELETE FROM alliance_logs
+			WHERE alliance_id IN (SELECT id FROM alliance WHERE game_type = ?)
+		`),
+		giftcode_usage: db.prepare('DELETE FROM giftcode_usage WHERE game_type = ?'),
+		furnace_changes: db.prepare('DELETE FROM furnace_changes WHERE game_type = ?'),
+		nickname_changes: db.prepare('DELETE FROM nickname_changes WHERE game_type = ?'),
+		id_channels: db.prepare('DELETE FROM id_channels WHERE game_type = ?'),
+		gift_code_channels: db.prepare('DELETE FROM gift_code_channels WHERE game_type = ?'),
+		players: db.prepare('DELETE FROM players WHERE game_type = ?'),
+		alliance: db.prepare('DELETE FROM alliance WHERE game_type = ?')
+	};
 
 	db.transaction(() => {
 		for (const table of deleteOrder) {
+			const scopedDelete = gameScopedDeleters[table];
+			if (scopedDelete) {
+				scopedDelete.run(resolvedGameType);
+				continue;
+			}
 			db.prepare(`DELETE FROM ${table}`).run();
 		}
 	})();
@@ -388,6 +422,7 @@ async function handleDBMigrationModal(interaction) {
 				userId: interaction.user.id,
 				availableTypes: availableTypes,
 				selectedTypes: [...availableTypes],
+				selectedGameType: getDefaultGameType(),
 				expiresAt: Date.now() + 5 * 60 * 1000
 			});
 
@@ -404,6 +439,23 @@ async function handleDBMigrationModal(interaction) {
 				})));
 
 			const selectRow = new ActionRowBuilder().addComponents(selectMenu);
+			const gameRows = [];
+			if (isMultiGameModeEnabled()) {
+				const gameMenu = new StringSelectMenuBuilder()
+					.setCustomId(`db_migration_game_${tempId}_${interaction.user.id}`)
+					.setPlaceholder(lang.common.gameSelection.placeholder)
+					.setMinValues(1)
+					.setMaxValues(1)
+					.addOptions(getActiveGameTypes().map((gameType) => ({
+						label: lang.common.gameSelection.options[gameType] || gameType,
+						value: gameType,
+						default: gameType === getDefaultGameType()
+					})));
+
+				gameRows.push(
+					new ActionRowBuilder().addComponents(gameMenu)
+				);
+			}
 
 			const confirmButton = new ButtonBuilder()
 				.setCustomId(`db_migration_confirm_${tempId}_${interaction.user.id}`)
@@ -431,6 +483,7 @@ async function handleDBMigrationModal(interaction) {
 					.addSeparatorComponents(
 						new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
 					)
+					.addActionRowComponents(...gameRows)
 					.addActionRowComponents(selectRow)
 					.addActionRowComponents(buttonRow)
 			];
@@ -760,7 +813,8 @@ async function handleDBMigrationConfirm(interaction) {
 
 			// Perform migration
 			const selectedTypes = pending.selectedTypes || pending.availableTypes || Object.keys(MIGRATION_TYPES);
-			const migrationResult = await performMigration(dbFiles, extractPath, interaction.user.id, selectedTypes);
+			const selectedGameType = normalizeGameType(pending.selectedGameType, getDefaultGameType());
+			const migrationResult = await performMigration(dbFiles, extractPath, interaction.user.id, selectedTypes, selectedGameType);
 
 			// Clean up
 			await fs.promises.unlink(tempZipPath).catch(() => { });
@@ -919,7 +973,7 @@ function convertOldDateToISO(oldDate) {
  * @param {string[]} selectedTypes - Array of migration type keys to process
  * @returns {Promise<Object>}
  */
-async function performMigration(dbFiles, extractPath, ownerId, selectedTypes) {
+async function performMigration(dbFiles, extractPath, ownerId, selectedTypes, gameType = getDefaultGameType()) {
 	const stats = {
 		alliances: 0,
 		players: 0,
@@ -943,14 +997,14 @@ async function performMigration(dbFiles, extractPath, ownerId, selectedTypes) {
 		}
 
 		// Clear only tables related to selected types
-		clearSelectedData(selectedTypes);
+		clearSelectedData(selectedTypes, gameType);
 
 		// Map to store old alliance ID -> new alliance ID
 		const allianceIdMap = new Map();
 
 		// Step 1: Migrate alliances first (needed for foreign keys)
 		if (selectedTypes.includes('alliances') && dbMap['alliance.sqlite']) {
-			const result = await migrateAlliances(dbMap['alliance.sqlite'], dbMap['giftcode.sqlite'], ownerId, allianceIdMap);
+			const result = await migrateAlliances(dbMap['alliance.sqlite'], dbMap['giftcode.sqlite'], ownerId, allianceIdMap, gameType);
 			stats.alliances = result;
 		}
 
@@ -962,19 +1016,19 @@ async function performMigration(dbFiles, extractPath, ownerId, selectedTypes) {
 
 		// Step 3: Migrate players (requires alliances to exist)
 		if (selectedTypes.includes('players') && dbMap['users.sqlite']) {
-			const result = await migratePlayers(dbMap['users.sqlite'], allianceIdMap, ownerId);
+			const result = await migratePlayers(dbMap['users.sqlite'], allianceIdMap, ownerId, gameType);
 			stats.players = result;
 		}
 
 		// Step 4: Migrate ID channels
 		if (selectedTypes.includes('idChannels') && dbMap['id_channel.sqlite']) {
-			const result = await migrateIdChannels(dbMap['id_channel.sqlite'], allianceIdMap);
+			const result = await migrateIdChannels(dbMap['id_channel.sqlite'], allianceIdMap, gameType);
 			stats.idChannels = result;
 		}
 
 		// Step 5: Migrate changes
 		if (selectedTypes.includes('changes') && dbMap['changes.sqlite']) {
-			const result = await migrateChanges(dbMap['changes.sqlite']);
+			const result = await migrateChanges(dbMap['changes.sqlite'], gameType);
 			stats.furnaceChanges = result.furnace;
 			stats.nicknameChanges = result.nickname;
 		}
@@ -1007,7 +1061,7 @@ async function performMigration(dbFiles, extractPath, ownerId, selectedTypes) {
  * @param {Map} allianceIdMap - Map to store old->new alliance ID mappings
  * @returns {Promise<number>}
  */
-async function migrateAlliances(alliancePath, giftcodePath, ownerId, allianceIdMap) {
+async function migrateAlliances(alliancePath, giftcodePath, ownerId, allianceIdMap, gameType = getDefaultGameType()) {
 	const oldDb = new Database(alliancePath, { readonly: true });
 	let giftcodeDb = null;
 
@@ -1054,7 +1108,8 @@ async function migrateAlliances(alliancePath, giftcodePath, ownerId, allianceIdM
 				settings?.channel_id || null,                   // channel_id (already TEXT from query)
 				settings?.interval?.toString() || null,        // interval
 				autoRedeem,                                     // auto_redeem from giftcodecontrol
-				ownerId                                         // created_by (owner)
+				ownerId,                                        // created_by (owner)
+				gameType                                        // game_type
 			);
 
 			// Store mapping: old alliance_id -> new alliance id
@@ -1070,7 +1125,7 @@ async function migrateAlliances(alliancePath, giftcodePath, ownerId, allianceIdM
 				for (const row of giftCodeChannels) {
 					if (row.channel_id) {
 						try {
-							giftCodeChannelQueries.addChannel(row.channel_id, ownerId);
+							giftCodeChannelQueries.addChannel(row.channel_id, ownerId, gameType);
 						} catch (e) {
 							// Skip duplicates
 						}
@@ -1095,7 +1150,7 @@ async function migrateAlliances(alliancePath, giftcodePath, ownerId, allianceIdM
  * @param {string} ownerId - Owner user ID
  * @returns {Promise<number>}
  */
-async function migratePlayers(usersPath, allianceIdMap, ownerId) {
+async function migratePlayers(usersPath, allianceIdMap, ownerId, gameType = getDefaultGameType()) {
 	const oldDb = new Database(usersPath, { readonly: true });
 
 	try {
@@ -1122,7 +1177,8 @@ async function migratePlayers(usersPath, allianceIdMap, ownerId) {
 					old.kid,                    // state (using old.kid)
 					null,                       // image_url (set to null)
 					newAllianceId,              // alliance_id (mapped to new ID)
-					ownerId                     // added_by (owner)
+					ownerId,                    // added_by (owner)
+					gameType                    // game_type
 				);
 				count++;
 			} catch (e) {
@@ -1201,7 +1257,7 @@ async function migrateAdmins(settingsPath, allianceIdMap) {
  * @param {Map} allianceIdMap - Map of old->new alliance IDs
  * @returns {Promise<number>}
  */
-async function migrateIdChannels(idChannelPath, allianceIdMap) {
+async function migrateIdChannels(idChannelPath, allianceIdMap, gameType = getDefaultGameType()) {
 	const oldDb = new Database(idChannelPath, { readonly: true });
 
 	try {
@@ -1223,7 +1279,8 @@ async function migrateIdChannels(idChannelPath, allianceIdMap) {
 					old.guild_id || null,                  // guide_id (mapped from guild_id, already TEXT from query)
 					newAllianceId,                         // alliance_id (mapped to new ID)
 					old.channel_id || null,                // channel_id (already TEXT from query)
-					old.created_by || null                 // linked_by (already TEXT from query)
+					old.created_by || null,                // linked_by (already TEXT from query)
+					gameType                               // game_type
 				);
 				count++;
 			} catch (e) {
@@ -1243,8 +1300,9 @@ async function migrateIdChannels(idChannelPath, allianceIdMap) {
  * @param {string} changesPath - Path to changes.sqlite
  * @returns {Promise<Object>}
  */
-async function migrateChanges(changesPath) {
+async function migrateChanges(changesPath, gameType = getDefaultGameType()) {
 	const oldDb = new Database(changesPath, { readonly: true });
+	const resolvedGameType = normalizeGameType(gameType, getDefaultGameType());
 
 	try {
 		const furnaceChanges = oldDb.prepare('SELECT * FROM furnace_changes').all();
@@ -1258,6 +1316,7 @@ async function migrateChanges(changesPath) {
 		for (const old of furnaceChanges.reverse()) {
 			try {
 				furnaceChangeQueries.rawInsert.run(
+					resolvedGameType,
 					old.fid,
 					old.old_furnace_lv,
 					old.new_furnace_lv,
@@ -1274,6 +1333,7 @@ async function migrateChanges(changesPath) {
 		for (const old of nicknameChanges.reverse()) {
 			try {
 				nicknameChangeQueries.rawInsert.run(
+					resolvedGameType,
 					old.fid,
 					old.old_nickname,
 					old.new_nickname,
@@ -1537,11 +1597,41 @@ async function handleDBMigrationSelect(interaction) {
 	}
 }
 
+/**
+ * Handle migration game select menu interaction
+ * @param {import('discord.js').StringSelectMenuInteraction} interaction
+ */
+async function handleDBMigrationGameSelect(interaction) {
+	const { lang } = getUserInfo(interaction.user.id);
+	try {
+		const parts = interaction.customId.split('_');
+		const tempId = parts[3];
+		const expectedUserId = parts[4];
+
+		if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+		const pending = global.pendingDBMigrations?.get(tempId);
+		if (!pending || pending.expiresAt < Date.now()) {
+			global.pendingDBMigrations?.delete(tempId);
+			return await interaction.reply({
+				content: lang.settings.migration.errors.uploadExpired,
+				ephemeral: true
+			});
+		}
+
+		pending.selectedGameType = normalizeGameType(interaction.values[0], getDefaultGameType());
+		await interaction.deferUpdate();
+	} catch (error) {
+		await handleError(interaction, lang, error, 'handleDBMigrationGameSelect');
+	}
+}
+
 module.exports = {
 	createDBMigrationButton,
 	handleDBMigrationButton,
 	handleDBMigrationModal,
 	handleDBMigrationConfirm,
 	handleDBMigrationCancel,
-	handleDBMigrationSelect
+	handleDBMigrationSelect,
+	handleDBMigrationGameSelect
 };

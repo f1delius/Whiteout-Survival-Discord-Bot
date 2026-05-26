@@ -21,8 +21,10 @@ const { LOG_CODES } = require('../utility/AdminLogs');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createProcess } = require('../Processes/createProcesses');
 const { queueManager } = require('../Processes/queueManager');
-const { hasPermission, handleError, getUserInfo, assertUserMatches, getAlliancesForUser, updateComponentsV2AfterSeparator, createAllianceSelectionComponents } = require('../utility/commonFunctions');
+const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator, createAllianceSelectionComponents, createGameSelectionComponents, getAlliancesForUser, getAlliancesForUserByGame } = require('../utility/commonFunctions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { getGameProfile, normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji, getGlobalEmojiMap } = require('../utility/emojis');
 
 // Global cache for ID channels
@@ -263,7 +265,9 @@ function createChannelRemovalContainer(interaction, idChannels, lang, page = 0) 
 /**
  * Creates alliance selection embed using shared utility
  */
-function createAllianceSelectionContainer(interaction, alliances, lang, page = 0) {
+function createAllianceSelectionContainer(interaction, alliances, lang, page = 0, gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, null);
+
     return createAllianceSelectionComponents({
         interaction,
         alliances,
@@ -275,7 +279,8 @@ function createAllianceSelectionContainer(interaction, alliances, lang, page = 0
         title: lang.players.idChannel.content.title.base,
         description: lang.players.idChannel.content.description.selectAlliance,
         accentColor: 0x3498db, // Blue
-        showAll: false
+        showAll: false,
+        contextData: resolvedGameType ? [resolvedGameType] : []
     });
 }
 
@@ -287,22 +292,27 @@ async function handleIdChannelPagination(interaction) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
     try {
         // Extract user ID and page from custom ID
-        const { userId: expectedUserId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId: expectedUserId, newPage, contextData } = parsePaginationCustomId(
+            interaction.customId,
+            isMultiGameModeEnabled() ? 1 : 0
+        );
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        // Get alliances based on user permissions
-        const alliances = getAlliancesForUser(adminData);
+        const gameType = normalizeGameType(contextData[0] || getDefaultGameType());
+        const alliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.PLAYER_MANAGEMENT);
         if (alliances.length === 0) {
             return await interaction.reply({
-                content: lang.players.idChannel.errors.noAlliances,
+                content: isMultiGameModeEnabled()
+                    ? lang.players.idChannel.errors.noAlliancesForGame
+                    : lang.players.idChannel.errors.noAlliances,
                 ephemeral: true
             });
         }
 
         // Create alliance selection embed and dropdown for new page
-        const { components } = createAllianceSelectionContainer(interaction, alliances, lang, newPage);
+        const { components } = createAllianceSelectionContainer(interaction, alliances, lang, newPage, gameType);
 
         // Update the message
         await interaction.update({
@@ -312,6 +322,52 @@ async function handleIdChannelPagination(interaction) {
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleIdChannelPagination');
+    }
+}
+
+/**
+ * Handles game selection before alliance selection for ID channels in both mode
+ * @param {import('discord.js').StringSelectMenuInteraction} interaction
+ */
+async function handleIdChannelGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_id_channel_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const selectedGameType = normalizeGameType(interaction.values[0], null);
+        if (!selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.idChannel.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const alliances = getAlliancesForUserByGame(adminData, selectedGameType, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (alliances.length === 0) {
+            return await interaction.reply({
+                content: lang.players.idChannel.errors.noAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        const { components } = createAllianceSelectionContainer(interaction, alliances, lang, 0, selectedGameType);
+
+        await interaction.update({
+            components,
+            flags: MessageFlags.IsComponentsV2
+        });
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleIdChannelGameSelection');
     }
 }
 
@@ -374,8 +430,22 @@ async function handleIdChannelAdd(interaction) {
             });
         }
 
-        // Get alliances based on user permissions
-        const alliances = getAlliancesForUser(adminData);
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_id_channel_game',
+                title: lang.players.idChannel.content.title.base,
+                description: lang.players.idChannel.content.description.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
+        const alliances = getAlliancesForUserByGame(adminData, getDefaultGameType(), PERMISSIONS.PLAYER_MANAGEMENT);
 
         if (alliances.length === 0) {
             return await interaction.reply({
@@ -385,7 +455,7 @@ async function handleIdChannelAdd(interaction) {
         }
 
         // Create alliance selection embed and dropdown with pagination (page 0)
-        const { components } = createAllianceSelectionContainer(interaction, alliances, lang);
+        const { components } = createAllianceSelectionContainer(interaction, alliances, lang, 0, getDefaultGameType());
 
         await interaction.update({
             components: components,
@@ -454,19 +524,20 @@ function getIdChannelsForUser(adminData) {
         let alliances;
         // Owner and full access can see all alliances
         if (adminData.is_owner || (adminData.permissions & PERMISSIONS.FULL_ACCESS)) {
-            alliances = allianceQueries.getAllAlliances();
+            alliances = allianceQueries.getAllAlliancesAny();
         } else if (adminData.permissions & PERMISSIONS.PLAYER_MANAGEMENT) {
             const allianceIds = JSON.parse(adminData.alliances || '[]');
             alliances = allianceIds
-                .map(id => allianceQueries.getAllianceById(id))
+                .map(id => allianceQueries.getAllianceByIdAny(id))
                 .filter(alliance => alliance !== undefined);
         } else {
             return [];
         }
 
         // Get ID channels for these alliances
-        const allianceIds = alliances.map(a => a.id);
-        const idChannels = idChannelQueries.getChannelsByAllianceIds(allianceIds);
+        const idChannels = alliances.flatMap(alliance =>
+            idChannelQueries.getChannelsByAlliance(alliance.id, alliance.game_type)
+        );
 
         // Enrich with alliance names and channel names (if available)
         return idChannels.map(channel => {
@@ -509,7 +580,7 @@ async function handleIdChannelRemoveSelect(interaction) {
 
         // Get selected channel ID
         const selectedId = parseInt(interaction.values[0]);
-        const channelData = idChannelQueries.getChannelById(selectedId);
+        const channelData = getIdChannelsForUser(adminData).find(channel => channel.id === selectedId);
 
         if (!channelData) {
             return await interaction.reply({
@@ -530,7 +601,7 @@ async function handleIdChannelRemoveSelect(interaction) {
         }
 
         // Remove from database
-        idChannelQueries.removeIdChannel(selectedId);
+        idChannelQueries.removeIdChannel(selectedId, channelData.game_type);
 
         // Update cache - remove only this specific entry
         removeFromIdChannelCache(channelData.channel_id, selectedId);
@@ -577,7 +648,9 @@ async function handleIdChannelAllianceSelection(interaction) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
     try {
         // Extract user ID from custom ID
-        const expectedUserId = interaction.customId.split('_')[4]; // id_channel_alliance_select_userId_page
+        const customIdParts = interaction.customId.split('_');
+        const expectedUserId = customIdParts[4]; // id_channel_alliance_select_userId_page_gameType?
+        const selectedGameType = normalizeGameType(customIdParts[6], null);
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
@@ -594,7 +667,7 @@ async function handleIdChannelAllianceSelection(interaction) {
 
         // Get selected alliance
         const selectedAllianceId = parseInt(interaction.values[0]);
-        const alliance = allianceQueries.getAllianceById(selectedAllianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(selectedAllianceId);
 
         if (!alliance) {
             return await interaction.reply({
@@ -603,9 +676,16 @@ async function handleIdChannelAllianceSelection(interaction) {
             });
         }
 
+        if (selectedGameType && alliance.game_type !== selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.idChannel.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
         // Create channel select menu (only text channels)
         const channelSelect = new ChannelSelectMenuBuilder()
-            .setCustomId(`id_channel_select_${selectedAllianceId}_${interaction.user.id}`)
+            .setCustomId(`id_channel_select_${selectedAllianceId}_${alliance.game_type}_${interaction.user.id}`)
             .setPlaceholder(lang.players.idChannel.selectMenu.selectChannel.placeholder)
             .setChannelTypes(ChannelType.GuildText);
 
@@ -647,9 +727,10 @@ async function handleIdChannelSelect(interaction) {
 
     try {
         // Extract alliance ID and user ID from custom ID
-        const parts = interaction.customId.split('_'); // id_channel_select_allianceId_userId
+        const parts = interaction.customId.split('_'); // id_channel_select_allianceId_gameType_userId
         const allianceId = parseInt(parts[3]);
-        const expectedUserId = parts[4];
+        const selectedGameType = normalizeGameType(parts[4], null);
+        const expectedUserId = parts[5];
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
@@ -664,12 +745,19 @@ async function handleIdChannelSelect(interaction) {
         }
 
         // Get alliance
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         if (!alliance) {
             return await interaction.reply({
                 content: lang.players.idChannel.errors.notFound,
                 embeds: [],
                 components: []
+            });
+        }
+
+        if (selectedGameType && alliance.game_type !== selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.idChannel.errors.invalidGameType,
+                ephemeral: true
             });
         }
 
@@ -683,7 +771,7 @@ async function handleIdChannelSelect(interaction) {
         }
 
         // Check if this channel is already a gift code channel
-        const isGiftCodeChannel = giftCodeChannelQueries.getChannelByChannelId(selectedChannel.id);
+        const isGiftCodeChannel = giftCodeChannelQueries.getChannelByChannelIdAny(selectedChannel.id);
         if (isGiftCodeChannel) {
             return await interaction.reply({
                 content: lang.players.idChannel.errors.channelIsGiftCodeChannel
@@ -693,12 +781,25 @@ async function handleIdChannelSelect(interaction) {
         }
 
         // Check if this specific alliance is already linked to this channel
-        const existingChannels = idChannelQueries.getChannelsByChannelId(selectedChannel.id);
+        const existingChannels = idChannelQueries.getChannelsByChannelId(alliance.game_type, selectedChannel.id);
         if (existingChannels.some(ch => ch.alliance_id === allianceId)) {
             return await interaction.reply({
                 content: lang.players.idChannel.errors.channelAlreadyLinked
                     .replace('{channel}', `<#${selectedChannel.id}>`)
                     .replace('{alliance}', alliance.name),
+                ephemeral: true
+            });
+        }
+
+        const conflictingChannels = idChannelQueries.getChannelsByChannelIdAny(selectedChannel.id)
+            .filter(channel => channel.game_type !== alliance.game_type);
+        if (conflictingChannels.length > 0) {
+            const conflictingAlliance = allianceQueries.getAllianceByIdAny(conflictingChannels[0].alliance_id);
+            return await interaction.reply({
+                content: lang.players.idChannel.errors.channelLinkedToOtherGame
+                    .replace('{channel}', `<#${selectedChannel.id}>`)
+                    .replace('{alliance}', conflictingAlliance?.name || lang.players.idChannel.content.unknownAlliance)
+                    .replace('{game}', getGameProfile(conflictingChannels[0].game_type).displayName),
                 ephemeral: true
             });
         }
@@ -709,7 +810,8 @@ async function handleIdChannelSelect(interaction) {
                 interaction.guild.id,
                 allianceId,
                 selectedChannel.id,
-                adminData.id
+                adminData.id,
+                alliance.game_type
             );
 
             adminLogQueries.addLog(
@@ -786,12 +888,13 @@ async function handleIdChannelMessage(message) {
         const existingPlayers = [];
 
         for (const playerId of playerIdsArray) {
-            const existingPlayer = playerQueries.getPlayer(playerId);
+            const existingMatches = playerQueries.getPlayersByFidAny(playerId);
+            const existingPlayer = existingMatches[0];
             if (existingPlayer) {
                 existingPlayers.push({
                     id: playerId,
                     nickname: existingPlayer.nickname,
-                    alliance: allianceQueries.getAllianceById(existingPlayer.alliance_id)?.name || 'Unknown'
+                    alliance: allianceQueries.getAllianceById(existingPlayer.alliance_id, existingPlayer.game_type)?.name || 'Unknown'
                 });
             }
         }
@@ -822,7 +925,7 @@ async function handleIdChannelMessage(message) {
 
         // Get valid alliances from cache entries
         const alliances = channelEntries
-            .map(entry => allianceQueries.getAllianceById(entry.alliance_id))
+            .map(entry => allianceQueries.getAllianceByIdAny(entry.alliance_id))
             .filter(Boolean);
 
         if (alliances.length === 0) return;
@@ -866,12 +969,12 @@ async function processIdChannelPlayers(message, alliance, sanitizedPlayerIds, la
     const { playerQueries } = require('../utility/database');
 
     for (const playerId of playerIdsArray) {
-        const existingPlayer = playerQueries.getPlayer(playerId);
+        const existingPlayer = playerQueries.getPlayer(playerId, alliance.game_type);
         if (existingPlayer) {
             existingPlayers.push({
                 id: playerId,
                 nickname: existingPlayer.nickname,
-                alliance: allianceQueries.getAllianceById(existingPlayer.alliance_id)?.name || 'Unknown'
+                alliance: allianceQueries.getAllianceById(existingPlayer.alliance_id, existingPlayer.game_type)?.name || 'Unknown'
             });
         }
     }
@@ -915,6 +1018,7 @@ async function processIdChannelPlayers(message, alliance, sanitizedPlayerIds, la
         alliance_id: alliance.id,
         player_ids: sanitizedPlayerIds,
         action: 'addplayer',
+        game_type: alliance.game_type,
         id_channel_message_id: message.id,
         id_channel_channel_id: message.channel.id,
         id_channel_reply_id: replyMessageId
@@ -996,7 +1100,7 @@ async function handleIdChannelMessageAllianceSelect(interaction) {
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const selectedAllianceId = parseInt(interaction.values[0]);
-        const alliance = allianceQueries.getAllianceById(selectedAllianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(selectedAllianceId);
         if (!alliance) {
             return await interaction.reply({
                 content: lang.players.idChannel.errors.notFound,
@@ -1072,7 +1176,7 @@ async function handleIdChannelMessagePagination(interaction) {
         }
 
         const alliances = channelEntries
-            .map(entry => allianceQueries.getAllianceById(entry.alliance_id))
+            .map(entry => allianceQueries.getAllianceByIdAny(entry.alliance_id))
             .filter(Boolean);
 
         const { embeds, components } = createMessageAllianceSelection(
@@ -1260,8 +1364,8 @@ async function handleAutoCleanSelect(interaction) {
             return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
         }
 
-        const channelDbId = interaction.values[0];
-        const channelData = idChannelQueries.getChannelById(parseInt(channelDbId));
+        const channelDbId = parseInt(interaction.values[0]);
+        const channelData = getIdChannelsForUser(adminData).find(channel => channel.id === channelDbId);
         if (!channelData) {
             return await interaction.reply({ content: lang.players.idChannel.autoClean.errors.channelNotFound, ephemeral: true });
         }
@@ -1275,13 +1379,13 @@ async function handleAutoCleanSelect(interaction) {
             : lang.players.idChannel.autoClean.content.disabled;
 
         const setButton = new ButtonBuilder()
-            .setCustomId(`id_channel_autoclean_set_${channelDbId}_${interaction.user.id}`)
+            .setCustomId(`id_channel_autoclean_set_${channelDbId}_${channelData.game_type}_${interaction.user.id}`)
             .setLabel(lang.players.idChannel.autoClean.buttons.set)
             .setStyle(ButtonStyle.Success)
             .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1004'));
 
         const disableButton = new ButtonBuilder()
-            .setCustomId(`id_channel_autoclean_disable_${channelDbId}_${interaction.user.id}`)
+            .setCustomId(`id_channel_autoclean_disable_${channelDbId}_${channelData.game_type}_${interaction.user.id}`)
             .setLabel(lang.players.idChannel.autoClean.buttons.disable)
             .setStyle(ButtonStyle.Danger)
             .setDisabled(currentInterval === 0)
@@ -1317,16 +1421,17 @@ async function handleAutoCleanSelect(interaction) {
 async function handleAutoCleanSetButton(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        const parts = interaction.customId.split('_'); // id_channel_autoclean_set_channelDbId_userId
+        const parts = interaction.customId.split('_'); // id_channel_autoclean_set_channelDbId_gameType_userId
         const channelDbId = parts[4];
-        const expectedUserId = parts[5];
+        const gameType = parts[5];
+        const expectedUserId = parts[6];
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const channelData = idChannelQueries.getChannelById(parseInt(channelDbId));
+        const channelData = idChannelQueries.getChannelById(parseInt(channelDbId), gameType);
         const currentInterval = channelData?.auto_clean || 0;
 
         const modal = new ModalBuilder()
-            .setCustomId(`id_channel_autoclean_modal_${channelDbId}_${interaction.user.id}`)
+            .setCustomId(`id_channel_autoclean_modal_${channelDbId}_${gameType}_${interaction.user.id}`)
             .setTitle(lang.players.idChannel.autoClean.modal.title);
 
         const intervalInput = new TextInputBuilder()
@@ -1358,9 +1463,10 @@ async function handleAutoCleanSetButton(interaction) {
 async function handleAutoCleanModal(interaction) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
     try {
-        const parts = interaction.customId.split('_'); // id_channel_autoclean_modal_channelDbId_userId
+        const parts = interaction.customId.split('_'); // id_channel_autoclean_modal_channelDbId_gameType_userId
         const channelDbId = parseInt(parts[4]);
-        const expectedUserId = parts[5];
+        const gameType = parts[5];
+        const expectedUserId = parts[6];
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.PLAYER_MANAGEMENT);
@@ -1378,12 +1484,12 @@ async function handleAutoCleanModal(interaction) {
             });
         }
 
-        const channelData = idChannelQueries.getChannelById(channelDbId);
+        const channelData = idChannelQueries.getChannelById(channelDbId, gameType);
         if (!channelData) {
             return await interaction.reply({ content: lang.players.idChannel.autoClean.errors.channelNotFound, ephemeral: true });
         }
 
-        idChannelQueries.updateAutoClean(interval, channelDbId);
+        idChannelQueries.updateAutoClean(interval, channelDbId, gameType);
 
         // Update the scheduler
         const { autoCleanScheduler } = require('./idChannelAutoClean');
@@ -1415,9 +1521,10 @@ async function handleAutoCleanModal(interaction) {
 async function handleAutoCleanDisable(interaction) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
     try {
-        const parts = interaction.customId.split('_'); // id_channel_autoclean_disable_channelDbId_userId
+        const parts = interaction.customId.split('_'); // id_channel_autoclean_disable_channelDbId_gameType_userId
         const channelDbId = parseInt(parts[4]);
-        const expectedUserId = parts[5];
+        const gameType = parts[5];
+        const expectedUserId = parts[6];
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.PLAYER_MANAGEMENT);
@@ -1425,12 +1532,12 @@ async function handleAutoCleanDisable(interaction) {
             return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
         }
 
-        const channelData = idChannelQueries.getChannelById(channelDbId);
+        const channelData = idChannelQueries.getChannelById(channelDbId, gameType);
         if (!channelData) {
             return await interaction.reply({ content: lang.players.idChannel.autoClean.errors.channelNotFound, ephemeral: true });
         }
 
-        idChannelQueries.updateAutoClean(0, channelDbId);
+        idChannelQueries.updateAutoClean(0, channelDbId, gameType);
 
         // Remove from scheduler
         const { autoCleanScheduler } = require('./idChannelAutoClean');
@@ -1457,6 +1564,7 @@ async function handleAutoCleanDisable(interaction) {
 module.exports = {
     createIdChannelButton,
     handleIdChannelButton,
+    handleIdChannelGameSelection,
     handleIdChannelAdd,
     handleIdChannelRemove,
     handleIdChannelRemoveSelect,

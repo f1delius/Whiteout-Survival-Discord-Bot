@@ -5,7 +5,9 @@ const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { stopAutoRefresh } = require('./refreshAlliance');
 const { updateIdChannelCache, removeFromIdChannelCache } = require('../Players/idChannel');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
 
 /**
@@ -47,36 +49,35 @@ async function handleDeleteAllianceButton(interaction) {
             });
         }
 
-        // Get alliances based on permissions
-        let alliances;
-        if (hasFullAccess) {
-            // Owner and full access admins can see all alliances
-            alliances = allianceQueries.getAllAlliances();
-        } else if (hasAccess) {
-            // Regular admins with alliance management can only see assigned alliances
-            const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
-            if (assignedAllianceIds.length === 0) {
-                return await interaction.reply({
-                    content: lang.alliance.deleteAlliance.errors.noAssignedAlliances,
-                    ephemeral: true
-                });
-            }
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_delete_alliance_game',
+                title: lang.alliance.deleteAlliance.content.title.base,
+                description: lang.alliance.deleteAlliance.content.selectGameDescription,
+                accentColor: 16711680
+            });
 
-            // Get only assigned alliances
-            alliances = allianceQueries.getAllAlliances().filter(alliance =>
-                assignedAllianceIds.includes(alliance.id)
-            );
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
         }
+
+        const alliances = getAlliancesForUserByGame(adminData, getDefaultGameType(), PERMISSIONS.ALLIANCE_MANAGEMENT);
 
         if (alliances.length === 0) {
             return await interaction.reply({
-                content: lang.alliance.deleteAlliance.errors.noAlliancesFound,
+                content: hasFullAccess
+                    ? lang.alliance.deleteAlliance.errors.noAlliancesFound
+                    : lang.alliance.deleteAlliance.errors.noAssignedAlliances,
                 ephemeral: true
             });
         }
 
         // Show alliance selection with pagination (page 0)
-        await showDeleteAllianceSelection(interaction, 0, lang, alliances);
+        await showDeleteAllianceSelection(interaction, 0, lang, alliances, getDefaultGameType());
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleDeleteAllianceButton');
@@ -90,23 +91,12 @@ async function handleDeleteAllianceButton(interaction) {
  * @param {Object} lang - Language object
  * @param {Array} alliances - Array of alliances to display (filtered based on permissions)
  */
-async function showDeleteAllianceSelection(interaction, page = 0, lang = {}, alliances = null) {
+async function showDeleteAllianceSelection(interaction, page = 0, lang = {}, alliances = null, gameType = getDefaultGameType()) {
+    const resolvedGameType = normalizeGameType(gameType);
     // If alliances not provided, get them based on user permissions
     if (!alliances) {
         const adminData = adminQueries.getAdmin(interaction.user.id);
-        const hasFullAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS);
-        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.ALLIANCE_MANAGEMENT);
-
-        if (hasFullAccess) {
-            alliances = allianceQueries.getAllAlliances();
-        } else if (hasAccess) {
-            const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
-            alliances = allianceQueries.getAllAlliances().filter(alliance =>
-                assignedAllianceIds.includes(alliance.id)
-            );
-        } else {
-            alliances = [];
-        }
+        alliances = getAlliancesForUserByGame(adminData, resolvedGameType, PERMISSIONS.ALLIANCE_MANAGEMENT);
     }
 
     const itemsPerPage = 24;
@@ -117,7 +107,7 @@ async function showDeleteAllianceSelection(interaction, page = 0, lang = {}, all
 
     // Create dropdown menu with alliances
     const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId(`select_alliance_delete_${interaction.user.id}_${page}`)
+        .setCustomId(`select_alliance_delete_${interaction.user.id}_${page}_${resolvedGameType}`)
         .setPlaceholder(lang.alliance.deleteAlliance.selectMenu.selectAlliance.placeholder)
         .setMinValues(1)
         .setMaxValues(1);
@@ -126,7 +116,7 @@ async function showDeleteAllianceSelection(interaction, page = 0, lang = {}, all
     // Batch fetch player counts (avoids N+1 query)
     const allianceIds = currentPageAlliances.map(a => a.id);
     const playerCountResults = allianceIds.length > 0
-        ? playerQueries.getPlayerCountsByAllianceIds(allianceIds)
+        ? playerQueries.getPlayerCountsByAllianceIds(allianceIds, resolvedGameType)
         : [];
     const playerCountMap = new Map(playerCountResults.map(r => [r.alliance_id, r.player_count]));
 
@@ -154,7 +144,8 @@ async function showDeleteAllianceSelection(interaction, page = 0, lang = {}, all
         userId: interaction.user.id,
         currentPage: page,
         totalPages: totalPages,
-        lang: lang
+        lang: lang,
+        contextData: [resolvedGameType]
     });
     components.push(selectRow);
     if (paginationRow) {
@@ -197,13 +188,14 @@ async function handleDeleteAlliancePagination(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
         // Extract user ID and page from custom ID
-        const { userId: expectedUserId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId: expectedUserId, newPage, contextData } = parsePaginationCustomId(interaction.customId, 1);
+        const gameType = contextData[0] || getDefaultGameType();
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         // Show new page
-        await showDeleteAllianceSelection(interaction, newPage, lang);
+        await showDeleteAllianceSelection(interaction, newPage, lang, null, gameType);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleDeleteAlliancePagination');
@@ -220,16 +212,18 @@ async function handleDeleteAllianceSelection(interaction) {
     try {
         // Extract user ID from custom ID
         const customIdParts = interaction.customId.split('_');
-        const expectedUserId = customIdParts[3]; // select_alliance_delete_userId_page
+        const expectedUserId = customIdParts[3]; // select_alliance_delete_userId_page_gameType
+        const selectedGameType = customIdParts[5] || getDefaultGameType();
+        const resolvedGameType = normalizeGameType(selectedGameType);
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         // Get selected alliance ID
         const allianceId = parseInt(interaction.values[0]);
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
 
-        if (!alliance) {
+        if (!alliance || alliance.game_type !== resolvedGameType) {
             return await interaction.reply({
                 content: lang.common.error,
                 ephemeral: true
@@ -259,7 +253,7 @@ async function handleDeleteAllianceSelection(interaction) {
         }
 
         // Get player count for this alliance
-        const playersInAlliance = playerQueries.getPlayersByAlliance(allianceId);
+        const playersInAlliance = playerQueries.getPlayersByAlliance(allianceId, alliance.game_type);
         const playerCount = playersInAlliance.length;
 
         // If owner or full access, delete immediately
@@ -271,6 +265,46 @@ async function handleDeleteAllianceSelection(interaction) {
         }
     } catch (error) {
         await handleError(interaction, lang, error, 'handleDeleteAllianceSelection');
+    }
+}
+
+async function handleDeleteAllianceGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_delete_alliance_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasFullAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS);
+        const hasAccess = hasPermission(adminData, PERMISSIONS.ALLIANCE_MANAGEMENT, PERMISSIONS.FULL_ACCESS);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const gameType = normalizeGameType(interaction.values[0], null);
+        if (!gameType) {
+            return await interaction.reply({
+                content: lang.alliance.deleteAlliance.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const alliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.ALLIANCE_MANAGEMENT);
+        if (!alliances || alliances.length === 0) {
+            return await interaction.reply({
+                content: hasFullAccess
+                    ? lang.alliance.deleteAlliance.errors.noAlliancesForGame
+                    : lang.alliance.deleteAlliance.errors.noAssignedAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        await showDeleteAllianceSelection(interaction, 0, lang, alliances, gameType);
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleDeleteAllianceGameSelection');
     }
 }
 
@@ -507,7 +541,7 @@ async function performAllianceDeletion(interaction, allianceId, requesterId = nu
     const { lang } = getUserInfo(interaction.user.id);
     try {
         // Get alliance data before deletion
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         if (!alliance) {
             return await interaction.reply({
                 content: lang.alliance.deleteAlliance.errors.allianceNotFound,
@@ -516,7 +550,7 @@ async function performAllianceDeletion(interaction, allianceId, requesterId = nu
         }
 
         // Get all players assigned to this alliance
-        const playersInAlliance = playerQueries.getPlayersByAlliance(allianceId);
+        const playersInAlliance = playerQueries.getPlayersByAlliance(allianceId, alliance.game_type);
         const playerCount = playersInAlliance.length;
 
         try {
@@ -525,13 +559,13 @@ async function performAllianceDeletion(interaction, allianceId, requesterId = nu
 
             // Delete all players assigned to this alliance
             for (const player of playersInAlliance) {
-                playerQueries.deletePlayer(player.fid);
+                playerQueries.deletePlayer(player.fid, alliance.game_type);
             }
 
             // Delete alliance ID channels
-            const idChannels = idChannelQueries.getChannelsByAlliance(allianceId);
+            const idChannels = idChannelQueries.getChannelsByAlliance(allianceId, alliance.game_type);
             for (const channel of idChannels) {
-                idChannelQueries.deleteChannel(channel.id);
+                idChannelQueries.deleteChannel(channel.id, alliance.game_type);
                 // Update cache to remove only this alliance's entry
                 removeFromIdChannelCache(channel.channel_id, channel.id);
             }
@@ -544,7 +578,7 @@ async function performAllianceDeletion(interaction, allianceId, requesterId = nu
             }
 
             // Delete the alliance
-            allianceQueries.deleteAlliance(allianceId);
+            allianceQueries.deleteAlliance(allianceId, alliance.game_type);
 
             // Remove alliance assignment from all admins who had it assigned
             const allAdmins = adminQueries.getAllAdmins();
@@ -568,7 +602,7 @@ async function performAllianceDeletion(interaction, allianceId, requesterId = nu
 
 
             // Update priorities of remaining alliances to fill the gap
-            const allRemainingAlliances = allianceQueries.getAllAlliances();
+            const allRemainingAlliances = allianceQueries.getAllAlliances(alliance.game_type);
             const alliancesToUpdate = allRemainingAlliances.filter(a => a.priority > deletedAlliancePriority);
 
             // Sort by current priority to ensure correct order
@@ -584,7 +618,8 @@ async function performAllianceDeletion(interaction, allianceId, requesterId = nu
                     allianceToUpdate.channel_id,
                     allianceToUpdate.interval,
                     allianceToUpdate.auto_redeem,
-                    allianceToUpdate.id
+                    allianceToUpdate.id,
+                    allianceToUpdate.game_type
                 );
             }
 
@@ -738,8 +773,8 @@ async function handleDenyDeleteAlliance(interaction) {
         }
 
         // Get alliance data
-        const alliance = allianceQueries.getAllianceById(allianceId);
-        const playerCount = playerQueries.getPlayersByAlliance(allianceId).length;
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
+        const playerCount = alliance ? playerQueries.getPlayersByAlliance(allianceId, alliance.game_type).length : 0;
 
         const content = [
             new ContainerBuilder()
@@ -806,6 +841,7 @@ module.exports = {
     createDeleteAllianceButton,
     handleDeleteAllianceButton,
     handleDeleteAlliancePagination,
+    handleDeleteAllianceGameSelection,
     handleDeleteAllianceSelection,
     handleConfirmDeleteAlliance,
     handleApproveDeleteAlliance,

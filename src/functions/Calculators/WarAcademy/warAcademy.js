@@ -10,10 +10,15 @@ const { checkFeatureAccess } = require('../../utility/checkAccess');
 const { userQueries } = require('../../utility/database');
 const { getComponentEmoji, getEmojiMapForUser } = require('../../utility/emojis');
 const { getFurnaceReadable } = require('../../Players/furnaceReadable');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../../utility/gameRuntime');
+const { normalizeGameType } = require('../../utility/gameProfiles');
 
 const infantryData = require('./Infantry.json');
 const marksmanData = require('./Marksman.json');
 const lancerData   = require('./Lancer.json');
+const kingshotInfantryData = require('./kingshot_infantry.json');
+const kingshotArcherData = require('./kingshot_archer.json');
+const kingshotCavalryData = require('./kingshot_cavalry.json');
 
 // Lazy-load ascii85 once; falls back to null if unavailable
 let _ascii85 = null;
@@ -26,10 +31,32 @@ function getAscii85() {
 
 const PAGE_SIZE = 24;
 
+const CATEGORY_META = {
+    wos: {
+        i: { localeKey: 'infantry', emoji: '1001' },
+        m: { localeKey: 'marksman', emoji: '1043' },
+        l: { localeKey: 'lancer', emoji: '1035' }
+    },
+    ks: {
+        i: { localeKey: 'infantry', emoji: '1001' },
+        a: { localeKey: 'archer', emoji: '1043' },
+        c: { localeKey: 'cavalry', emoji: '1035' }
+    }
+};
+
 // ─── Category / data helpers ──────────────────────────────────────────────────
 
 /** Returns the JSON data object for a category key. */
-function getCategoryData(cat) {
+function getCategoryData(cat, gameType = getDefaultGameType()) {
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    if (resolvedGameType === 'ks') {
+        switch (cat) {
+            case 'i': return kingshotInfantryData;
+            case 'a': return kingshotArcherData;
+            case 'c': return kingshotCavalryData;
+            default:  return kingshotInfantryData;
+        }
+    }
     switch (cat) {
         case 'i': return infantryData;
         case 'm': return marksmanData;
@@ -39,13 +66,13 @@ function getCategoryData(cat) {
 }
 
 /** Returns the list of skill names for a category. */
-function getSkillNames(cat) {
-    return Object.keys(getCategoryData(cat).skills);
+function getSkillNames(cat, gameType = getDefaultGameType()) {
+    return Object.keys(getCategoryData(cat, gameType).skills);
 }
 
 /** Returns the skill data object for a given category + skill id (name). */
-function getSkillData(cat, skillId) {
-    return getCategoryData(cat).skills[skillId];
+function getSkillData(cat, skillId, gameType = getDefaultGameType()) {
+    return getCategoryData(cat, gameType).skills[skillId];
 }
 
 /** Returns sorted level keys for a skill. */
@@ -65,8 +92,10 @@ const SHORT_TO_SKILL = {};
  */
 function ensureShortCodes() {
     if (Object.keys(SKILL_SHORT).length > 0) return;
-    for (const cat of ['i', 'm', 'l']) {
-        for (const name of getSkillNames(cat)) {
+    for (const gameType of ['wos', 'ks']) {
+        const cats = Object.keys(CATEGORY_META[gameType]);
+        for (const cat of cats) {
+            for (const name of getSkillNames(cat, gameType)) {
             if (SKILL_SHORT[name]) continue;
             // Create a short 2-char code from a simple hash
             let hash = 0;
@@ -82,17 +111,16 @@ function ensureShortCodes() {
             SKILL_SHORT[name] = code;
             SHORT_TO_SKILL[code] = name;
         }
+        }
     }
 }
 
-function getCategoryLabel(cat, lang) {
-    const c = lang.calculators.warAcademy.categories;
-    switch (cat) {
-        case 'i': return c.infantry;
-        case 'm': return c.marksman;
-        case 'l': return c.lancer;
-        default:  return c.infantry;
-    }
+function getCategoryLabel(cat, lang, gameType = getDefaultGameType()) {
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    const meta = CATEGORY_META[resolvedGameType]?.[cat] || CATEGORY_META.wos.i;
+    const categories = lang.calculators.warAcademy.categories?.[resolvedGameType]
+        || lang.calculators.warAcademy.categories;
+    return categories?.[meta.localeKey] || categories?.infantry || meta.localeKey;
 }
 
 /** Returns the human-readable display string for a level key. */
@@ -102,7 +130,10 @@ function getLevelDisplay(key, lang) {
 }
 
 /** Maps single-char category code to the i18n skills key. */
-const CAT_KEY_MAP = { i: 'infantry', m: 'marksman', l: 'lancer' };
+const CAT_KEY_MAP = {
+    wos: { i: 'infantry', m: 'marksman', l: 'lancer' },
+    ks: { i: 'infantry', a: 'archer', c: 'cavalry' }
+};
 
 /**
  * Maps raw JSON skill names to short camelCase i18n keys.
@@ -141,22 +172,88 @@ const SKILL_NAME_TO_KEY = {
     'Helios Lancer First Aid': 'heliosFirstAid',
 };
 
+const KSHOT_SKILL_NAME_TO_KEY = {
+    'Truegold Battalion': 'truegoldBattalion',
+    'Truegold Blades': 'truegoldBlades',
+    'Truegold Shields': 'truegoldShields',
+    'Truegold Legionaries': 'truegoldLegionaries',
+    'Truegold Plating': 'truegoldPlating',
+    'Truegold Mauls': 'truegoldMauls',
+    'Truegold Infantry': 'truegoldInfantry',
+    'Truegold Infantry Training': 'truegoldInfantryTraining',
+    'Truegold Infantry Aid': 'truegoldInfantryAid',
+    'Truegold Infantry Healing': 'truegoldInfantryHealing',
+    'Truegold Bows': 'truegoldBows',
+    'Truegold Bracers': 'truegoldBracers',
+    'Truegold Vests': 'truegoldVests',
+    'Truegold Arrows': 'truegoldArrows',
+    'Truegold Archers': 'truegoldArchers',
+    'Truegold Archer Training': 'truegoldArcherTraining',
+    'Truegold Archer Aid': 'truegoldArcherAid',
+    'Truegold Archer Healing': 'truegoldArcherHealing',
+    'Truegold Charge': 'truegoldCharge',
+    'Truegold Farriery': 'truegoldFarriery',
+    'Truegold Platecraft': 'truegoldPlatecraft',
+    'Truegold Lances': 'truegoldLances',
+    'Truegold Cavalry': 'truegoldCavalry',
+    'Truegold Cavalry Training': 'truegoldCavalryTraining',
+    'Truegold Cavalry Aid': 'truegoldCavalryAid',
+    'Truegold Cavalry Healing': 'truegoldCavalryHealing'
+};
+
 /** Returns the localized display name for a skill. Falls back to the raw JSON key. */
-function getSkillDisplayName(cat, skillName, lang) {
-    const catKey = CAT_KEY_MAP[cat] || 'infantry';
-    const i18nKey = SKILL_NAME_TO_KEY[skillName] || skillName;
-    return lang.calculators.warAcademy.content.skills?.[catKey]?.[i18nKey] || skillName;
+function getSkillDisplayName(cat, skillName, lang, gameType = getDefaultGameType()) {
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    const catKey = CAT_KEY_MAP[resolvedGameType]?.[cat] || 'infantry';
+    const skillMap = resolvedGameType === 'ks' ? KSHOT_SKILL_NAME_TO_KEY : SKILL_NAME_TO_KEY;
+    const i18nKey = skillMap[skillName] || skillName;
+    return lang.calculators.warAcademy.content.skills?.[resolvedGameType]?.[catKey]?.[i18nKey]
+        || lang.calculators.warAcademy.content.skills?.[catKey]?.[i18nKey]
+        || skillName;
 }
 
-function getResourceLabels(lang) {
-    const r = lang.calculators.warAcademy.content.resources;
+function getResourceLabels(lang, gameType = getDefaultGameType()) {
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    const resourceGroups = lang.calculators.warAcademy.content.resources;
+    const r = resourceGroups[resolvedGameType] || resourceGroups;
     return {
         meat:      r.meat,
+        food:      r.food,
         wood:      r.wood,
         coal:      r.coal,
+        stone:     r.stone,
         iron:      r.iron,
         steel:     r.steel,
-        fc_shards: r.fcShards
+        gold:      r.gold,
+        fc_shards: r.fcShards,
+        truegoldDust: r.truegoldDust
+    };
+}
+
+function getWarAcademyModalLocale(lang, gameType = getDefaultGameType()) {
+    const baseModal = lang.calculators.warAcademy.modal;
+    if (normalizeGameType(gameType, 'wos') !== 'ks') {
+        return baseModal;
+    }
+
+    return {
+        ...baseModal,
+        vp: {
+            ...baseModal.vp,
+            ...((baseModal.ks || {}).vp || {})
+        }
+    };
+}
+
+function getWarAcademyResultBuffLocale(lang, gameType = getDefaultGameType()) {
+    const resultBuffs = lang.calculators.warAcademy.results.buffs;
+    if (normalizeGameType(gameType, 'wos') !== 'ks') {
+        return resultBuffs;
+    }
+
+    return {
+        ...resultBuffs,
+        ...((lang.calculators.warAcademy.results.ks || {}).buffs || {})
     };
 }
 
@@ -216,10 +313,21 @@ function hasAnyBuff(buffs) {
 }
 
 // Empty resource totals template
-const EMPTY_TOTALS = { meat: 0, wood: 0, coal: 0, iron: 0, steel: 0, fc_shards: 0 };
+const EMPTY_TOTALS = {
+    meat: 0,
+    food: 0,
+    wood: 0,
+    coal: 0,
+    stone: 0,
+    iron: 0,
+    steel: 0,
+    gold: 0,
+    fc_shards: 0,
+    truegoldDust: 0
+};
 
 /** Buff names that are flat numbers (not percentages). */
-const FLAT_BUFFS = new Set(['Troop Deployment Capacity', 'Rally Capacity']);
+const FLAT_BUFFS = new Set(['Troop Deployment Capacity', 'Rally Capacity', 'Squad Capacity']);
 
 /** Formats a buff amount: flat buffs as plain integer, % buffs with % suffix. Strips trailing .00. */
 function formatBuffAmount(name, amount) {
@@ -276,13 +384,14 @@ function calculateUpgrade(skillData, fromKey, toKey, buffs) {
         }
 
         // Track max research center requirement
-        const rcLevel = parseInt(levelData.requirements?.['war-academy']);
+        const requirements = levelData.requirements || {};
+        const rcLevel = parseInt(requirements['war-academy'] ?? requirements.warAcademy);
         if (!isNaN(rcLevel) && rcLevel > maxResearchCenter) {
             maxResearchCenter = rcLevel;
         }
 
         // Track other-skill requirements (keep max level per skill)
-        const otherSkills = levelData.requirements?.['other-skill'];
+        const otherSkills = requirements['other-skill'] || requirements.otherSkill;
         if (otherSkills) {
             for (const [reqSkill, reqLevel] of Object.entries(otherSkills)) {
                 const lvl = parseInt(reqLevel);
@@ -319,17 +428,18 @@ function calculateUpgrade(skillData, fromKey, toKey, buffs) {
 
 /**
  * Encodes upgrade entries into the copy-button customId.
- * Format: calc_wa_copy_{cat}:{shortCode}{from}-{to}.{shortCode}{from}-{to}_{userId}
- * @param {{ cat, skillId, fromKey, toKey }[]} entries
+ * Format: calc_wa_copy_{gameType}|{cat}:{shortCode}{from}-{to}.{shortCode}{from}-{to}_{userId}
+ * @param {{ gameType, cat, skillId, fromKey, toKey }[]} entries
  * @param {string} userId
  * @returns {string | null} null if the final customId would exceed 100 characters
  */
 function encodeResultsCustomId(entries, userId) {
     if (!entries?.length) return null;
     ensureShortCodes();
+    const gameType = normalizeGameType(entries[0].gameType, 'wos');
     const cat  = entries[0].cat;
     const segs = entries.map(e => `${SKILL_SHORT[e.skillId] ?? e.skillId}${e.fromKey}-${e.toKey}`);
-    const plain = `${cat}:${segs.join('.')}`;
+    const plain = `${gameType}|${cat}:${segs.join('.')}`;
 
     let payload = plain;
     try {
@@ -348,7 +458,7 @@ function encodeResultsCustomId(entries, userId) {
  * Decodes all upgrade entries from a copy-button customId.
  * @param {string} copyId  full customId string
  * @param {object} buffs
- * @returns {{ cat, skillId, fromKey, toKey, result }[]}
+ * @returns {{ gameType, cat, skillId, fromKey, toKey, result }[]}
  */
 function decodeResultsEntries(copyId, buffs) {
     if (!copyId.startsWith('calc_wa_copy_')) return [];
@@ -369,7 +479,12 @@ function decodeResultsEntries(copyId, buffs) {
 
     const colonIdx = encoded.indexOf(':');
     if (colonIdx === -1) return [];
-    const cat     = encoded.slice(0, colonIdx);
+    const header = encoded.slice(0, colonIdx);
+    const [maybeGameType, maybeCat] = header.includes('|')
+        ? header.split('|')
+        : ['wos', header];
+    const gameType = normalizeGameType(maybeGameType, 'wos');
+    const cat     = maybeCat;
     const segsStr = encoded.slice(colonIdx + 1);
 
     return segsStr.split('.').flatMap(seg => {
@@ -381,8 +496,8 @@ function decodeResultsEntries(copyId, buffs) {
         if (dashIdx === -1 || !skillId) return [];
         const fromKey = levelStr.slice(0, dashIdx);
         const toKey   = levelStr.slice(dashIdx + 1);
-        const result  = calculateUpgrade(getSkillData(cat, skillId), fromKey, toKey, buffs);
-        return result ? [{ cat, skillId, fromKey, toKey, result }] : [];
+        const result  = calculateUpgrade(getSkillData(cat, skillId, gameType), fromKey, toKey, buffs);
+        return result ? [{ gameType, cat, skillId, fromKey, toKey, result }] : [];
     });
 }
 
@@ -445,29 +560,60 @@ function getExistingEntries(message, buffs) {
 // ─── UI builders ──────────────────────────────────────────────────────────────
 
 /**
- * Container shown after clicking "War Academy" — lets user pick Infantry, Marksman, or Lancer.
+ * Container shown after clicking "War Academy" in both mode — lets user pick the game first.
  */
-function buildCategorySelectionContainer(userId, lang) {
+function buildGameSelectionContainer(userId, lang) {
     const lc       = lang.calculators.warAcademy;
     const emojiMap = getEmojiMapForUser(userId);
+    const options = lang.common?.gameSelection?.options || {};
 
-    const infantryBtn = new ButtonBuilder()
-        .setCustomId(`calc_wa_cat_i_${userId}`)
-        .setLabel(lc.buttons.infantry)
+    const wosBtn = new ButtonBuilder()
+        .setCustomId(`calc_wa_game_wos_${userId}`)
+        .setLabel(options.wos || 'Whiteout Survival')
         .setStyle(ButtonStyle.Secondary)
-        .setEmoji(getComponentEmoji(emojiMap, '1001'));
+        .setEmoji(getComponentEmoji(emojiMap, '1040'));
 
-    const marksmanBtn = new ButtonBuilder()
-        .setCustomId(`calc_wa_cat_m_${userId}`)
-        .setLabel(lc.buttons.marksman)
+    const ksBtn = new ButtonBuilder()
+        .setCustomId(`calc_wa_game_ks_${userId}`)
+        .setLabel(options.ks || 'Kingshot')
         .setStyle(ButtonStyle.Secondary)
-        .setEmoji(getComponentEmoji(emojiMap, '1043'));
+        .setEmoji(getComponentEmoji(emojiMap, '1012'));
 
-    const lancerBtn = new ButtonBuilder()
-        .setCustomId(`calc_wa_cat_l_${userId}`)
-        .setLabel(lc.buttons.lancer)
+    const backBtn = new ButtonBuilder()
+        .setCustomId(`calc_wa_back_main_x_${userId}`)
+        .setLabel(lc.buttons.back)
         .setStyle(ButtonStyle.Secondary)
-        .setEmoji(getComponentEmoji(emojiMap, '1035'));
+        .setEmoji(getComponentEmoji(emojiMap, '1002'));
+
+    return new ContainerBuilder()
+        .setAccentColor(0xe74c3c)
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(lc.header.gameSelection)
+        )
+        .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
+        .addActionRowComponents(new ActionRowBuilder().addComponents(wosBtn, ksBtn, backBtn));
+}
+
+/**
+ * Container shown after clicking "War Academy" — lets user pick troop category for the selected game.
+ */
+function buildCategorySelectionContainer(userId, lang, gameType = getDefaultGameType()) {
+    const lc       = lang.calculators.warAcademy;
+    const emojiMap = getEmojiMapForUser(userId);
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    const categories = Object.entries(CATEGORY_META[resolvedGameType]).map(([cat, meta]) =>
+        new ButtonBuilder()
+            .setCustomId(`calc_wa_cat_${resolvedGameType}_${cat}_${userId}`)
+            .setLabel(getCategoryLabel(cat, lang, resolvedGameType))
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji(getComponentEmoji(emojiMap, meta.emoji))
+    );
+    const backTarget = isMultiGameModeEnabled() ? 'game' : 'main';
+    const backBtn = new ButtonBuilder()
+        .setCustomId(`calc_wa_back_${backTarget}_${resolvedGameType}_${userId}`)
+        .setLabel(lc.buttons.back)
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji(getComponentEmoji(emojiMap, '1002'));
 
     return new ContainerBuilder()
         .setAccentColor(0xe74c3c)
@@ -475,7 +621,7 @@ function buildCategorySelectionContainer(userId, lang) {
             new TextDisplayBuilder().setContent(lc.header.categorySelection)
         )
         .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
-        .addActionRowComponents(new ActionRowBuilder().addComponents(infantryBtn, marksmanBtn, lancerBtn));
+        .addActionRowComponents(new ActionRowBuilder().addComponents(...categories, backBtn));
 }
 
 /**
@@ -489,23 +635,24 @@ function buildCategorySelectionContainer(userId, lang) {
  * @param {string} userId
  * @param {object} lang
  */
-function buildControlsContainer(cat, skillId, fromKey, toKey, pageFrom, pageTo, userId, lang) {
+function buildControlsContainer(cat, skillId, fromKey, toKey, pageFrom, pageTo, userId, lang, gameType = getDefaultGameType()) {
     const lc       = lang.calculators.warAcademy;
     const emojiMap = getEmojiMapForUser(userId);
-    const catData  = getCategoryData(cat);
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    const catData  = getCategoryData(cat, resolvedGameType);
 
-    const headerText = lc.header.controls.replace('{category}', getCategoryLabel(cat, lang));
+    const headerText = lc.header.controls.replace('{category}', getCategoryLabel(cat, lang, resolvedGameType));
 
     // Skill select menu
-    const skillNames  = getSkillNames(cat);
+    const skillNames  = getSkillNames(cat, resolvedGameType);
     const skillOptions = skillNames.map(name => ({
-        label: getSkillDisplayName(cat, name, lang),
+        label: getSkillDisplayName(cat, name, lang, resolvedGameType),
         value: name,
         default: false
     }));
 
     const skillSelect = new StringSelectMenuBuilder()
-        .setCustomId(`calc_wa_select_${cat}_${userId}`)
+        .setCustomId(`calc_wa_select_${resolvedGameType}_${cat}_${userId}`)
         .setPlaceholder(lc.placeholders.selectSkill)
         .addOptions(skillOptions.slice(0, 25));
 
@@ -517,7 +664,7 @@ function buildControlsContainer(cat, skillId, fromKey, toKey, pageFrom, pageTo, 
     // Show selected skill name and from-level (both as text)
     if (skillId !== 'x' && catData.skills[skillId]) {
         container.addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(lc.header.selected.replace('{name}', getSkillDisplayName(cat, skillId, lang)))
+            new TextDisplayBuilder().setContent(lc.header.selected.replace('{name}', getSkillDisplayName(cat, skillId, lang, resolvedGameType)))
         );
         if (fromKey !== 'x') {
             container.addTextDisplayComponents(
@@ -548,7 +695,7 @@ function buildControlsContainer(cat, skillId, fromKey, toKey, pageFrom, pageTo, 
                 container.addActionRowComponents(
                     new ActionRowBuilder().addComponents(
                         new StringSelectMenuBuilder()
-                            .setCustomId(`calc_wa_from_${cat}_${skillId}_${pf}_${userId}`)
+                            .setCustomId(`calc_wa_from_${resolvedGameType}_${cat}_${skillId}_${pf}_${userId}`)
                             .setPlaceholder(lc.placeholders.selectStartingLevel)
                             .addOptions(sliceFrom.map(key => ({
                                 label: getLevelDisplay(key, lang),
@@ -576,7 +723,7 @@ function buildControlsContainer(cat, skillId, fromKey, toKey, pageFrom, pageTo, 
                 container.addActionRowComponents(
                     new ActionRowBuilder().addComponents(
                         new StringSelectMenuBuilder()
-                            .setCustomId(`calc_wa_to_${cat}_${skillId}_${fromKey}_${pt}_${userId}`)
+                            .setCustomId(`calc_wa_to_${resolvedGameType}_${cat}_${skillId}_${fromKey}_${pt}_${userId}`)
                             .setPlaceholder(lc.placeholders.selectTargetLevel)
                             .addOptions(sliceTo.map(key => ({
                                 label: lc.levelDisplay.replace('{key}', key),
@@ -600,24 +747,24 @@ function buildControlsContainer(cat, skillId, fromKey, toKey, pageFrom, pageTo, 
 
     if (needFromPagination) {
         const pf = Math.max(0, parseInt(pageFrom) || 0);
-        if (fromPrevPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_wa_fprev_${cat}_${skillId}_${pf}_${userId}`).setLabel(lc.buttons.prev).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1019')));
-        if (fromNextPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_wa_fnext_${cat}_${skillId}_${pf}_${userId}`).setLabel(lc.buttons.next).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1034')));
+        if (fromPrevPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_wa_fprev_${resolvedGameType}_${cat}_${skillId}_${pf}_${userId}`).setLabel(lc.buttons.prev).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1019')));
+        if (fromNextPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_wa_fnext_${resolvedGameType}_${cat}_${skillId}_${pf}_${userId}`).setLabel(lc.buttons.next).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1034')));
     }
 
     if (needToPagination) {
         const pt = Math.max(0, parseInt(pageTo) || 0);
-        if (toPrevPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_wa_tprev_${cat}_${skillId}_${fromKey}_${pt}_${userId}`).setLabel(lc.buttons.prev).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1019')));
-        if (toNextPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_wa_tnext_${cat}_${skillId}_${fromKey}_${pt}_${userId}`).setLabel(lc.buttons.next).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1034')));
+        if (toPrevPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_wa_tprev_${resolvedGameType}_${cat}_${skillId}_${fromKey}_${pt}_${userId}`).setLabel(lc.buttons.prev).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1019')));
+        if (toNextPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_wa_tnext_${resolvedGameType}_${cat}_${skillId}_${fromKey}_${pt}_${userId}`).setLabel(lc.buttons.next).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1034')));
     }
 
     bottomButtons.push(
         new ButtonBuilder()
-            .setCustomId(`calc_wa_buffs_${cat}_${skillId}_${fromKey}_${toKey}_${userId}`)
+            .setCustomId(`calc_wa_buffs_${resolvedGameType}_${cat}_${skillId}_${fromKey}_${toKey}_${userId}`)
             .setLabel(lc.buttons.buffs)
             .setStyle(ButtonStyle.Secondary)
             .setEmoji(getComponentEmoji(emojiMap, '1035')),
         new ButtonBuilder()
-            .setCustomId(`calc_wa_back_${userId}`)
+            .setCustomId(`calc_wa_back_category_${resolvedGameType}_${userId}`)
             .setLabel(lc.buttons.back)
             .setStyle(ButtonStyle.Secondary)
             .setEmoji(getComponentEmoji(emojiMap, '1002'))
@@ -633,8 +780,8 @@ function buildControlsContainer(cat, skillId, fromKey, toKey, pageFrom, pageTo, 
  */
 function buildResultsContainer(entries, buffs, userId, lang, activeState) {
     const lc             = lang.calculators.warAcademy;
-    const resourceLabels = getResourceLabels(lang);
-    const cat            = entries[0].cat;
+    const gameType       = normalizeGameType(activeState?.gameType || entries[0]?.gameType, 'wos');
+    const resourceLabels = getResourceLabels(lang, gameType);
     const { totalRes, totalSeconds, reducedSeconds, totalNumLevels, maxResearchCenter, allOtherSkillReqs, allBuffs } = aggregateEntries(entries);
     const buffActive = hasAnyBuff(buffs);
 
@@ -643,7 +790,7 @@ function buildResultsContainer(entries, buffs, userId, lang, activeState) {
     // Per-entry upgrade summary
     lines.push(lc.results.skillsList);
     for (const e of entries) {
-        lines.push(`  - ${getSkillDisplayName(cat, e.skillId, lang)}: ${getLevelDisplay(e.fromKey, lang)} → ${getLevelDisplay(e.toKey, lang)}`);
+        lines.push(`  - ${getSkillDisplayName(e.cat, e.skillId, lang, gameType)}: ${getLevelDisplay(e.fromKey, lang)} → ${getLevelDisplay(e.toKey, lang)}`);
     }
 
     // Resources (non-zero only)
@@ -661,7 +808,7 @@ function buildResultsContainer(entries, buffs, userId, lang, activeState) {
     // Requirements — research center
     if (maxResearchCenter > 0) {
         lines.push(lc.results.requirements);
-        lines.push(`  - ${lc.results.warAcademy}: ${getFurnaceReadable(maxResearchCenter, lang)}`);
+        lines.push(`  - ${lc.results.warAcademy}: ${getFurnaceReadable(maxResearchCenter, lang, gameType)}`);
     }
 
     // Other skill requirements
@@ -670,7 +817,7 @@ function buildResultsContainer(entries, buffs, userId, lang, activeState) {
         if (maxResearchCenter <= 0) lines.push(lc.results.requirements);
         lines.push(lc.results.skillRequirements);
         for (const [sk, lv] of otherReqEntries) {
-            lines.push(`  - ${getSkillDisplayName(cat, sk, lang)}: ${lc.levelDisplay.replace('{key}', lv)}`);
+            lines.push(`  - ${getSkillDisplayName(entries[0].cat, sk, lang, gameType)}: ${lc.levelDisplay.replace('{key}', lv)}`);
         }
     }
 
@@ -684,9 +831,10 @@ function buildResultsContainer(entries, buffs, userId, lang, activeState) {
 
     // Applied speed buffs summary
     if (buffActive) {
+        const resultBuffs = getWarAcademyResultBuffLocale(lang, gameType);
         const buffParts = [];
-        if (buffs.researchSpeed > 0) buffParts.push(lc.results.buffs.researchSpeed.replace('{pct}', buffs.researchSpeed));
-        if (buffs.vpBonus > 0)        buffParts.push(lc.results.buffs.vpBonus.replace('{pct}', buffs.vpBonus));
+        if (buffs.researchSpeed > 0) buffParts.push(resultBuffs.researchSpeed.replace('{pct}', buffs.researchSpeed));
+        if (buffs.vpBonus > 0)        buffParts.push(resultBuffs.vpBonus.replace('{pct}', buffs.vpBonus));
         lines.push(lc.results.buffsLine.replace('{parts}', buffParts.join('\n  - ')));
     }
 
@@ -703,7 +851,7 @@ function buildResultsContainer(entries, buffs, userId, lang, activeState) {
     // Remove button — opens a modal to select entries to remove
     const { cat: ac, skillId: as, fromKey: af, toKey: ak } = activeState || {};
     const removeBtn = new ButtonBuilder()
-        .setCustomId(`calc_wa_remove_${ac || 'x'}_${as || 'x'}_${af || 'x'}_${ak || 'x'}_${userId}`)
+        .setCustomId(`calc_wa_remove_${gameType}_${ac || 'x'}_${as || 'x'}_${af || 'x'}_${ak || 'x'}_${userId}`)
         .setLabel(lc.buttons.remove)
         .setStyle(ButtonStyle.Danger);
 
@@ -718,16 +866,16 @@ function buildResultsContainer(entries, buffs, userId, lang, activeState) {
  */
 function buildCopySummary(entries, buffs, lang) {
     const lc             = lang.calculators.warAcademy;
-    const resourceLabels = getResourceLabels(lang);
+    const gameType       = normalizeGameType(entries[0]?.gameType, 'wos');
+    const resourceLabels = getResourceLabels(lang, gameType);
     const { totalRes, totalSeconds, reducedSeconds, totalNumLevels, maxResearchCenter, allOtherSkillReqs, allBuffs } = aggregateEntries(entries);
     const buffActive = hasAnyBuff(buffs);
 
     const lines = [lc.results.upgradePlan];
 
-    const cat = entries[0].cat;
     lines.push(lc.results.skillsList);
     for (const e of entries) {
-        lines.push(`  - ${getSkillDisplayName(cat, e.skillId, lang)}: ${getLevelDisplay(e.fromKey, lang)} → ${getLevelDisplay(e.toKey, lang)}`);
+        lines.push(`  - ${getSkillDisplayName(e.cat, e.skillId, lang, gameType)}: ${getLevelDisplay(e.fromKey, lang)} → ${getLevelDisplay(e.toKey, lang)}`);
     }
 
     const nonZero = Object.entries(totalRes).filter(([, v]) => v > 0);
@@ -742,7 +890,7 @@ function buildCopySummary(entries, buffs, lang) {
 
     if (maxResearchCenter > 0) {
         lines.push(lc.results.requirements);
-        lines.push(`  - ${lc.results.warAcademy}: ${getFurnaceReadable(maxResearchCenter, lang)}`);
+        lines.push(`  - ${lc.results.warAcademy}: ${getFurnaceReadable(maxResearchCenter, lang, gameType)}`);
     }
 
     const otherReqEntries = Object.entries(allOtherSkillReqs);
@@ -750,7 +898,7 @@ function buildCopySummary(entries, buffs, lang) {
         if (maxResearchCenter <= 0) lines.push(lc.results.requirements);
         lines.push(lc.results.skillRequirements);
         for (const [sk, lv] of otherReqEntries) {
-            lines.push(`  - ${getSkillDisplayName(cat, sk, lang)}: ${lc.levelDisplay.replace('{key}', lv)}`);
+            lines.push(`  - ${getSkillDisplayName(entries[0].cat, sk, lang, gameType)}: ${lc.levelDisplay.replace('{key}', lv)}`);
         }
     }
 
@@ -760,9 +908,10 @@ function buildCopySummary(entries, buffs, lang) {
     }
 
     if (buffActive) {
+        const resultBuffs = getWarAcademyResultBuffLocale(lang, gameType);
         const buffParts = [];
-        if (buffs.researchSpeed > 0) buffParts.push(lc.results.buffs.researchSpeed.replace('{pct}', buffs.researchSpeed));
-        if (buffs.vpBonus > 0)        buffParts.push(lc.results.buffs.vpBonus.replace('{pct}', buffs.vpBonus));
+        if (buffs.researchSpeed > 0) buffParts.push(resultBuffs.researchSpeed.replace('{pct}', buffs.researchSpeed));
+        if (buffs.vpBonus > 0)        buffParts.push(resultBuffs.vpBonus.replace('{pct}', buffs.vpBonus));
         lines.push(lc.results.buffsLine.replace('{parts}', buffParts.join('\n  - ')));
     }
 
@@ -797,11 +946,33 @@ async function handleWarAcademyButton(interaction) {
             return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
         }
 
-        const catContainer = buildCategorySelectionContainer(userId, lang);
+        const catContainer = isMultiGameModeEnabled()
+            ? buildGameSelectionContainer(userId, lang)
+            : buildCategorySelectionContainer(userId, lang, getDefaultGameType());
         const updatedComponents = require('../../utility/commonFunctions').updateComponentsV2AfterSeparator(interaction, [catContainer]);
         await interaction.update({ components: updatedComponents, flags: MessageFlags.IsComponentsV2 });
     } catch (err) {
         await handleError(interaction, null, err, 'handleWarAcademyButton');
+    }
+}
+
+async function handleGameSelection(interaction) {
+    try {
+        const ctx = await initHandler(interaction);
+        if (!ctx) return;
+        const { parts, userId, lang } = ctx;
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+
+        if (!checkFeatureAccess('calculators', interaction)) {
+            return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
+        }
+
+        await interaction.update({
+            components: [buildCategorySelectionContainer(userId, lang, gameType)],
+            flags: MessageFlags.IsComponentsV2
+        });
+    } catch (err) {
+        await handleError(interaction, null, err, 'handleGameSelection');
     }
 }
 
@@ -820,9 +991,10 @@ async function handleCategorySelection(interaction) {
             return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
         }
 
-        // parts: ['calc', 'wa', 'cat', cat, userId]
-        const cat = parts[3];
-        const controlsContainer = buildControlsContainer(cat, 'x', 'x', 'x', 0, 0, userId, lang);
+        // parts: ['calc', 'wa', 'cat', gameType, cat, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const cat = parts[4];
+        const controlsContainer = buildControlsContainer(cat, 'x', 'x', 'x', 0, 0, userId, lang, gameType);
         await interaction.update({ components: [controlsContainer], flags: MessageFlags.IsComponentsV2 });
     } catch (err) {
         await handleError(interaction, null, err, 'handleCategorySelection');
@@ -838,14 +1010,15 @@ async function handleSkillSelect(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'wa', 'select', cat, userId]
-        const cat     = parts[3];
+        // parts: ['calc', 'wa', 'select', gameType, cat, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const cat     = parts[4];
         const skillId = interaction.values[0];
         const existingResults = interaction.message.components.length > 1
             ? interaction.message.components.slice(1) : [];
 
         await interaction.update({
-            components: [buildControlsContainer(cat, skillId, 'x', 'x', 0, 0, userId, lang), ...existingResults],
+            components: [buildControlsContainer(cat, skillId, 'x', 'x', 0, 0, userId, lang, gameType), ...existingResults],
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {
@@ -862,15 +1035,16 @@ async function handleFromLevelSelect(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'wa', 'from', cat, skillId, page, userId]
-        const cat     = parts[3];
-        const skillId = parts[4];
+        // parts: ['calc', 'wa', 'from', gameType, cat, skillId, page, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const cat     = parts[4];
+        const skillId = parts[5];
         const fromKey = interaction.values[0];
         const existingResults = interaction.message.components.length > 1
             ? interaction.message.components.slice(1) : [];
 
         await interaction.update({
-            components: [buildControlsContainer(cat, skillId, fromKey, 'x', 0, 0, userId, lang), ...existingResults],
+            components: [buildControlsContainer(cat, skillId, fromKey, 'x', 0, 0, userId, lang, gameType), ...existingResults],
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {
@@ -887,14 +1061,15 @@ async function handleToLevelSelect(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'wa', 'to', cat, skillId, fromKey, page, userId]
-        const cat     = parts[3];
-        const skillId = parts[4];
-        const fromKey = parts[5];
+        // parts: ['calc', 'wa', 'to', gameType, cat, skillId, fromKey, page, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const cat     = parts[4];
+        const skillId = parts[5];
+        const fromKey = parts[6];
         const toKey   = interaction.values[0];
 
         const buffs  = getUserBuffs(userId);
-        const result = calculateUpgrade(getSkillData(cat, skillId), fromKey, toKey, buffs);
+        const result = calculateUpgrade(getSkillData(cat, skillId, gameType), fromKey, toKey, buffs);
 
         if (!result) {
             return await interaction.reply({
@@ -905,12 +1080,12 @@ async function handleToLevelSelect(interaction) {
 
         // Decode existing entries, replace any existing one for the same skill, append new
         const existingEntries = getExistingEntries(interaction.message, buffs);
-        const allEntries      = [...existingEntries.filter(e => e.skillId !== skillId), { cat, skillId, fromKey, toKey, result }];
+        const allEntries      = [...existingEntries.filter(e => !(e.gameType === gameType && e.cat === cat && e.skillId === skillId)), { gameType, cat, skillId, fromKey, toKey, result }];
 
         await interaction.update({
             components: [
-                buildControlsContainer(cat, skillId, fromKey, toKey, 0, 0, userId, lang),
-                buildResultsContainer(allEntries, buffs, userId, lang, { cat, skillId, fromKey, toKey })
+                buildControlsContainer(cat, skillId, fromKey, toKey, 0, 0, userId, lang, gameType),
+                buildResultsContainer(allEntries, buffs, userId, lang, { gameType, cat, skillId, fromKey, toKey })
             ],
             flags: MessageFlags.IsComponentsV2
         });
@@ -929,17 +1104,18 @@ async function handleFromLevelPage(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'wa', 'fprev'|'fnext', cat, skillId, curPage, userId]
+        // parts: ['calc', 'wa', 'fprev'|'fnext', gameType, cat, skillId, curPage, userId]
         const direction = parts[2];
-        const cat       = parts[3];
-        const skillId   = parts[4];
-        const curPage   = parseInt(parts[5]) || 0;
+        const gameType  = normalizeGameType(parts[3], getDefaultGameType());
+        const cat       = parts[4];
+        const skillId   = parts[5];
+        const curPage   = parseInt(parts[6]) || 0;
         const newPage   = direction === 'fnext' ? curPage + 1 : Math.max(0, curPage - 1);
         const existingResults = interaction.message.components.length > 1
             ? interaction.message.components.slice(1) : [];
 
         await interaction.update({
-            components: [buildControlsContainer(cat, skillId, 'x', 'x', newPage, 0, userId, lang), ...existingResults],
+            components: [buildControlsContainer(cat, skillId, 'x', 'x', newPage, 0, userId, lang, gameType), ...existingResults],
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {
@@ -957,18 +1133,19 @@ async function handleToLevelPage(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'wa', 'tprev'|'tnext', cat, skillId, fromKey, curPage, userId]
+        // parts: ['calc', 'wa', 'tprev'|'tnext', gameType, cat, skillId, fromKey, curPage, userId]
         const direction = parts[2];
-        const cat       = parts[3];
-        const skillId   = parts[4];
-        const fromKey   = parts[5];
-        const curPage   = parseInt(parts[6]) || 0;
+        const gameType  = normalizeGameType(parts[3], getDefaultGameType());
+        const cat       = parts[4];
+        const skillId   = parts[5];
+        const fromKey   = parts[6];
+        const curPage   = parseInt(parts[7]) || 0;
         const newPage   = direction === 'tnext' ? curPage + 1 : Math.max(0, curPage - 1);
         const existingResults = interaction.message.components.length > 1
             ? interaction.message.components.slice(1) : [];
 
         await interaction.update({
-            components: [buildControlsContainer(cat, skillId, fromKey, 'x', 0, newPage, userId, lang), ...existingResults],
+            components: [buildControlsContainer(cat, skillId, fromKey, 'x', 0, newPage, userId, lang, gameType), ...existingResults],
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {
@@ -988,18 +1165,19 @@ async function handleBuffsButton(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId } = ctx;
-        // parts: ['calc', 'wa', 'buffs', cat, skillId, fromKey, toKey, userId]
-        const cat     = parts[3];
-        const skillId = parts[4];
-        const fromKey = parts[5];
-        const toKey   = parts[6];
+        // parts: ['calc', 'wa', 'buffs', gameType, cat, skillId, fromKey, toKey, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const cat     = parts[4];
+        const skillId = parts[5];
+        const fromKey = parts[6];
+        const toKey   = parts[7];
 
         const cur = getUserBuffs(userId);
         const lang = ctx.lang;
-        const ml = lang.calculators.warAcademy.modal;
+        const ml = getWarAcademyModalLocale(lang, gameType);
 
         const modal = new ModalBuilder()
-            .setCustomId(`calc_wa_modal_${cat}_${skillId}_${fromKey}_${toKey}_${userId}`)
+            .setCustomId(`calc_wa_modal_${gameType}_${cat}_${skillId}_${fromKey}_${toKey}_${userId}`)
             .setTitle(ml.title);
 
         // ── 1. VP Bonus ───────────────────────────────────────────────────────
@@ -1045,11 +1223,12 @@ async function handleBuffsModal(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'wa', 'modal', cat, skillId, fromKey, toKey, userId]
-        const cat     = parts[3];
-        const skillId = parts[4];
-        const fromKey = parts[5];
-        const toKey   = parts[6];
+        // parts: ['calc', 'wa', 'modal', gameType, cat, skillId, fromKey, toKey, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const cat     = parts[4];
+        const skillId = parts[5];
+        const fromKey = parts[6];
+        const toKey   = parts[7];
 
         const vpValues  = interaction.fields.getStringSelectValues('wa_vp_bonus');
         const rawSpeed  = interaction.fields.getTextInputValue('wa_research_speed').trim();
@@ -1071,10 +1250,10 @@ async function handleBuffsModal(interaction) {
 
         userQueries.upsertBuffs(userId, JSON.stringify(existing));
 
-        const controlsContainer = buildControlsContainer(cat, skillId, fromKey, toKey, 0, 0, userId, lang);
+        const controlsContainer = buildControlsContainer(cat, skillId, fromKey, toKey, 0, 0, userId, lang, gameType);
         const entries           = getExistingEntries(interaction.message, newBuffs);
         const components        = entries.length > 0
-            ? [controlsContainer, buildResultsContainer(entries, newBuffs, userId, lang, { cat, skillId, fromKey, toKey })]
+            ? [controlsContainer, buildResultsContainer(entries, newBuffs, userId, lang, { gameType, cat, skillId, fromKey, toKey })]
             : [controlsContainer];
 
         await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
@@ -1114,20 +1293,28 @@ async function handleCopyButton(interaction) {
 }
 
 /**
- * Returns to the calculators main panel.
- * CustomId: calc_wa_back_{userId}
+ * Handles War Academy back navigation.
  */
 async function handleBackButton(interaction) {
     try {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
-        const { userId, lang } = ctx;
+        const { parts, userId, lang } = ctx;
+        const target = parts[3];
+        const gameType = normalizeGameType(parts[4], getDefaultGameType());
+        let components;
 
-        const { buildCalculatorsPanel } = require('../calculators');
-        const panel = buildCalculatorsPanel(userId);
+        if (target === 'category') {
+            components = [buildCategorySelectionContainer(userId, lang, gameType)];
+        } else if (target === 'game') {
+            components = [buildGameSelectionContainer(userId, lang)];
+        } else {
+            const { buildCalculatorsPanel } = require('../calculators');
+            components = [buildCalculatorsPanel(userId)];
+        }
 
         await interaction.update({
-            components: [panel],
+            components,
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {
@@ -1144,11 +1331,12 @@ async function handleRemoveButton(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'wa', 'remove', cat, skillId, fromKey, toKey, userId]
-        const cat     = parts[3];
-        const skillId = parts[4];
-        const fromKey = parts[5];
-        const toKey   = parts[6];
+        // parts: ['calc', 'wa', 'remove', gameType, cat, skillId, fromKey, toKey, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const cat     = parts[4];
+        const skillId = parts[5];
+        const fromKey = parts[6];
+        const toKey   = parts[7];
 
         const buffs   = getUserBuffs(userId);
         const entries = getExistingEntries(interaction.message, buffs);
@@ -1166,7 +1354,7 @@ async function handleRemoveButton(interaction) {
             .setMinValues(1)
             .setMaxValues(entries.length)
             .addOptions(entries.map((e, i) => {
-                const name = getSkillDisplayName(e.cat, e.skillId, lang);
+                const name = getSkillDisplayName(e.cat, e.skillId, lang, e.gameType || gameType);
                 return new StringSelectMenuOptionBuilder()
                     .setLabel(name)
                     .setValue(String(i));
@@ -1177,7 +1365,7 @@ async function handleRemoveButton(interaction) {
             .setStringSelectMenuComponent(selectMenu);
 
         const modal = new ModalBuilder()
-            .setCustomId(`calc_wa_rmmodal_${cat}_${skillId}_${fromKey}_${toKey}_${userId}`)
+            .setCustomId(`calc_wa_rmmodal_${gameType}_${cat}_${skillId}_${fromKey}_${toKey}_${userId}`)
             .setTitle(rm.title)
             .addLabelComponents(label);
 
@@ -1196,20 +1384,21 @@ async function handleRemoveModal(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'wa', 'rmmodal', cat, skillId, fromKey, toKey, userId]
-        const cat     = parts[3];
-        const skillId = parts[4];
-        const fromKey = parts[5];
-        const toKey   = parts[6];
+        // parts: ['calc', 'wa', 'rmmodal', gameType, cat, skillId, fromKey, toKey, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const cat     = parts[4];
+        const skillId = parts[5];
+        const fromKey = parts[6];
+        const toKey   = parts[7];
 
         const buffs     = getUserBuffs(userId);
         const entries   = getExistingEntries(interaction.message, buffs);
         const toRemove  = new Set(interaction.fields.getStringSelectValues('remove_entries'));
         const remaining = entries.filter((_, i) => !toRemove.has(String(i)));
 
-        const controlsContainer = buildControlsContainer(cat, skillId, fromKey, toKey, 0, 0, userId, lang);
+        const controlsContainer = buildControlsContainer(cat, skillId, fromKey, toKey, 0, 0, userId, lang, gameType);
         const components = remaining.length > 0
-            ? [controlsContainer, buildResultsContainer(remaining, buffs, userId, lang, { cat, skillId, fromKey, toKey })]
+            ? [controlsContainer, buildResultsContainer(remaining, buffs, userId, lang, { gameType, cat, skillId, fromKey, toKey })]
             : [controlsContainer];
 
         await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
@@ -1220,6 +1409,7 @@ async function handleRemoveModal(interaction) {
 
 module.exports = {
     handleWarAcademyButton,
+    handleGameSelection,
     handleCategorySelection,
     handleSkillSelect,
     handleFromLevelSelect,

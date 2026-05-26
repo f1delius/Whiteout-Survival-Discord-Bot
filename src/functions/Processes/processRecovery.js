@@ -166,7 +166,7 @@ class ProcessRecovery {
                 await updateProcessStatus(process.id, PROCESS_STATUS.COMPLETED);
 
                 // Get the alliance and reschedule the refresh
-                const alliance = allianceQueries.getAllianceById(process.target);
+                const alliance = allianceQueries.getAllianceByIdAny(process.target);
                 if (alliance && alliance.interval > 0) {
                     const { autoRefreshManager } = require('../Alliance/refreshAlliance');
                     autoRefreshManager.scheduleNextRefresh(alliance);
@@ -183,7 +183,7 @@ class ProcessRecovery {
                     await updateProcessStatus(process.id, PROCESS_STATUS.COMPLETED);
 
                     // Get the alliance and reschedule the refresh
-                    const alliance = allianceQueries.getAllianceById(process.target);
+                    const alliance = allianceQueries.getAllianceByIdAny(process.target);
                     if (alliance && alliance.interval > 0) {
                         const { autoRefreshManager } = require('../Alliance/refreshAlliance');
                         await autoRefreshManager.scheduleNextRefresh(alliance);

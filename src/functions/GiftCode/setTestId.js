@@ -1,10 +1,65 @@
-const { ButtonBuilder, ButtonStyle, ModalBuilder, SectionBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, ThumbnailBuilder, MessageFlags, TextDisplayBuilder } = require('discord.js');
+const { ButtonBuilder, ButtonStyle, ModalBuilder, SectionBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, ThumbnailBuilder, MessageFlags, TextDisplayBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const { adminQueries, testIdQueries, systemLogQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { getFurnaceReadable } = require('../Players/furnaceReadable');
+const { getFurnaceReadable, getSettlementName } = require('../Players/furnaceReadable');
 const { fetchPlayerFromAPI } = require('../Players/fetchPlayerData');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
 const { getComponentEmoji, getEmojiMapForUser } = require('../utility/emojis');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
+
+function buildSetTestIdModal(userId, lang = {}) {
+    const modal = new ModalBuilder()
+        .setCustomId(`test_id_modal_${userId}`)
+        .setTitle(lang.giftCode.giftSetTestId.modal.title);
+
+    const selectedGameType = getDefaultGameType();
+    const currentTestId = getTestIdForValidation(selectedGameType);
+
+    if (isMultiGameModeEnabled()) {
+        const gameTypeSelect = new StringSelectMenuBuilder()
+            .setCustomId('test_id_game_type')
+            .setPlaceholder(lang.common.gameSelection.placeholder)
+            .setRequired(true)
+            .setMinValues(1)
+            .setMaxValues(1)
+            .addOptions(
+                new StringSelectMenuOptionBuilder()
+                    .setLabel(lang.common.gameSelection.options.wos)
+                    .setValue('wos'),
+                new StringSelectMenuOptionBuilder()
+                    .setLabel(lang.common.gameSelection.options.ks)
+                    .setValue('ks')
+            );
+
+        const gameTypeLabel = new LabelBuilder()
+            .setLabel(lang.common.gameSelection.label)
+            .setDescription(lang.giftCode.giftSetTestId.modal.gameTypeField.description)
+            .setStringSelectMenuComponent(gameTypeSelect);
+
+        modal.addLabelComponents(gameTypeLabel);
+    }
+
+    const testIdInput = new TextInputBuilder()
+        .setCustomId('test_id_value')
+        .setPlaceholder(lang.giftCode.giftSetTestId.modal.testIdInput.placeholder)
+        .setStyle(TextInputStyle.Short)
+        .setMinLength(1)
+        .setMaxLength(20)
+        .setRequired(true);
+
+    if (!isMultiGameModeEnabled()) {
+        testIdInput.setValue(String(currentTestId));
+    }
+
+    const testIdLabel = new LabelBuilder()
+        .setLabel(lang.giftCode.giftSetTestId.modal.testIdInput.label)
+        .setTextInputComponent(testIdInput);
+
+    modal.addLabelComponents(testIdLabel);
+
+    return modal;
+}
 
 /**
  * Creates a set test ID button
@@ -42,27 +97,7 @@ async function handleSetTestIdButton(interaction) {
             });
         }
 
-        // Create and show modal directly
-        const currentTestId = getTestIdForValidation();
-
-        const modal = new ModalBuilder()
-            .setCustomId(`test_id_modal_${interaction.user.id}`)
-            .setTitle(lang.giftCode.giftSetTestId.modal.title);
-
-        const testIdInput = new TextInputBuilder()
-            .setCustomId('test_id_value')
-            .setPlaceholder(lang.giftCode.giftSetTestId.modal.testIdInput.placeholder)
-            .setStyle(TextInputStyle.Short)
-            .setMinLength(1)
-            .setMaxLength(20)
-            .setRequired(true)
-            .setValue(String(currentTestId));
-
-        const testIdLabel = new LabelBuilder()
-            .setLabel(lang.giftCode.giftSetTestId.modal.testIdInput.label)
-            .setTextInputComponent(testIdInput);
-
-        modal.addLabelComponents(testIdLabel);
+        const modal = buildSetTestIdModal(interaction.user.id, lang);
 
         await interaction.showModal(modal);
 
@@ -92,6 +127,18 @@ async function handleTestIdModal(interaction) {
         if (!hasFullAccess) {
             return await interaction.reply({
                 content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const selectedGameType = isMultiGameModeEnabled()
+            ? interaction.fields.getStringSelectValues('test_id_game_type')?.[0]
+            : getDefaultGameType();
+        const gameType = normalizeGameType(selectedGameType, null);
+
+        if (!gameType) {
+            return await interaction.reply({
+                content: lang.giftCode.giftSetTestId.errors.invalidGameType,
                 ephemeral: true
             });
         }
@@ -128,7 +175,7 @@ async function handleTestIdModal(interaction) {
         });
 
         // Validate the player ID
-        const playerData = await fetchPlayerFromAPI(fid);
+        const playerData = await fetchPlayerFromAPI(fid, gameType);
 
         if (!playerData) {
             const containerError = [
@@ -150,7 +197,7 @@ async function handleTestIdModal(interaction) {
         }
 
         // Valid player ID - update the database
-        testIdQueries.updateUserTestId(fid, interaction.user.id);
+        testIdQueries.updateUserTestId(fid, interaction.user.id, gameType);
 
         // Log the update
         systemLogQueries.addLog(
@@ -158,6 +205,7 @@ async function handleTestIdModal(interaction) {
             `Test ID updated to: ${fid}`,
             JSON.stringify({
                 new_fid: fid,
+                game_type: gameType,
                 player_nickname: playerData.nickname,
                 updated_by: interaction.user.id,
                 updated_by_tag: interaction.user.tag
@@ -175,15 +223,21 @@ async function handleTestIdModal(interaction) {
                         )
                         .addTextDisplayComponents(
                             new TextDisplayBuilder().setContent(
+                                (() => {
+                                    const settlementName = getSettlementName(gameType, lang);
+                                    const defaultSettlementName = getSettlementName('wos', lang);
 
-                                `${lang.giftCode.giftSetTestId.content.title}` +
-                                `\n${lang.giftCode.giftSetTestId.content.description}` +
-                                `\n${lang.giftCode.giftSetTestId.content.playerInfoField.name}` +
-                                `\n${lang.giftCode.giftSetTestId.content.playerInfoField.value}`
-                                    .replace('{playerId}', fid)
-                                    .replace('{nickname}', playerData.nickname)
-                                    .replace('{furnace}', getFurnaceReadable(playerData.stove_lv, lang))
-                                    .replace('{state}', playerData.kid)
+                                    return `${lang.giftCode.giftSetTestId.content.title}` +
+                                        `\n${lang.giftCode.giftSetTestId.content.description}` +
+                                        `\n${lang.giftCode.giftSetTestId.content.playerInfoField.name}` +
+                                        `\n${lang.giftCode.giftSetTestId.content.playerInfoField.value}`
+                                            .replace('Furnace', settlementName)
+                                            .replace(defaultSettlementName, settlementName)
+                                            .replace('{playerId}', fid)
+                                            .replace('{nickname}', playerData.nickname)
+                                            .replace('{furnace}', getFurnaceReadable(playerData.stove_lv, lang, gameType))
+                                            .replace('{state}', playerData.kid);
+                                })()
                             )
                         )
                 )
@@ -207,9 +261,9 @@ async function handleTestIdModal(interaction) {
  * Tries user-set ID first, falls back to default
  * @returns {number} FID to use for testing
  */
-function getTestIdForValidation() {
+function getTestIdForValidation(gameType) {
     try {
-        const userTestId = testIdQueries.getUserTestId();
+        const userTestId = testIdQueries.getUserTestId(gameType);
 
         // If user has set a test ID, use it
         if (userTestId && userTestId.set_by) {
@@ -217,12 +271,12 @@ function getTestIdForValidation() {
         }
 
         // Otherwise use default
-        const defaultTestId = testIdQueries.getDefaultTestId();
+        const defaultTestId = testIdQueries.getDefaultTestId(gameType);
         return defaultTestId.fid;
     } catch (error) {
         handleError(null, null, error, 'getTestIdForValidation', false);
         // Return hard-coded default as last resort
-        return 40393986;
+        return gameType === 'ks' ? 103893494 : 40393986;
     }
 }
 

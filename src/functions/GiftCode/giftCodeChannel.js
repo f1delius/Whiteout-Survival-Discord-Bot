@@ -13,8 +13,11 @@ const {
 } = require('discord.js');
 const { giftCodeChannelQueries, giftCodeQueries, allianceQueries, playerQueries, systemLogQueries, idChannelQueries } = require('../utility/database');
 const { createRedeemProcess } = require('./redeemFunction');
+const { parseGameScopedGiftCode } = require('./gameScopedGiftCode');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { getGameProfile, normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
 
 // Global cache for gift code channels
@@ -29,13 +32,14 @@ const MAX_GIFT_CODE_CHANNEL_CACHE_SIZE = 1000;
  */
 async function initializeGiftCodeChannelCache() {
     try {
-        const allChannels = giftCodeChannelQueries.getAllChannels();
+        const allChannels = giftCodeChannelQueries.getAllChannelsAny();
 
         global.giftCodeChannelCache.clear();
         allChannels.forEach(channel => {
             global.giftCodeChannelCache.set(channel.channel_id, {
                 id: channel.id,
                 channelId: channel.channel_id,
+                gameType: channel.game_type,
                 linkedBy: channel.linked_by,
                 createdAt: channel.created_at
             });
@@ -169,9 +173,24 @@ async function handleGiftCodeChannelAdd(interaction) {
             });
         }
 
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_gift_code_channel_game_add',
+                title: lang.giftCode.giftCodeChannel.content.title.add,
+                description: lang.giftCode.giftCodeChannel.content.description.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
         // Create channel select menu
         const channelSelect = new ChannelSelectMenuBuilder()
-            .setCustomId(`gift_code_channel_select_${interaction.user.id}`)
+            .setCustomId(`gift_code_channel_select_${getDefaultGameType()}_${interaction.user.id}`)
             .setPlaceholder(lang.giftCode.giftCodeChannel.selectMenu.selectChannel.placeholder)
             .setChannelTypes([ChannelType.GuildText]);
 
@@ -227,8 +246,23 @@ async function handleGiftCodeChannelRemove(interaction) {
             });
         }
 
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_gift_code_channel_game_remove',
+                title: lang.giftCode.giftCodeChannel.content.title.remove,
+                description: lang.giftCode.giftCodeChannel.content.description.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
         // Get all gift code channels
-        const giftCodeChannels = giftCodeChannelQueries.getAllChannels();
+        const giftCodeChannels = giftCodeChannelQueries.getAllChannels(getDefaultGameType());
 
         if (!giftCodeChannels || giftCodeChannels.length === 0) {
             return await interaction.reply({
@@ -310,6 +344,79 @@ function createChannelRemovalContainer(interaction, giftCodeChannels, lang) {
     return { components: content };
 }
 
+async function handleGiftCodeChannelGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+
+    try {
+        const parts = interaction.customId.split('_'); // select_gift_code_channel_game_action_userId
+        const action = parts[5];
+        const expectedUserId = parts[6];
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.GIFT_CODE_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const gameType = normalizeGameType(interaction.values[0], null);
+        if (!gameType) {
+            return await interaction.reply({
+                content: lang.giftCode.giftCodeChannel.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        if (action === 'add') {
+            const channelSelect = new ChannelSelectMenuBuilder()
+                .setCustomId(`gift_code_channel_select_${gameType}_${interaction.user.id}`)
+                .setPlaceholder(lang.giftCode.giftCodeChannel.selectMenu.selectChannel.placeholder)
+                .setChannelTypes([ChannelType.GuildText]);
+
+            const selectRow = new ActionRowBuilder().addComponents(channelSelect);
+            const container = [
+                new ContainerBuilder()
+                    .setAccentColor(0x2ecc71)
+                    .addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(
+                            `${lang.giftCode.giftCodeChannel.content.title.add}\n` +
+                            `${lang.giftCode.giftCodeChannel.content.description.add}`
+                        )
+                    )
+                    .addSeparatorComponents(
+                        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+                    )
+                    .addActionRowComponents(selectRow)
+            ];
+
+            const content = updateComponentsV2AfterSeparator(interaction, container);
+            return await interaction.update({
+                components: content,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
+        const giftCodeChannels = giftCodeChannelQueries.getAllChannels(gameType);
+        if (!giftCodeChannels || giftCodeChannels.length === 0) {
+            return await interaction.reply({
+                content: lang.giftCode.giftCodeChannel.errors.noChannelsForGame,
+                ephemeral: true
+            });
+        }
+
+        const { components } = createChannelRemovalContainer(interaction, giftCodeChannels, lang);
+        await interaction.update({
+            components,
+            flags: MessageFlags.IsComponentsV2
+        });
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleGiftCodeChannelGameSelection');
+    }
+}
+
 /**
  * Handles channel selection for gift code channel
  * @param {import('discord.js').ChannelSelectMenuInteraction} interaction 
@@ -318,8 +425,9 @@ async function handleGiftCodeChannelSelect(interaction) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
 
     try {
-        // Extract user ID from custom ID
-        const expectedUserId = interaction.customId.split('_')[4]; // gift_code_channel_select_userId
+        const parts = interaction.customId.split('_'); // gift_code_channel_select_gameType_userId
+        const selectedGameType = normalizeGameType(parts[4], null);
+        const expectedUserId = parts[5];
 
         // Security check
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
@@ -330,6 +438,13 @@ async function handleGiftCodeChannelSelect(interaction) {
         if (!hasAccess) {
             return await interaction.reply({
                 content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        if (!selectedGameType) {
+            return await interaction.reply({
+                content: lang.giftCode.giftCodeChannel.errors.invalidGameType,
                 ephemeral: true
             });
         }
@@ -345,20 +460,33 @@ async function handleGiftCodeChannelSelect(interaction) {
         }
 
         // Check if channel is already an ID channel
-        const isIdChannel = idChannelQueries.getChannelByChannelId(selectedChannelId);
-        if (isIdChannel) {
-            const alliance = allianceQueries.getAllianceById(isIdChannel.alliance_id);
+        const conflictingIdChannels = idChannelQueries.getChannelsByChannelIdAny(selectedChannelId);
+        if (conflictingIdChannels && conflictingIdChannels.length > 0) {
+            const conflict = conflictingIdChannels[0];
+            const alliance = allianceQueries.getAllianceByIdAny(conflict.alliance_id);
+            const gameName = getGameProfile(conflict.game_type).displayName;
             return await interaction.reply({
                 content: lang.giftCode.giftCodeChannel.errors.channelIsIdChannel
                     .replace('{channel}', `<#${selectedChannelId}>`)
-                    .replace('{alliance}', alliance?.name || 'Unknown Alliance'),
+                    .replace('{alliance}', alliance?.name || 'Unknown Alliance')
+                    .replace('{game}', gameName),
                 ephemeral: true
             });
         }
 
         // Check if channel is already registered
-        const existingChannel = giftCodeChannelQueries.getChannelByChannelId(selectedChannelId);
+        const existingChannel = giftCodeChannelQueries.getChannelByChannelIdAny(selectedChannelId);
         if (existingChannel) {
+            const existingGameType = normalizeGameType(existingChannel.game_type, getDefaultGameType());
+            if (existingGameType !== selectedGameType) {
+                return await interaction.reply({
+                    content: lang.giftCode.giftCodeChannel.errors.channelRegisteredForOtherGame
+                        .replace('{channel}', `<#${selectedChannelId}>`)
+                        .replace('{game}', getGameProfile(existingGameType).displayName),
+                    ephemeral: true
+                });
+            }
+
             return await interaction.reply({
                 content: lang.giftCode.giftCodeChannel.errors.channelAlreadyExists,
                 ephemeral: true
@@ -366,13 +494,14 @@ async function handleGiftCodeChannelSelect(interaction) {
         }
 
         // Add channel to database
-        giftCodeChannelQueries.addChannel(selectedChannelId, interaction.user.id);
+        giftCodeChannelQueries.addChannel(selectedChannelId, interaction.user.id, selectedGameType);
 
         // Update cache
-        const newChannelData = giftCodeChannelQueries.getChannelByChannelId(selectedChannelId);
+        const newChannelData = giftCodeChannelQueries.getChannelByChannelId(selectedChannelId, selectedGameType);
         updateGiftCodeChannelCache(selectedChannelId, {
             id: newChannelData.id,
             channelId: newChannelData.channel_id,
+            gameType: newChannelData.game_type,
             linkedBy: newChannelData.linked_by,
             createdAt: newChannelData.created_at
         });
@@ -478,19 +607,24 @@ async function handleGiftCodeChannelMessage(message) {
         const channelData = global.giftCodeChannelCache.get(message.channel.id);
         if (!channelData) return;
 
-        // Extract gift code from message
-        const giftCode = extractGiftCode(message.content);
+        const fallbackGameType = normalizeGameType(channelData.gameType, getDefaultGameType());
+        const parsedGiftCode = parseGameScopedGiftCode(extractGiftCode(message.content), {
+            strictBothMode: false,
+            fallbackGameType
+        });
 
-        if (!giftCode) {
+        if (!parsedGiftCode || parsedGiftCode.error) {
             // Invalid format - silently ignore
             return;
         }
+
+        const { gameType, giftCode } = parsedGiftCode;
 
         // React with received emoji
         await message.react(receivedEmoji);
 
         // Check if gift code already exists
-        const existingCode = giftCodeQueries.getGiftCode(giftCode);
+        const existingCode = giftCodeQueries.getGiftCode(giftCode, gameType);
         if (existingCode) {
             await message.reactions.cache.filter(r => r.me).first()?.remove();
             await message.react(emojiMap['1051'] || '❌');
@@ -506,7 +640,8 @@ async function handleGiftCodeChannelMessage(message) {
                 status: 'validation'
             }
         ], {
-            adminId: message.author.id
+            adminId: message.author.id,
+            gameType
         });
 
         if (!validationOutcome?.success) {
@@ -520,10 +655,10 @@ async function handleGiftCodeChannelMessage(message) {
         const isVipCode = validationOutcome.results?.[0]?.is_vip || false;
 
         // Add gift code to database
-        giftCodeQueries.addGiftCode(giftCode, 'active', message.author.id, 'manual', false, isVipCode);
+        giftCodeQueries.addGiftCode(giftCode, 'active', message.author.id, 'manual', false, isVipCode, gameType);
 
         // Set last_validated timestamp
-        giftCodeQueries.updateLastValidated(giftCode);
+        giftCodeQueries.updateLastValidated(giftCode, gameType);
 
         // Reply with success
         await message.reactions.cache.filter(r => r.me).first()?.remove();
@@ -532,7 +667,7 @@ async function handleGiftCodeChannelMessage(message) {
 
         // Start auto-redeem for alliances
         try {
-            await startAutoRedeemForAlliances(giftCode, message.author.id, lang);
+            await startAutoRedeemForAlliances(giftCode, message.author.id, lang, gameType);
         } catch (error) {
             await handleError(null, lang, error, 'startAutoRedeemForAlliances', false);
             // Change reaction to failed
@@ -585,9 +720,9 @@ function extractGiftCode(content) {
  * @param {string} adminId - Admin who initiated the process
  * @param {Object} lang - Language object
  */
-async function startAutoRedeemForAlliances(giftCode, adminId, lang) {
+async function startAutoRedeemForAlliances(giftCode, adminId, lang, gameType) {
     // Get all alliances with auto-redeem enabled, ordered by priority
-    const alliances = allianceQueries.getAlliancesWithAutoRedeem();
+    const alliances = allianceQueries.getAlliancesWithAutoRedeem(gameType);
 
     if (alliances.length === 0) {
         return;
@@ -596,7 +731,7 @@ async function startAutoRedeemForAlliances(giftCode, adminId, lang) {
     // Process each alliance
     for (const alliance of alliances) {
         // Get all players for this alliance
-        const players = playerQueries.getPlayersByAlliance(alliance.id);
+        const players = playerQueries.getPlayersByAlliance(alliance.id, gameType);
 
         if (players.length === 0) {
             continue;
@@ -611,10 +746,12 @@ async function startAutoRedeemForAlliances(giftCode, adminId, lang) {
 
         const redeemOptions = {
             adminId,
+            gameType,
             allianceContext: {
                 id: alliance.id,
                 name: alliance.name,
-                channelId: alliance.channel_id || null
+                channelId: alliance.channel_id || null,
+                gameType
             }
         };
 
@@ -626,6 +763,7 @@ async function startAutoRedeemForAlliances(giftCode, adminId, lang) {
 module.exports = {
     createGiftCodeChannelButton,
     handleGiftCodeChannelButton,
+    handleGiftCodeChannelGameSelection,
     handleGiftCodeChannelAdd,
     handleGiftCodeChannelRemove,
     handleGiftCodeChannelSelect,

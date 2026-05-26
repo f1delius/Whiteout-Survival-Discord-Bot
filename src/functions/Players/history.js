@@ -17,8 +17,10 @@ const {
 const { allianceQueries, playerQueries, furnaceChangeQueries, nicknameChangeQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
-const { getFurnaceReadable } = require('./furnaceReadable');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, getAlliancesForUser, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, getAlliancesForUser, getAlliancesForUserByGame, createGameSelectionComponents, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
 
 const CHANGES_PER_PAGE = 10;
@@ -32,13 +34,16 @@ const CHANGES_PER_PAGE = 10;
  * @returns {Array} Sorted array of change records (newest first)
  */
 function getChangesByAlliance(allianceId, type) {
-    const players = playerQueries.getPlayersByAllianceId(allianceId);
+    const alliance = allianceQueries.getAllianceByIdAny(allianceId);
+    if (!alliance) return [];
+
+    const players = playerQueries.getPlayersByAllianceId(allianceId, alliance.game_type);
     const fids = new Set(players.map(p => p.fid));
     const playerMap = new Map(players.map(p => [p.fid, p]));
 
     const allChanges = type === 'furnace'
-        ? furnaceChangeQueries.getAllChanges()
-        : nicknameChangeQueries.getAllChanges();
+        ? furnaceChangeQueries.getAllChanges(alliance.game_type)
+        : nicknameChangeQueries.getAllChanges(alliance.game_type);
 
     return allChanges
         .filter(c => fids.has(c.fid))
@@ -52,13 +57,13 @@ function getChangesByAlliance(allianceId, type) {
  * @param {Object} lang - Language object
  * @returns {string} Formatted text line
  */
-function formatChange(change, type, lang) {
+function formatChange(change, type, lang, gameType = 'wos') {
     const nickname = change.player?.nickname || `Player ${change.fid}`;
     const date = change.change_date || 'Unknown';
 
     if (type === 'furnace') {
-        const oldLv = getFurnaceReadable(change.old_furnace_lv, lang);
-        const newLv = getFurnaceReadable(change.new_furnace_lv, lang);
+        const oldLv = getFurnaceReadable(change.old_furnace_lv, lang, gameType);
+        const newLv = getFurnaceReadable(change.new_furnace_lv, lang, gameType);
         return lang.players.history.content.furnaceChange
             .replace('{nickname}', nickname)
             .replace('{fid}', change.fid)
@@ -91,6 +96,41 @@ function createHistoryButton(userId, lang = {}) {
         .setEmoji(getComponentEmoji(getEmojiMapForUser(userId), '1044'));
 }
 
+function createHistoryTypeContainer(interaction, lang, gameType = null) {
+    const emojiMap = getEmojiMapForUser(interaction.user.id);
+    const resolvedGameType = normalizeGameType(gameType, getDefaultGameType());
+    const settlementLabel = getSettlementName(resolvedGameType, lang);
+
+    const typeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`history_type_furnace_${resolvedGameType}_${interaction.user.id}`)
+            .setLabel(settlementLabel)
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji(getComponentEmoji(emojiMap, '1012')),
+        new ButtonBuilder()
+            .setCustomId(`history_type_nickname_${resolvedGameType}_${interaction.user.id}`)
+            .setLabel(lang.players.history.buttons.nickname)
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji(getComponentEmoji(emojiMap, '1042'))
+    );
+
+    const container = [
+        new ContainerBuilder()
+            .setAccentColor(2417109)
+            .addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `${lang.players.history.content.title}\n${lang.players.history.content.typeDescription}`
+                )
+            )
+            .addSeparatorComponents(
+                new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+            )
+            .addActionRowComponents(typeRow)
+    ];
+
+    return { components: updateComponentsV2AfterSeparator(interaction, container) };
+}
+
 // ─── Handler: Main History button → type selection ─────────────────────────────
 
 /**
@@ -108,37 +148,20 @@ async function handleHistoryButton(interaction) {
             return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
         }
 
-        const emojiMap = getEmojiMapForUser(interaction.user.id);
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_history_game_root',
+                title: lang.players.history.content.title,
+                description: lang.players.history.content.selectGameDescription
+            });
 
-        const typeRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`history_type_furnace_${interaction.user.id}`)
-                .setLabel(lang.players.history.buttons.furnace)
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji(getComponentEmoji(emojiMap, '1012')),
-            new ButtonBuilder()
-                .setCustomId(`history_type_nickname_${interaction.user.id}`)
-                .setLabel(lang.players.history.buttons.nickname)
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji(getComponentEmoji(emojiMap, '1042'))
-        );
+            return await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
+        }
 
-        const container = [
-            new ContainerBuilder()
-                .setAccentColor(2417109)
-                .addTextDisplayComponents(
-                    new TextDisplayBuilder().setContent(
-                        `${lang.players.history.content.title}\n${lang.players.history.content.typeDescription}`
-                    )
-                )
-                .addSeparatorComponents(
-                    new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-                )
-                .addActionRowComponents(typeRow)
-        ];
-
-        const content = updateComponentsV2AfterSeparator(interaction, container);
-        await interaction.update({ components: content, flags: MessageFlags.IsComponentsV2 });
+        const { components } = createHistoryTypeContainer(interaction, lang, getDefaultGameType());
+        await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
     } catch (error) {
         await handleError(interaction, lang, error, 'handleHistoryButton');
     }
@@ -155,17 +178,18 @@ async function handleHistoryButton(interaction) {
  * @param {number} [page=0] - Current page
  * @returns {{ components: Array }}
  */
-function createHistoryAllianceContainer(interaction, alliances, type, lang, page = 0) {
+function createHistoryAllianceContainer(interaction, alliances, type, lang, page = 0, gameType = null) {
     const itemsPerPage = 24;
     const totalPages = Math.max(1, Math.ceil(alliances.length / itemsPerPage));
     const startIndex = page * itemsPerPage;
     const currentPageAlliances = alliances.slice(startIndex, startIndex + itemsPerPage);
+    const resolvedGameType = normalizeGameType(gameType, null);
 
     const emojiMap = getEmojiMapForUser(interaction.user.id);
 
     // "By ID" button as section accessory
     const byIdButton = new ButtonBuilder()
-        .setCustomId(`history_byid_${type}_${interaction.user.id}`)
+        .setCustomId(`history_byid_${type}_${resolvedGameType || 'auto'}_${interaction.user.id}`)
         .setLabel(lang.players.history.buttons.search)
         .setStyle(ButtonStyle.Secondary)
         .setEmoji(getComponentEmoji(emojiMap, '1043'));
@@ -180,7 +204,7 @@ function createHistoryAllianceContainer(interaction, alliances, type, lang, page
     }));
 
     const allianceSelect = new StringSelectMenuBuilder()
-        .setCustomId(`history_alliance_${type}_${interaction.user.id}_${page}`)
+        .setCustomId(`history_alliance_${type}_${interaction.user.id}_${page}${resolvedGameType ? `_${resolvedGameType}` : ''}`)
         .setPlaceholder(lang.players.history.selectMenu.allianceSelect.placeholder)
         .addOptions(selectOptions);
 
@@ -193,7 +217,8 @@ function createHistoryAllianceContainer(interaction, alliances, type, lang, page
         userId: interaction.user.id,
         currentPage: page,
         totalPages,
-        lang
+        lang,
+        contextData: resolvedGameType ? [resolvedGameType] : []
     });
 
     if (paginationRow) {
@@ -232,21 +257,24 @@ function createHistoryAllianceContainer(interaction, alliances, type, lang, page
 async function handleHistoryTypeButton(interaction) {
     const { lang, adminData } = getUserInfo(interaction.user.id);
     try {
-        // history_type_{furnace|nickname}_{userId}
+        // history_type_{furnace|nickname}_{gameType}_{userId}
         const parts = interaction.customId.split('_');
         const type = parts[2]; // furnace or nickname
-        const expectedUserId = parts[3];
+        const selectedGameType = normalizeGameType(parts[3], getDefaultGameType());
+        const expectedUserId = parts[4];
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const alliances = getAlliancesForUser(adminData);
+        const alliances = getAlliancesForUserByGame(adminData, selectedGameType, PERMISSIONS.PLAYER_MANAGEMENT);
         if (alliances.length === 0) {
             return await interaction.reply({
-                content: lang.players.history.errors.noAlliances,
+                content: isMultiGameModeEnabled()
+                    ? lang.players.history.errors.noAlliancesForGame
+                    : lang.players.history.errors.noAlliances,
                 ephemeral: true
             });
         }
 
-        const { components } = createHistoryAllianceContainer(interaction, alliances, type, lang, 0);
+        const { components } = createHistoryAllianceContainer(interaction, alliances, type, lang, 0, selectedGameType);
         await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
     } catch (error) {
         await handleError(interaction, lang, error, 'handleHistoryTypeButton');
@@ -262,17 +290,68 @@ async function handleHistoryTypeButton(interaction) {
 async function handleHistoryAlliancePagination(interaction) {
     const { lang, adminData } = getUserInfo(interaction.user.id);
     try {
-        const { userId: expectedUserId, newPage, feature } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId: expectedUserId, newPage, feature, contextData } = parsePaginationCustomId(
+            interaction.customId,
+            isMultiGameModeEnabled() ? 1 : 0
+        );
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         // feature is "history_furnace" or "history_nickname"
         const type = feature.split('_')[1];
-        const alliances = getAlliancesForUser(adminData);
+        const gameType = normalizeGameType(contextData[0] || getDefaultGameType());
+        const alliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (alliances.length === 0) {
+            return await interaction.reply({
+                content: isMultiGameModeEnabled()
+                    ? lang.players.history.errors.noAlliancesForGame
+                    : lang.players.history.errors.noAlliances,
+                ephemeral: true
+            });
+        }
 
-        const { components } = createHistoryAllianceContainer(interaction, alliances, type, lang, newPage);
+        const { components } = createHistoryAllianceContainer(interaction, alliances, type, lang, newPage, gameType);
         await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
     } catch (error) {
         await handleError(interaction, lang, error, 'handleHistoryAlliancePagination');
+    }
+}
+
+/**
+ * Handles game selection before alliance selection in both mode
+ * @param {import('discord.js').StringSelectMenuInteraction} interaction
+ */
+async function handleHistoryGameSelection(interaction) {
+    const { lang, adminData } = getUserInfo(interaction.user.id);
+    try {
+        const parts = interaction.customId.split('_'); // select_history_game_root_userId
+        const source = parts[3];
+        const expectedUserId = parts[4];
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
+        }
+
+        const selectedGameType = normalizeGameType(interaction.values[0], null);
+        if (!selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.history.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        if (source !== 'root') {
+            return await interaction.reply({
+                content: lang.players.history.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const { components } = createHistoryTypeContainer(interaction, lang, selectedGameType);
+        await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleHistoryGameSelection');
     }
 }
 
@@ -285,16 +364,24 @@ async function handleHistoryAlliancePagination(interaction) {
 async function handleHistoryAllianceSelection(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        // customId: history_alliance_{type}_{userId}_{page}
+        // customId: history_alliance_{type}_{userId}_{page}_{gameType?}
         const parts = interaction.customId.split('_');
         const type = parts[2]; // furnace or nickname
         const expectedUserId = parts[3];
+        const selectedGameType = normalizeGameType(parts[5], null);
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const allianceId = parseInt(interaction.values[0]);
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         if (!alliance) {
             return await interaction.reply({ content: lang.common.error, ephemeral: true });
+        }
+
+        if (selectedGameType && alliance.game_type !== selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.history.errors.invalidGameType,
+                ephemeral: true
+            });
         }
 
         const changes = getChangesByAlliance(allianceId, type);
@@ -321,7 +408,7 @@ async function handleHistoryChangesPagination(interaction) {
         // feature is "history_furnace" or "history_nickname"
         const type = feature.split('_')[1];
         const allianceId = parseInt(contextData[0]);
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         const changes = getChangesByAlliance(allianceId, type);
 
         const { components } = buildChangesContainer(interaction, changes, type, alliance, lang, newPage);
@@ -340,14 +427,15 @@ async function handleHistoryChangesPagination(interaction) {
 async function handleHistoryByIdButton(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        // history_byid_{type}_{userId}
+        // history_byid_{type}_{gameType}_{userId}
         const parts = interaction.customId.split('_');
         const type = parts[2];
-        const expectedUserId = parts[3];
+        const gameType = parts[3];
+        const expectedUserId = parts[4];
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const modal = new ModalBuilder()
-            .setCustomId(`history_search_modal_${type}_0_${interaction.user.id}`)
+            .setCustomId(`history_search_modal_${type}_0_${gameType}_${interaction.user.id}`)
             .setTitle(lang.players.history.modal.title);
 
         const idInput = new TextInputBuilder()
@@ -377,16 +465,17 @@ async function handleHistoryByIdButton(interaction) {
 async function handleHistorySearchButton(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        // history_search_{type}_{allianceId}_{userId}
+        // history_search_{type}_{allianceId}_{gameType}_{userId}
         const parts = interaction.customId.split('_');
-        const expectedUserId = parts[4];
+        const expectedUserId = parts[5];
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const type = parts[2];
         const allianceId = parts[3];
+        const gameType = parts[4];
 
         const modal = new ModalBuilder()
-            .setCustomId(`history_search_modal_${type}_${allianceId}_${interaction.user.id}`)
+            .setCustomId(`history_search_modal_${type}_${allianceId}_${gameType}_${interaction.user.id}`)
             .setTitle(lang.players.history.modal.title);
 
         const idInput = new TextInputBuilder()
@@ -416,11 +505,12 @@ async function handleHistorySearchButton(interaction) {
 async function handleHistorySearchModal(interaction) {
     const { lang, adminData } = getUserInfo(interaction.user.id);
     try {
-        // history_search_modal_{type}_{allianceId}_{userId}
+        // history_search_modal_{type}_{allianceId}_{gameType}_{userId}
         const parts = interaction.customId.split('_');
         const type = parts[3];
         const allianceId = parseInt(parts[4]);
-        const expectedUserId = parts[5];
+        const selectedGameType = normalizeGameType(parts[5], null);
+        const expectedUserId = parts[6];
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const inputId = interaction.fields.getTextInputValue('player_id_input').trim();
@@ -433,7 +523,12 @@ async function handleHistorySearchModal(interaction) {
         }
 
         // Check if player exists in the database
-        const player = playerQueries.getPlayer(fid);
+        const alliance = allianceId > 0 ? allianceQueries.getAllianceByIdAny(allianceId) : null;
+        const player = alliance
+            ? playerQueries.getPlayer(fid, alliance.game_type)
+            : (selectedGameType
+                ? playerQueries.getPlayersByFidAny(fid).find(p => p.game_type === selectedGameType)
+                : playerQueries.getPlayersByFidAny(fid)[0]);
         if (!player) {
             return await interaction.reply({
                 content: lang.players.history.errors.playerNotFound,
@@ -442,7 +537,9 @@ async function handleHistorySearchModal(interaction) {
         }
 
         // Check if the player's alliance is accessible to this admin
-        const accessibleAlliances = getAlliancesForUser(adminData);
+        const accessibleAlliances = selectedGameType
+            ? getAlliancesForUserByGame(adminData, selectedGameType, PERMISSIONS.PLAYER_MANAGEMENT)
+            : getAlliancesForUser(adminData);
         const accessibleIds = new Set(accessibleAlliances.map(a => a.id));
         if (!accessibleIds.has(player.alliance_id)) {
             return await interaction.reply({
@@ -453,11 +550,11 @@ async function handleHistorySearchModal(interaction) {
 
         // Get the player's changes of the selected type
         const changes = type === 'furnace'
-            ? furnaceChangeQueries.getChangesByPlayer(fid).map(c => ({ ...c, player }))
-            : nicknameChangeQueries.getChangesByPlayer(fid).map(c => ({ ...c, player }));
+            ? furnaceChangeQueries.getChangesByPlayer(fid, player.game_type).map(c => ({ ...c, player }))
+            : nicknameChangeQueries.getChangesByPlayer(fid, player.game_type).map(c => ({ ...c, player }));
 
         // Use the player's own alliance for display context
-        const displayAlliance = allianceQueries.getAllianceById(player.alliance_id) || { id: player.alliance_id, name: 'Unknown' };
+        const displayAlliance = allianceQueries.getAllianceById(player.alliance_id, player.game_type) || { id: player.alliance_id, name: 'Unknown', game_type: player.game_type };
         const { components } = buildChangesContainer(interaction, changes, type, displayAlliance, lang, 0, fid);
         await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
     } catch (error) {
@@ -481,12 +578,14 @@ async function handleHistoryPlayerPagination(interaction) {
         const type = feature.split('_')[1]; // history_furnace or history_nickname
         const allianceId = parseInt(contextData[0]);
         const fid = parseInt(contextData[1]);
-        const alliance = allianceQueries.getAllianceById(allianceId);
-        const player = playerQueries.getPlayer(fid);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
+        const player = alliance
+            ? playerQueries.getPlayer(fid, alliance.game_type)
+            : playerQueries.getPlayersByFidAny(fid)[0];
 
         const changes = type === 'furnace'
-            ? furnaceChangeQueries.getChangesByPlayer(fid).map(c => ({ ...c, player }))
-            : nicknameChangeQueries.getChangesByPlayer(fid).map(c => ({ ...c, player }));
+            ? furnaceChangeQueries.getChangesByPlayer(fid, player?.game_type || alliance?.game_type || 'wos').map(c => ({ ...c, player }))
+            : nicknameChangeQueries.getChangesByPlayer(fid, player?.game_type || alliance?.game_type || 'wos').map(c => ({ ...c, player }));
 
         const { components } = buildChangesContainer(interaction, changes, type, alliance, lang, newPage, fid);
         await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
@@ -515,8 +614,9 @@ function buildChangesContainer(interaction, changes, type, alliance, lang, page 
     const pageChanges = changes.slice(startIndex, startIndex + CHANGES_PER_PAGE);
 
     // Build title
+    const gameType = alliance?.game_type || changes[0]?.player?.game_type || getDefaultGameType();
     const typeLabel = type === 'furnace'
-        ? lang.players.history.buttons.furnace
+        ? getSettlementName(gameType, lang)
         : lang.players.history.buttons.nickname;
 
     let titleText;
@@ -538,7 +638,7 @@ function buildChangesContainer(interaction, changes, type, alliance, lang, page 
     if (changes.length === 0) {
         displayText = `${titleText}\n${lang.players.history.errors.noChanges}`;
     } else {
-        const lines = pageChanges.map(c => formatChange(c, type, lang));
+        const lines = pageChanges.map(c => formatChange(c, type, lang, gameType));
         const pageInfo = lang.pagination.text.pageInfo
             .replace('{current}', safePage + 1)
             .replace('{total}', totalPages);
@@ -560,7 +660,7 @@ function buildChangesContainer(interaction, changes, type, alliance, lang, page 
     // Search button
     const emojiMap = getEmojiMapForUser(interaction.user.id);
     const searchButton = new ButtonBuilder()
-        .setCustomId(`history_search_${type}_${alliance.id}_${interaction.user.id}`)
+        .setCustomId(`history_search_${type}_${alliance.id}_${gameType}_${interaction.user.id}`)
         .setLabel(lang.players.history.buttons.search)
         .setStyle(ButtonStyle.Secondary)
         .setEmoji(getComponentEmoji(emojiMap, '1043'));
@@ -592,6 +692,7 @@ module.exports = {
     createHistoryButton,
     handleHistoryButton,
     handleHistoryTypeButton,
+    handleHistoryGameSelection,
     handleHistoryByIdButton,
     handleHistoryAlliancePagination,
     handleHistoryAllianceSelection,

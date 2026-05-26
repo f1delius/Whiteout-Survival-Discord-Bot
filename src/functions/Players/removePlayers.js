@@ -18,9 +18,19 @@ const { allianceQueries, playerQueries, adminLogQueries } = require('../utility/
 const { LOG_CODES } = require('../utility/AdminLogs');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
-const { getFurnaceReadable } = require('./furnaceReadable');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, getAlliancesForUser, updateComponentsV2AfterSeparator, createAllianceSelectionComponents } = require('../utility/commonFunctions');
+const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, createAllianceSelectionComponents, createGameSelectionComponents, getAlliancesForUserByGame } = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
+
+function buildPlayerCountMap(alliances) {
+    const playerCountMap = {};
+    for (const alliance of alliances) {
+        playerCountMap[alliance.id] = playerQueries.getPlayersByAllianceId(alliance.id, alliance.game_type).length;
+    }
+    return playerCountMap;
+}
 
 function createRemovePlayersSessionToken() {
     return randomBytes(6).toString('base64url');
@@ -83,8 +93,22 @@ async function handleRemovePlayersButton(interaction) {
             });
         }
 
-        // Get alliances based on user permissions
-        const allAlliances = getAlliancesForUser(adminData);
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_remove_players_game',
+                title: lang.players.removePlayer.content.title.base,
+                description: lang.players.removePlayer.content.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
+        const allAlliances = getAlliancesForUserByGame(adminData, getDefaultGameType(), PERMISSIONS.PLAYER_MANAGEMENT);
 
         if (allAlliances.length === 0) {
             return await interaction.reply({
@@ -94,12 +118,7 @@ async function handleRemovePlayersButton(interaction) {
         }
 
         // Get player counts for all alliances in a single query
-        const allianceIds = allAlliances.map(a => a.id);
-        const playerCounts = playerQueries.getPlayerCountsByAllianceIds(allianceIds);
-        const playerCountMap = {};
-        playerCounts.forEach(row => {
-            playerCountMap[row.alliance_id] = row.player_count;
-        });
+        const playerCountMap = buildPlayerCountMap(allAlliances);
 
         // Filter out alliances with 0 members
         const alliancesWithMembers = allAlliances.filter(alliance => {
@@ -114,7 +133,14 @@ async function handleRemovePlayersButton(interaction) {
         }
 
         // Create alliance selection embed and dropdown
-        const { components } = createAllianceSelectionContainer(interaction, alliancesWithMembers, lang, playerCountMap);
+        const { components } = createAllianceSelectionContainer(
+            interaction,
+            alliancesWithMembers,
+            lang,
+            playerCountMap,
+            0,
+            getDefaultGameType()
+        );
 
         await interaction.update({
             components: components,
@@ -130,7 +156,9 @@ async function handleRemovePlayersButton(interaction) {
 /**
  * Creates alliance selection embed using shared utility with player count info
  */
-function createAllianceSelectionContainer(interaction, alliances, lang, playerCountMap, page = 0) {
+function createAllianceSelectionContainer(interaction, alliances, lang, playerCountMap, page = 0, gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, null);
+
     return createAllianceSelectionComponents({
         interaction,
         alliances,
@@ -144,6 +172,7 @@ function createAllianceSelectionContainer(interaction, alliances, lang, playerCo
         description: lang.players.removePlayer.content.description.base,
         accentColor: 16711937, // Red
         showAll: false,
+        contextData: resolvedGameType ? [resolvedGameType] : [],
         optionMapper: (alliance) => ({
             label: alliance.name,
             value: alliance.id.toString(),
@@ -172,6 +201,7 @@ function createPlayerSelectionEmbed(interaction, players, lang, alliance, page =
     const startIndex = page * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     const currentPagePlayers = players.slice(startIndex, endIndex);
+    const settlementName = getSettlementName(alliance.game_type, lang);
 
     const components = [];
 
@@ -202,6 +232,8 @@ function createPlayerSelectionEmbed(interaction, players, lang, alliance, page =
         components.push(new ActionRowBuilder().addComponents(removeByIdButton));
     }
 
+    const defaultSettlementName = getSettlementName('wos', lang);
+
     // Third row: Select menu (if there are players)
     if (currentPagePlayers.length > 0) {
         const options = currentPagePlayers.map(player => ({
@@ -209,7 +241,9 @@ function createPlayerSelectionEmbed(interaction, players, lang, alliance, page =
             value: player.fid.toString(),
             description: (lang.players.removePlayer.selectMenu.playerSelect.description)
                 .replace('{id}', player.fid)
-                .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang) || "Unknown")
+                .replace('Furnace', settlementName)
+                .replace(defaultSettlementName, settlementName)
+                .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang, alliance.game_type) || "Unknown")
                 .replace('{state}', player.state || "Unknown"),
             emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1026')
         }));
@@ -253,10 +287,14 @@ function createPlayerSelectionEmbed(interaction, players, lang, alliance, page =
  * @returns {Object} Embed and components
  */
 function createRemovalConfirmationEmbed(players, alliance, interaction, lang) {
+    const settlementName = getSettlementName(alliance.game_type, lang);
+    const defaultSettlementName = getSettlementName('wos', lang);
     const playerList = players.map(player => lang.players.removePlayer.content.playersToRemoveField.value
         .replace('{nickname}', player.nickname || `Player ${player.fid}`)
         .replace('{id}', player.fid)
-        .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang) || "Unknown")
+        .replace('Furnace', settlementName)
+        .replace(defaultSettlementName, settlementName)
+        .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang, alliance.game_type) || "Unknown")
         .replace('{state}', player.state || "Unknown")
     ).join('\n');
 
@@ -307,25 +345,40 @@ async function handleRemovePlayersAlliancePagination(interaction) {
     const { lang, adminData } = getUserInfo(interaction.user.id);
 
     try {
-        const { userId: expectedUserId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId: expectedUserId, newPage, contextData } = parsePaginationCustomId(
+            interaction.customId,
+            isMultiGameModeEnabled() ? 1 : 0
+        );
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const allAlliances = getAlliancesForUser(adminData);
+        const gameType = normalizeGameType(contextData[0] || getDefaultGameType());
+        const allAlliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (allAlliances.length === 0) {
+            return await interaction.reply({
+                content: isMultiGameModeEnabled()
+                    ? lang.players.removePlayer.errors.noAssignedAlliancesForGame
+                    : lang.players.removePlayer.errors.noAssignedAlliances,
+                ephemeral: true
+            });
+        }
 
         // Get player counts for all alliances in a single query
-        const allianceIds = allAlliances.map(a => a.id);
-        const playerCounts = playerQueries.getPlayerCountsByAllianceIds(allianceIds);
-        const playerCountMap = {};
-        playerCounts.forEach(row => {
-            playerCountMap[row.alliance_id] = row.player_count;
-        });
+        const playerCountMap = buildPlayerCountMap(allAlliances);
 
         const alliancesWithMembers = allAlliances.filter(alliance => {
             return (playerCountMap[alliance.id] || 0) > 0;
         });
+        if (alliancesWithMembers.length === 0) {
+            return await interaction.reply({
+                content: isMultiGameModeEnabled()
+                    ? lang.players.removePlayer.errors.noAvailableAlliancesForGame
+                    : lang.players.removePlayer.errors.noAvailableAlliances,
+                ephemeral: true
+            });
+        }
 
-        const { components } = createAllianceSelectionContainer(interaction, alliancesWithMembers, lang, playerCountMap, newPage);
+        const { components } = createAllianceSelectionContainer(interaction, alliancesWithMembers, lang, playerCountMap, newPage, gameType);
 
         await interaction.update({
             components: components,
@@ -334,6 +387,70 @@ async function handleRemovePlayersAlliancePagination(interaction) {
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleRemovePlayersAlliancePagination');
+    }
+}
+
+/**
+ * Handles game selection before alliance selection in both mode
+ * @param {import('discord.js').StringSelectMenuInteraction} interaction
+ */
+async function handleRemovePlayersGameSelection(interaction) {
+    const { lang, adminData } = getUserInfo(interaction.user.id);
+
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_remove_players_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const selectedGameType = normalizeGameType(interaction.values[0], null);
+        if (!selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.removePlayer.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const allAlliances = getAlliancesForUserByGame(adminData, selectedGameType, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (allAlliances.length === 0) {
+            return await interaction.reply({
+                content: lang.players.removePlayer.errors.noAssignedAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        const playerCountMap = buildPlayerCountMap(allAlliances);
+        const alliancesWithMembers = allAlliances.filter(alliance => (playerCountMap[alliance.id] || 0) > 0);
+        if (alliancesWithMembers.length === 0) {
+            return await interaction.reply({
+                content: lang.players.removePlayer.errors.noAvailableAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        const { components } = createAllianceSelectionContainer(
+            interaction,
+            alliancesWithMembers,
+            lang,
+            playerCountMap,
+            0,
+            selectedGameType
+        );
+
+        await interaction.update({
+            components,
+            flags: MessageFlags.IsComponentsV2
+        });
+
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleRemovePlayersGameSelection');
     }
 }
 
@@ -350,8 +467,8 @@ async function handleRemovePlayersPlayerPagination(interaction) {
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         // contextData[0] = allianceId, contextData[1] = totalRemovedCount
-        const alliance = allianceQueries.getAllianceById(contextData[0]);
-        const players = playerQueries.getPlayersByAllianceId(contextData[0]);
+        const alliance = allianceQueries.getAllianceByIdAny(contextData[0]);
+        const players = playerQueries.getPlayersByAllianceId(contextData[0], alliance.game_type);
         const totalRemovedCount = parseInt(contextData[1]) || 0;
 
         // Reconstruct success content if there are removed players
@@ -383,12 +500,13 @@ async function handleRemovePlayersAllianceSelection(interaction) {
 
     try {
         const customIdParts = interaction.customId.split('_');
-        const expectedUserId = customIdParts[4]; // remove_players_alliance_select_userId_page
+        const expectedUserId = customIdParts[4]; // remove_players_alliance_select_userId_page_gameType?
+        const selectedGameType = normalizeGameType(customIdParts[6], null);
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const allianceId = parseInt(interaction.values[0]);
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
 
         if (!alliance) {
             return await interaction.reply({
@@ -397,8 +515,15 @@ async function handleRemovePlayersAllianceSelection(interaction) {
             });
         }
 
+        if (selectedGameType && alliance.game_type !== selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.removePlayer.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
         // Get players from alliance
-        const players = playerQueries.getPlayersByAllianceId(allianceId);
+        const players = playerQueries.getPlayersByAllianceId(allianceId, alliance.game_type);
 
         if (players.length === 0) {
             return await interaction.reply({
@@ -434,12 +559,12 @@ async function handleRemovePlayersPlayerSelection(interaction) {
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         const selectedPlayerIds = interaction.values.map(id => parseInt(id));
 
         // Get player objects
         const selectedPlayers = selectedPlayerIds.map(playerId => {
-            return playerQueries.getPlayerByFid(playerId);
+            return playerQueries.getPlayerByFid(playerId, alliance.game_type);
         }).filter(Boolean);
 
         // Store selected players temporarily so confirmation uses a short tokenized custom ID.
@@ -485,9 +610,9 @@ async function handleRemovePlayersConfirm(interaction) {
             });
         }
 
-        const alliance = allianceQueries.getAllianceById(session.allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(session.allianceId);
         const playerIds = session.players.map(player => player.fid);
-        const playersToRemove = playerQueries.getPlayersByFids(playerIds);
+        const playersToRemove = playerQueries.getPlayersByFids(playerIds, alliance.game_type);
         const currentTotal = session.currentTotal || 0;
 
         if (playersToRemove.length === 0) {
@@ -501,14 +626,14 @@ async function handleRemovePlayersConfirm(interaction) {
         let removedCount = 0;
         try {
             const fidsToDelete = playersToRemove.map(p => p.fid);
-            playerQueries.deletePlayers(fidsToDelete);
+            playerQueries.deletePlayers(fidsToDelete, alliance.game_type);
             removedCount = playersToRemove.length;
         } catch (error) {
             await handleError(interaction, lang, error, 'handleRemovePlayersConfirm - batch delete failed', false);
             // Fall back to individual deletion if batch fails
             for (const player of playersToRemove) {
                 try {
-                    playerQueries.deletePlayer(player.fid);
+                    playerQueries.deletePlayer(player.fid, alliance.game_type);
                     removedCount++;
                 } catch (individualError) {
                     await handleError(interaction, lang, individualError, `handleRemovePlayersConfirm - individual delete failed for player ${player.fid}`, false);
@@ -535,7 +660,7 @@ async function handleRemovePlayersConfirm(interaction) {
         );
 
         // Show success message and return to player selection
-        const remainingPlayers = playerQueries.getPlayersByAllianceId(session.allianceId);
+        const remainingPlayers = playerQueries.getPlayersByAllianceId(session.allianceId, alliance.game_type);
 
         if (remainingPlayers.length === 0) {
             const newSection = [
@@ -586,7 +711,7 @@ async function handleRemovePlayersAddIds(interaction) {
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
 
         if (!alliance) {
             return await interaction.reply({
@@ -634,7 +759,7 @@ async function handleRemovePlayersIdsModal(interaction) {
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
 
         if (!alliance) {
             return await interaction.reply({
@@ -657,7 +782,7 @@ async function handleRemovePlayersIdsModal(interaction) {
         const playerIds = sanitizedPlayerIds.split(',').map(id => parseInt(id));
 
         // Fetch all players in batch
-        const allPlayers = playerQueries.getPlayersByFids(playerIds);
+        const allPlayers = playerQueries.getPlayersByFids(playerIds, alliance.game_type);
         const foundPlayers = [];
         const notFoundPlayers = [];
 
@@ -755,8 +880,8 @@ async function handleRemovePlayersCancel(interaction) {
             });
         }
 
-        const alliance = allianceQueries.getAllianceById(session.allianceId);
-        const players = playerQueries.getPlayersByAllianceId(session.allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(session.allianceId);
+        const players = playerQueries.getPlayersByAllianceId(session.allianceId, alliance.game_type);
 
         // Return to player selection
         const { components } = createPlayerSelectionEmbed(interaction, players, lang, alliance, 0, '');
@@ -775,6 +900,7 @@ async function handleRemovePlayersCancel(interaction) {
 module.exports = {
     createRemovePlayersButton,
     handleRemovePlayersButton,
+    handleRemovePlayersGameSelection,
     handleRemovePlayersAlliancePagination,
     handleRemovePlayersPlayerPagination,
     handleRemovePlayersAllianceSelection,

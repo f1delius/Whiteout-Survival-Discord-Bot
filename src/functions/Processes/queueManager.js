@@ -1,9 +1,9 @@
 const {
     getProcessById,
+    resolveProcessGameType,
     updateProcessStatus,
     setProcessPreemption,
     clearProcessPreemption,
-    getNextQueuedProcess,
     getActiveProcesses,
     getProcessesByStatus,
     getProcessesByActionAndTarget,
@@ -44,6 +44,27 @@ const getAutoRefreshManager = () => {
 class QueueManager {
     constructor() {
         this._startingNext = false;
+        this.supportedGames = ['wos', 'ks'];
+    }
+
+    async startProcess(process, paused = null) {
+        await updateProcessStatus(process.id, PROCESS_STATUS.ACTIVE);
+
+        if (process.preempted_by) {
+            await clearProcessPreemption(process.id);
+        }
+
+        const executor = getProcessExecutor();
+        const executionPayload = {
+            process_id: process.id,
+            status: 'active',
+            paused
+        };
+
+        executor.executeProcess(executionPayload).catch(error => {
+            systemLogQueries.addLog('error', `Unhandled execution error for process ${process.id}`,
+                JSON.stringify({ process_id: process.id, error: error.message, function: 'startProcess' }));
+        });
     }
 
     /**
@@ -58,48 +79,54 @@ class QueueManager {
     async manageQueue(processInfo) {
         try {
             const { process_id, priority } = processInfo;
+            const process = await getProcessById(process_id);
+            if (!process) {
+                throw new Error(`Process ${process_id} not found during queue management`);
+            }
+
+            const processGameType = resolveProcessGameType(process);
 
             // Check for active processes
             const activeProcesses = await getActiveProcesses();
+            const sameGameActive = activeProcesses.filter(activeProcess =>
+                resolveProcessGameType(activeProcess) === processGameType
+            );
 
-            if (activeProcesses.length === 0) {
-                // No active processes, start this one immediately
-                await updateProcessStatus(process_id, PROCESS_STATUS.ACTIVE);
+            if (sameGameActive.length === 0) {
+                await this.startNextProcess();
+                const updatedProcess = await getProcessById(process_id);
 
-                // Execute the process
-                const executor = getProcessExecutor();
-                const executionPayload = {
-                    process_id,
-                    status: 'active',
-                    paused: null
-                };
-
-                // Execute process asynchronously (don't await to avoid blocking)
-                executor.executeProcess(executionPayload).catch(error => {
-                    systemLogQueries.addLog('error', `Unhandled execution error for process ${process_id}`,
-                        JSON.stringify({ process_id, error: error.message, function: 'manageQueue' }));
-                });
+                if (updatedProcess?.status === PROCESS_STATUS.ACTIVE) {
+                    return {
+                        process_id,
+                        status: 'active',
+                        paused: null,
+                        message: 'Task started.',
+                        messageType: 'success',
+                        queue_position: 0
+                    };
+                }
 
                 return {
                     process_id,
-                    status: 'active',
+                    status: 'queue',
                     paused: null,
-                    message: 'Task started.',
-                    messageType: 'success',
-                    queue_position: 0
+                    message: 'Task queued and will start when older same-game tasks complete.',
+                    messageType: 'info',
+                    queue_position: await this.getQueuePosition(process_id, processGameType)
                 };
             }
 
-            // There are active processes, check priorities
-            const highestPriorityActive = Math.min(...activeProcesses.map(p => p.priority));
+            // There are same-game active processes, check priorities within the game slot only.
+            const highestPriorityActive = Math.min(...sameGameActive.map(p => p.priority));
 
             if (priority < highestPriorityActive) {
-                // This process has higher priority, preempt the active ones
+                // This process has higher priority, preempt the same-game active ones.
                 const preemptedProcesses = [];
                 const executor = getProcessExecutor();
 
-                // Pause all active processes with lower priority
-                for (const activeProcess of activeProcesses) {
+                // Pause same-game active processes with lower priority.
+                for (const activeProcess of sameGameActive) {
                     if (activeProcess.priority > priority) {
                         await setProcessPreemption(activeProcess.id, process_id);
                         executor.activeProcesses.delete(activeProcess.id);
@@ -107,21 +134,7 @@ class QueueManager {
                     }
                 }
 
-                // Start this process
-                await updateProcessStatus(process_id, PROCESS_STATUS.ACTIVE);
-
-                // Execute the process
-                const executionPayload = {
-                    process_id,
-                    status: 'active',
-                    paused: preemptedProcesses[0] || null
-                };
-
-                // Execute process asynchronously (don't await to avoid blocking)
-                executor.executeProcess(executionPayload).catch(error => {
-                    systemLogQueries.addLog('error', `Unhandled execution error for process ${process_id}`,
-                        JSON.stringify({ process_id, error: error.message, function: 'manageQueue' }));
-                });
+                await this.startProcess(process, preemptedProcesses[0] || null);
 
                 return {
                     process_id,
@@ -138,9 +151,9 @@ class QueueManager {
                     process_id,
                     status: 'queue',
                     paused: null,
-                    message: 'Task queued and will start when older tasks complete.',
+                    message: 'Task queued and will start when older same-game tasks complete.',
                     messageType: 'info',
-                    queue_position: await this.getQueuePosition(process_id)
+                    queue_position: await this.getQueuePosition(process_id, processGameType)
                 };
             }
 
@@ -165,17 +178,19 @@ class QueueManager {
      * @param {number} processId - Process ID
      * @returns {Promise<number>} Queue position (0-based)
      */
-    async getQueuePosition(processId) {
+    async getQueuePosition(processId, gameType = null) {
         try {
             const process = await getProcessById(processId);
             if (!process) return -1;
+            const processGameType = gameType || resolveProcessGameType(process);
 
-            // Count processes with higher priority or same priority but created earlier
+            // Count same-game queued processes with higher priority or same priority but created earlier.
             const queuedProcesses = await this.getQueuedProcesses();
             let position = 0;
 
             for (const queuedProcess of queuedProcesses) {
                 if (queuedProcess.id === processId) break;
+                if (resolveProcessGameType(queuedProcess) !== processGameType) continue;
                 if (queuedProcess.priority < process.priority ||
                     (queuedProcess.priority === process.priority &&
                         new Date(queuedProcess.created_at) < new Date(process.created_at))) {
@@ -209,47 +224,34 @@ class QueueManager {
      */
     async _startNextProcessInternal() {
         try {
-            // Check if there are any active processes
             const activeProcesses = await getActiveProcesses();
-            if (activeProcesses.length > 0) {
-                return null;
-            }
-
-            // Get next process from queue by priority
-            const nextProcess = await getNextQueuedProcess();
-            if (!nextProcess) {
-                return null;
-            }
-
-            // Check if this process is awaiting crash recovery confirmation
             const recovery = getProcessRecovery();
-            if (recovery.isAwaitingConfirmation(nextProcess.id)) {
-                return null;
+            const occupiedGames = new Set(
+                activeProcesses.map(process => resolveProcessGameType(process))
+            );
+            const queuedProcesses = await this.getQueuedProcesses();
+            const startedProcesses = [];
+
+            for (const queuedProcess of queuedProcesses) {
+                if (occupiedGames.size >= this.supportedGames.length) {
+                    break;
+                }
+
+                if (recovery.isAwaitingConfirmation(queuedProcess.id)) {
+                    continue;
+                }
+
+                const gameType = resolveProcessGameType(queuedProcess);
+                if (occupiedGames.has(gameType)) {
+                    continue;
+                }
+
+                await this.startProcess(queuedProcess);
+                occupiedGames.add(gameType);
+                startedProcesses.push(queuedProcess.id);
             }
 
-            // Start the process
-            await updateProcessStatus(nextProcess.id, PROCESS_STATUS.ACTIVE);
-
-            // Clear stale preempted_by if this process was previously preempted
-            if (nextProcess.preempted_by) {
-                await clearProcessPreemption(nextProcess.id);
-            }
-
-            // Execute the process
-            const executor = getProcessExecutor();
-            const executionPayload = {
-                process_id: nextProcess.id,
-                status: 'active',
-                paused: null
-            };
-
-            // Execute process asynchronously (don't await to avoid blocking)
-            executor.executeProcess(executionPayload).catch(error => {
-                systemLogQueries.addLog('error', `Unhandled execution error for process ${nextProcess.id}`,
-                    JSON.stringify({ process_id: nextProcess.id, error: error.message, function: 'startNextProcess' }));
-            });
-
-            return null;
+            return startedProcesses;
 
         } catch (error) {
             console.error('Error starting next process:', error);
@@ -348,6 +350,8 @@ class QueueManager {
                 queued: queuedProcesses.length,
                 active: activeProcesses.length,
                 total: queuedProcesses.length + activeProcesses.length,
+                queuedByGame: this.groupByGame(queuedProcesses),
+                activeByGame: this.groupByGame(activeProcesses),
                 queuedByPriority: this.groupByPriority(queuedProcesses),
                 activeByPriority: this.groupByPriority(activeProcesses)
             };
@@ -366,6 +370,8 @@ class QueueManager {
                 queued: 0,
                 active: 0,
                 total: 0,
+                queuedByGame: {},
+                activeByGame: {},
                 queuedByPriority: {},
                 activeByPriority: {}
             };
@@ -382,6 +388,15 @@ class QueueManager {
             const priority = process.priority;
             if (!acc[priority]) acc[priority] = 0;
             acc[priority]++;
+            return acc;
+        }, {});
+    }
+
+    groupByGame(processes) {
+        return processes.reduce((acc, process) => {
+            const gameType = resolveProcessGameType(process);
+            if (!acc[gameType]) acc[gameType] = 0;
+            acc[gameType]++;
             return acc;
         }, {});
     }

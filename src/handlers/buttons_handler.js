@@ -342,8 +342,8 @@ const buttonHandlers = [
     { pattern: /^calc_bld_tprev_|^calc_bld_tnext_/, fn: buildings.handleBuildingToLevelPage },
     { pattern: /^calc_building_buffs_/, fn: buildings.handleBuildingBuffsButton },
     { pattern: /^calc_building_back_/, fn: calculators.handleBuildingBackButton },
-    { pattern: /^calc_building_basic_/, fn: buildings.handleBuildingTypeSelection },
-    { pattern: /^calc_building_fc_/, fn: buildings.handleBuildingTypeSelection },
+    { pattern: /^calc_building_game_/, fn: buildings.handleBuildingGameSelection },
+    { pattern: /^calc_building_type_/, fn: buildings.handleBuildingTypeSelection },
     { pattern: /^calc_main_buildings_/, fn: buildings.handleBuildingsButton },
 
     // War Academy calculator
@@ -353,6 +353,7 @@ const buttonHandlers = [
     { pattern: /^calc_wa_tprev_|^calc_wa_tnext_/, fn: warAcademy.handleToLevelPage },
     { pattern: /^calc_wa_buffs_/, fn: warAcademy.handleBuffsButton },
     { pattern: /^calc_wa_back_/, fn: warAcademy.handleBackButton },
+    { pattern: /^calc_wa_game_/, fn: warAcademy.handleGameSelection },
     { pattern: /^calc_wa_cat_/, fn: warAcademy.handleCategorySelection },
     { pattern: /^calc_main_wa_/, fn: warAcademy.handleWarAcademyButton }
 ];

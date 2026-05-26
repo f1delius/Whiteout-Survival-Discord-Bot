@@ -7,6 +7,7 @@ const { handleError, assertUserMatches, getUserInfo } = require('../utility/comm
 const { checkFeatureAccess } = require('../utility/checkAccess');
 const { getComponentEmoji, getEmojiMapForUser } = require('../utility/emojis');
 const { createBackToPanelButton } = require('../Panel/backToPanel');
+const buildings = require('./Buildings/buildings');
 
 /**
  * Creates database migration button
@@ -98,21 +99,41 @@ async function handleCalcMainPanel(interaction) {
 }
 
 /**
- * Returns to the calculators main panel, removing all building calculator containers.
- * CustomId: calc_building_back_{userId}
+ * Handles navigation back within the Buildings calculator.
+ * CustomId:
+ * - calc_building_back_main_x_{userId}
+ * - calc_building_back_game_{gameType}_{userId}
+ * - calc_building_back_type_{gameType}_{userId}
  */
 async function handleBuildingBackButton(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
         const parts = interaction.customId.split('_');
-        // parts: ['calc', 'building', 'back', userId]
+        // parts: ['calc', 'building', 'back', target, gameType|x, userId]
         const userId = parts[parts.length - 1];
         if (!(await assertUserMatches(interaction, userId))) return;
 
-        const panel = buildCalculatorsPanel(userId);
+        if (!checkFeatureAccess('calculators', interaction)) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const target = parts[3];
+        let components;
+
+        if (target === 'type') {
+            const gameType = parts[4];
+            components = [buildings.buildTypeSelectionContainer(userId, lang, gameType)];
+        } else if (target === 'game') {
+            components = [buildings.buildGameSelectionContainer(userId, lang)];
+        } else {
+            components = [buildCalculatorsPanel(userId)];
+        }
 
         await interaction.update({
-            components: [panel],
+            components,
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {

@@ -117,6 +117,9 @@
             },
             "modal": {
                 "title": "Créer une alliance",
+                "gameTypeField": {
+                    "description": "Choisissez le jeu auquel cette alliance appartient."
+                },
                 "allianceField": {
                     "label": "Nom de l'alliance",
                     "placeholder": "Entrez le nom de l'alliance"
@@ -133,6 +136,7 @@
                 }
             },
             "errors": {
+                "invalidGameType": "{emoji.1050} Choisissez un jeu valide avant de créer l'alliance.",
                 "invalidRefreshRate": "{emoji.1050} La fréquence de rafraîchissement doit être un nombre valide (0 ou plus).",
                 "invalidSelection": "{emoji.1050} Sélection de canal invalide. Réessayez.",
                 "allianceNotFound": "{emoji.1050} Alliance introuvable. Créez une alliance d'abord.",
@@ -148,6 +152,7 @@
                     "base": "### {emoji.1008} Modifier l'alliance",
                     "updated": "### {emoji.1004} Alliance mise à jour"
                 },
+                "selectGameDescription": "Choisissez les alliances du jeu que vous voulez modifier.",
                 "description": "Les informations de l'alliance ont été mises à jour.",
                 "allianceInfoField": {
                     "name": "- **Informations mises à jour**",
@@ -183,9 +188,12 @@
                 }
             },
             "errors": {
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
                 "invalidRefreshRate": "{emoji.1050} La fréquence de rafraîchissement doit être un nombre valide (0 ou plus).",
                 "noAssignedAlliances": "{emoji.1050} Vous n'êtes affecté à aucune alliance.",
-                "noAlliances": "{emoji.1050} Aucune alliance trouvée. Créez une alliance d'abord."
+                "noAssignedAlliancesForGame": "{emoji.1050} Vous n'êtes affecté à aucune alliance pour ce jeu.",
+                "noAlliances": "{emoji.1050} Aucune alliance trouvée. Créez une alliance d'abord.",
+                "noAlliancesForGame": "{emoji.1050} Aucune alliance trouvée pour ce jeu."
             }
         },
         "deleteAlliance": {
@@ -200,6 +208,7 @@
                     "denial": "### {emoji.1051} Suppression de l'alliance refusée",
                     "cancel": "### {emoji.1051} Suppression de l'alliance annulée"
                 },
+                "selectGameDescription": "Choisissez les alliances du jeu que vous voulez supprimer.",
                 "description": {
                     "request": "Une demande de suppression a été soumise et nécessite l'approbation d'un propriétaire ou d'un administrateur avec accès complet.",
                     "approval": "La demande de suppression a été approuvée. L'alliance et tous ses joueurs associés ont été supprimés.",
@@ -239,7 +248,11 @@
             },
             "errors": {
                 "allianceNotFound": "{emoji.1050} Alliance introuvable. Créez une alliance d'abord.",
-                "noAssignedAlliances": "{emoji.1050} Vous n'êtes affecté à aucune alliance."
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
+                "noAssignedAlliances": "{emoji.1050} Vous n'êtes affecté à aucune alliance.",
+                "noAssignedAlliancesForGame": "{emoji.1050} Vous n'êtes affecté à aucune alliance pour ce jeu.",
+                "noAlliancesFound": "{emoji.1050} Aucune alliance trouvée. Créez une alliance d'abord.",
+                "noAlliancesForGame": "{emoji.1050} Aucune alliance trouvée pour ce jeu."
             }
         },
         "assignAlliance": {
@@ -306,7 +319,8 @@
                     "name": "- **Contexte de priorité**",
                     "value": "  - Aucune autre alliance trouvée"
                 },
-                "priorityUpdated": "Priorité mise à jour pour **{allianceName}** de **{oldPriority}** à **{newPriority}**"
+                "priorityUpdated": "Priorité mise à jour pour **{allianceName}** de **{oldPriority}** à **{newPriority}**",
+                "selectGameDescription": "Choisissez le jeu dont vous voulez modifier les priorites d'alliance."
             },
             "buttons": {
                 "highest": "Plus haut",
@@ -331,7 +345,9 @@
             "errors": {
                 "noAlliances": "{emoji.1050} Aucune alliance trouvée. Créez une alliance d'abord.",
                 "notEnoughAlliances": "{emoji.1050} Au moins deux alliances sont requises pour modifier la priorité.",
-                "invalidPriority": "{emoji.1050} La priorité doit être un nombre valide entre 1 et le nombre total d'alliances."
+                "invalidPriority": "{emoji.1050} La priorité doit être un nombre valide entre 1 et le nombre total d'alliances.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
+                "noAlliancesForGame": "{emoji.1050} Aucune alliance trouvee pour ce jeu. Creez-en une d'abord."
             }
         },
         "refreshAlliance": {
@@ -340,6 +356,7 @@
                     "base": "### {emoji.1033} Rafraîchissement manuel des alliances",
                     "results": "### {emoji.1041} Résultats du rafraîchissement"
                 },
+                "selectGameDescription": "Choisissez les alliances du jeu que vous voulez rafraîchir.",
                 "description": "Choisissez une ou plusieurs alliances pour lancer un rafraîchissement manuel.",
                 "allianceSuccess": "Alliance **{allianceName}** : {playerCount} joueurs mis en file pour le rafraîchissement, les modifications seront publiées dans le canal de l'alliance.",
                 "autoRefreshStopped": "Arrêté {cancelledCount} processus(s) d'auto-rafraîchissement pour l'alliance {allianceId} afin de permettre le rafraîchissement manuel"
@@ -351,7 +368,9 @@
                 }
             },
             "errors": {
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
                 "noAlliances": "{emoji.1050} Aucune alliance avec des joueurs trouvée.",
+                "noAlliancesForGame": "{emoji.1050} Aucune alliance avec des joueurs trouvée pour ce jeu.",
                 "noValidAlliances": "{emoji.1050} Aucune alliance valide disponible pour le rafraîchissement.",
                 "allianceNotFound": "{emoji.1050} Alliance {allianceId} introuvable.",
                 "allianceHasNoPlayers": "{emoji.1050} L'alliance {allianceId} n'a pas de joueurs à rafraîchir.",
@@ -361,6 +380,7 @@
         "viewAlliances": {
             "content": {
                 "title": "### {emoji.1021} Voir les alliances",
+                "selectGameDescription": "Choisissez les alliances du jeu que vous voulez voir.",
                 "description": "Choisissez une alliance ci-dessous pour voir ses détails.",
                 "allianceDetailsField": {
                     "name": "- **{allianceName}**",
@@ -378,7 +398,9 @@
                 }
             },
             "errors": {
-                "noAlliances": "{emoji.1050} Aucune alliance trouvée. Créez une alliance d'abord."
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
+                "noAlliances": "{emoji.1050} Aucune alliance trouvée. Créez une alliance d'abord.",
+                "noAlliancesForGame": "{emoji.1050} Aucune alliance trouvée pour ce jeu."
             }
         }
     },
@@ -432,6 +454,7 @@
                 "description": {
                     "base": "Choisissez une alliance ci-dessous pour voir ses joueurs."
                 },
+                "selectGameDescription": "Choisissez les alliances du jeu dont vous voulez voir les joueurs.",
                 "playerField": {
                     "value": "- **{nickname}**\n  - ID: {fid}\n  - Fourneau: {furnace}\n  - État: {state}"
                 }
@@ -446,8 +469,11 @@
                 }
             },
             "errors": {
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
                 "noAssignedAlliances": "{emoji.1050} Vous n'êtes assigné à aucune alliance.",
+                "noAssignedAlliancesForGame": "{emoji.1050} Vous n'êtes assigné à aucune alliance pour ce jeu.",
                 "noAvailableAlliances": "{emoji.1050} Aucune alliance avec des joueurs trouvée.",
+                "noAvailableAlliancesForGame": "{emoji.1050} Aucune alliance avec des joueurs trouvée pour ce jeu.",
                 "noPlayersInAlliance": "{emoji.1050} Aucun joueur trouvé dans cette alliance."
             }
         },
@@ -457,6 +483,7 @@
                 "typeDescription": "Choisissez le type de changements que vous souhaitez consulter.",
                 "allianceTitle": "### {emoji.1044} Choisir une Alliance",
                 "allianceDescription": "Choisissez une alliance pour voir l'historique des changements.",
+                "selectGameDescription": "Choisissez les alliances du jeu dont vous voulez voir l'historique des joueurs.",
                 "changesTitle": "### {emoji.1044} Historique {type} - {allianceName}",
                 "playerTitle": "### {emoji.1044} Historique {type} - {playerName} ({fid})",
                 "furnaceChange": "- **{nickname}** (`{fid}`)\n  - {oldLevel} → {newLevel}\n  - {date}",
@@ -480,7 +507,9 @@
             },
             "errors": {
                 "noAlliances": "{emoji.1050} Vous n'êtes assigné à aucune alliance.",
+                "noAlliancesForGame": "{emoji.1050} Vous n'êtes assigné à aucune alliance pour ce jeu.",
                 "noChanges": "{emoji.1050} Aucun changement trouvé.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
                 "invalidId": "{emoji.1050} Entrez un ID de joueur numérique valide.",
                 "playerNotFound": "{emoji.1050} Ce joueur n'a pas été trouvé dans la base de données.",
                 "noAccessToPlayer": "{emoji.1050} Vous n'avez pas accès à l'alliance de ce joueur."
@@ -543,7 +572,8 @@
                 },
                 "moreThanTen": "\n\n*...et {count} de plus*",
                 "processStarted": "Processus démarré ! Les mises à jour de progression seront affichées dans {channelMention}",
-                "currentChannel": "le canal actuel"
+                "currentChannel": "le canal actuel",
+                "selectGameDescription": "Choisissez les alliances du jeu auxquelles vous voulez ajouter des joueurs."
             },
             "buttons": {
                 "inputPlayerId": "Saisir ID",
@@ -562,6 +592,8 @@
                 }
             },
             "error": {
+                "noAssignedAlliancesForGame": "{emoji.1050} Vous n'êtes affecté à aucune alliance pour ce jeu.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
                 "noAssignedAlliances": "{emoji.1050} Vous n'êtes affecté à aucune alliance.",
                 "noAvailableAlliances": "{emoji.1050} Aucune alliance disponible pour ajouter des joueurs.",
                 "invalidPlayerIds": "{emoji.1050} IDs de joueurs invalides. Entrez uniquement des IDs numériques séparés par des virgules."
@@ -601,7 +633,9 @@
                 "existingPlayersField": {
                     "name": "Joueurs existants",
                     "value": "  - **{nickname}** (ID : {id})  - {alliance}"
-                }
+                },
+                "unknownAlliance": "Alliance inconnue",
+                "selectGameDescription": "Choisissez les alliances du jeu pour lesquelles vous voulez configurer un canal d'ID."
             },
             "selectMenu": {
                 "selectAlliance": {
@@ -655,11 +689,14 @@
                 }
             },
             "errors": {
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
                 "noAlliances": "{emoji.1050} Aucune alliance trouvée. Créez une alliance d'abord.",
+                "noAlliancesForGame": "{emoji.1050} Aucune alliance trouvée pour ce jeu.",
                 "notFound": "{emoji.1050} Alliance introuvable. Réessayez.",
                 "invalidSelection": "{emoji.1050} Sélection de canal invalide. Réessayez.",
                 "noChannelsToRemove": "{emoji.1050} Aucun canal d'ID trouvé à supprimer.",
                 "channelAlreadyLinked": "{emoji.1050} Le canal {channel} est déjà lié à **{alliance}**.",
+                "channelLinkedToOtherGame": "{emoji.1050} Le canal {channel} est déjà lié à **{alliance}** dans **{game}**. Le même canal ne peut pas être utilisé pour les deux jeux.",
                 "channelIsGiftCodeChannel": "{emoji.1050} Le canal {channel} est déjà utilisé comme canal de codes cadeau. Un canal ne peut pas être à la fois un canal d'ID et un canal de codes cadeau.",
                 "messageNotFound": "{emoji.1050} Le message original est introuvable. Réessayez."
             }
@@ -682,6 +719,7 @@
                     "cancel": "L'opération de déplacement a été annulée. Aucun joueur n'a été déplacé.",
                     "allMoved": "Tous les joueurs ont été déplacés de **{sourceName}** vers **{destName}**."
                 },
+                "selectGameDescription": "Choisissez les alliances du jeu entre lesquelles vous voulez déplacer des joueurs.",
                 "movedField": {
                     "name": "- **Déplacés**",
                     "value": "  - {movedCount} joueurs déplacés de **{sourceName}** vers **{destName}**",
@@ -736,7 +774,10 @@
             },
             "errors": {
                 "noAssignedAlliances": "{emoji.1050} Vous n'êtes affecté à aucune alliance.",
+                "noAssignedAlliancesForGame": "{emoji.1050} Vous n'êtes affecté à aucune alliance pour le jeu sélectionné.",
                 "insufficientAlliances": "{emoji.1050} Au moins deux alliances sont requises pour déplacer des joueurs.",
+                "insufficientAlliancesForGame": "{emoji.1050} Au moins deux alliances du jeu sélectionné sont requises pour déplacer des joueurs.",
+                "invalidGameType": "{emoji.1050} Sélection de jeu invalide. Veuillez réessayer.",
                 "invalidPlayerIds": "{emoji.1050} IDs de joueurs invalides. Entrez uniquement des IDs numériques séparés par des virgules.",
                 "noPlayersInAlliance": "{emoji.1050} L'alliance source sélectionnée n'a pas de joueurs à déplacer."
             }
@@ -756,6 +797,7 @@
                     "removalSuccess": "Les joueurs sélectionnés ont été supprimés.",
                     "allRemoved": "Tous les joueurs ont été supprimés de **{allianceName}**."
                 },
+                "selectGameDescription": "Choisissez les alliances du jeu desquelles vous voulez supprimer des joueurs.",
                 "playersToRemoveField": {
                     "name": "**Joueurs à supprimer**",
                     "value": "- pseudo : {nickname}\n  - ID : {id}\n  - fournaise : {furnace}\n  - état : {state}"
@@ -789,8 +831,11 @@
                 }
             },
             "errors": {
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
                 "noAssignedAlliances": "{emoji.1050} Vous n'êtes affecté à aucune alliance.",
+                "noAssignedAlliancesForGame": "{emoji.1050} Vous n'êtes affecté à aucune alliance pour ce jeu.",
                 "noAvailableAlliances": "{emoji.1050} Aucune alliance disponible pour supprimer des joueurs.",
+                "noAvailableAlliancesForGame": "{emoji.1050} Aucune alliance avec des joueurs trouvée pour ce jeu.",
                 "invalidPlayerIds": "{emoji.1050} IDs de joueurs invalides. Entrez uniquement des IDs numériques séparés par des virgules.",
                 "noPlayersInAlliance": "{emoji.1050} L'alliance sélectionnée n'a pas de joueurs à supprimer.",
                 "playersNotFound": "{emoji.1050} Joueur(s) soumis introuvable(s) dans la base de données des joueurs."
@@ -811,6 +856,7 @@
                     "selectAlliance": "Choisissez les alliances à filtrer, ou choisissez \"Toutes les alliances\".",
                     "selectFurnace": "Choisissez les niveaux de fournaise à filtrer. Choisir un niveau FC inclut tous ses sous-niveaux dans l'export."
                 },
+                "selectGameDescription": "Choisissez les joueurs du jeu que vous voulez exporter.",
                 "filtersField": {
                     "name": "- **Filtres actuels**",
                     "value": "  - État : {state}\n  - Alliance : {alliance}\n  - Niveau de fournaise : {furnace}"
@@ -841,6 +887,8 @@
             },
             "errors": {
                 "noAlliances": "{emoji.1050} Aucune alliance affectée ou disponible.",
+                "noAlliancesForGame": "{emoji.1050} Aucune alliance trouvée pour le jeu sélectionné.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
                 "noPlayers": "{emoji.1050} Aucun joueur trouvé."
             }
         }
@@ -902,6 +950,9 @@
             },
             "modal": {
                 "title": "Ajouter un code cadeau",
+                "gameTypeField": {
+                    "description": "Choisissez le jeu auquel appartient ce code cadeau."
+                },
                 "giftCodeInput": {
                     "label": "Code cadeau",
                     "placeholder": "Entrez le code cadeau à ajouter"
@@ -909,7 +960,9 @@
             },
             "errors": {
                 "invalidGiftCode": "{emoji.1050} Code cadeau invalide. Entrez un code valide.",
-                "giftCodeExists": "{emoji.1050} Ce code cadeau existe déjà."
+                "giftCodeExists": "{emoji.1050} Ce code cadeau existe déjà.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
+                "gameTypeMismatch": "{emoji.1050} Le jeu sélectionné ne correspond pas au préfixe du code cadeau."
             }
         },
         "giftSetTestId": {
@@ -927,13 +980,17 @@
             },
             "modal": {
                 "title": "Définir l'ID de test",
+                "gameTypeField": {
+                    "description": "Choisissez le jeu auquel appartient cet ID de test."
+                },
                 "testIdInput": {
                     "label": "ID du joueur",
                     "placeholder": "Entrez l'ID du joueur à définir comme ID de test"
                 }
             },
             "errors": {
-                "invalidTestId": "{emoji.1050} ID de test invalide. Entrez un ID valide."
+                "invalidTestId": "{emoji.1050} ID de test invalide. Entrez un ID valide.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide."
             }
         },
         "redeemGiftCode": {
@@ -948,6 +1005,7 @@
                     "selectGiftCode": "Choisissez un code cadeau à rembourser pour : **{alliances}**",
                     "success": "Le code cadeau **{code}** est en cours de remboursement pour {count} alliance(s)."
                 },
+                "selectGameDescription": "Choisissez les alliances et codes cadeaux du jeu que vous voulez rembourser.",
                 "summeryField": {
                     "name": "- **Résumé**",
                     "value": "  - Démarré {total} processus de remboursement "
@@ -974,8 +1032,11 @@
             "errors": {
                 "noActiveGiftCodes": "{emoji.1050} Aucun code cadeau actif trouvé. Ajoutez des Cadeaux d'abord.",
                 "noAlliances": "{emoji.1050} Aucune alliance trouvée. Créez une alliance d'abord.",
+                "noAlliancesForGame": "{emoji.1050} Aucune alliance trouvée pour ce jeu.",
                 "noPlayers": "{emoji.1050} Aucune alliance avec des joueurs trouvée.",
-                "noGiftCodes": "{emoji.1050} Aucun code cadeau disponible pour le remboursement."
+                "noGiftCodes": "{emoji.1050} Aucun code cadeau disponible pour le remboursement.",
+                "noGiftCodesForGame": "{emoji.1050} Aucun code cadeau disponible pour ce jeu.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide."
             }
         },
         "apiGiftCode": {
@@ -983,7 +1044,7 @@
                 "title": "{emoji.1013} Nouveau code cadeau trouvé !",
                 "giftCodeDetailsField": {
                     "name": "Détails du code cadeau",
-                    "value": "- **Code :** {giftCode}\n- **Date :** {date}\n- **Source :** {source}\n- **Heure :** {time}"
+                    "value": "- **Code :** {giftCode}\n- **Date :** {date}\n- **Jeu :** {game}\n- **Source :** {source}\n- **Heure :** {time}"
                 },
                 "autoRedeem": "{emoji.1033} Remboursement automatique",
                 "autoRedeemValue": "Démarré pour {count} alliances éligibles.",
@@ -1003,6 +1064,7 @@
                     "base": "Choisissez les Cadeaux que vous souhaitez supprimer du bot.\n**Cadeaux disponibles :** {codesCount}",
                     "cancel": "La suppression des Cadeaux a été annulée. Aucune modification n'a été effectuée."
                 },
+                "selectGameDescription": "Choisissez les codes cadeaux du jeu que vous voulez supprimer.",
                 "giftCodesToRemoveField": {
                     "name": "- **Cadeaux à supprimer**",
                     "value": "  - Vous êtes sur le point de supprimer les Cadeaux suivants :\n{codes}"
@@ -1028,17 +1090,22 @@
                 }
             },
             "errors": {
-                "noGiftCodes": "{emoji.1050} Aucun code cadeau trouvé à supprimer."
+                "noGiftCodes": "{emoji.1050} Aucun code cadeau trouvé à supprimer.",
+                "noGiftCodesForGame": "{emoji.1050} Aucun code cadeau trouvé pour ce jeu.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide."
             }
         },
         "viewGiftCodes": {
             "content": {
                 "title": "### {emoji.1021} Liste des Cadeaux",
                 "description": "**Statistiques :**\n- Codes totaux : **{totalCodesCount}**\n- Actifs : **{activeCodesCount}** | Invalides : **{invalidCodesCount}**\n- Codes VIP : **{vipCodesCount}**\n- Total des remboursements : **{totalUsages}**",
+                "selectGameDescription": "Choisissez les codes cadeaux du jeu que vous voulez voir.",
                 "giftCodeDetails": "Utilisations : {usageCount} | Source : {source}"
             },
             "errors": {
-                "noGiftCodes": "{emoji.1050} Aucun code cadeau trouvé. Ajoutez des Cadeaux d'abord."
+                "noGiftCodes": "{emoji.1050} Aucun code cadeau trouvé. Ajoutez des Cadeaux d'abord.",
+                "noGiftCodesForGame": "{emoji.1050} Aucun code cadeau trouvé pour ce jeu.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide."
             }
         },
         "autoRedeem": {
@@ -1048,6 +1115,7 @@
                     "results": "### {emoji.1041} Statut du remboursement automatique mis à jour"
                 },
                 "description": "Choisissez une ou plusieurs alliances pour basculer leur statut de remboursement automatique.",
+                "selectGameDescription": "Choisissez les alliances du jeu que vous voulez mettre à jour.",
                 "enabledField": {
                     "name": "- **Activé pour**",
                     "value": "  - {enabledAlliances}"
@@ -1069,7 +1137,9 @@
                 }
             },
             "errors": {
-                "noAlliances": "{emoji.1050} Aucune alliance trouvée."
+                "noAlliances": "{emoji.1050} Aucune alliance trouvée.",
+                "noAlliancesForGame": "{emoji.1050} Aucune alliance trouvée pour ce jeu.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide."
             }
         },
         "giftCodeChannel": {
@@ -1082,7 +1152,8 @@
                 "description": {
                     "base": "Configurez des canaux où les utilisateurs peuvent soumettre des Cadeaux directement. Le bot validera et ajoutera automatiquement les codes valides.",
                     "add": "Choisissez un canal texte à surveiller pour les soumissions de Cadeaux.\n- **Formats pris en charge :**\n  - Texte simple : `GIFTCODE123`\n  - Annonce : `Code : GIFTCODE123`",
-                    "remove": "Choisissez un canal pour arrêter la surveillance des Cadeaux."
+                    "remove": "Choisissez un canal pour arrêter la surveillance des Cadeaux.",
+                    "selectGameDescription": "Choisissez les canaux de codes cadeaux du jeu que vous voulez gerer."
                 },
                 "channelAdded": "### {emoji.1004} Canal ajouté\n\nSurveillance de **<#{channelID}>** pour les soumissions de Cadeaux.",
                 "channelRemoved": "### {emoji.1004} Canal supprimé\n\nLa surveillance du canal sélectionné a été arrêtée."
@@ -1110,7 +1181,10 @@
                 "noChannels": "{emoji.1050} Aucun canal de Cadeaux trouvé.",
                 "channelNotFound": "{emoji.1050} Canal introuvable.",
                 "channelAlreadyExists": "{emoji.1050} Ce canal est déjà surveillé.",
-                "channelIsIdChannel": "{emoji.1050} Le canal {channel} est déjà utilisé comme canal d'ID pour **{alliance}**. Un canal ne peut pas être à la fois un canal d'ID et un canal de Cadeaux."
+                "channelIsIdChannel": "{emoji.1050} Le canal {channel} est deja utilise comme canal d'ID pour **{alliance}** dans **{game}**. Un canal ne peut pas etre a la fois un canal d'ID et un canal de Cadeaux.",
+                "noChannelsForGame": "{emoji.1050} Aucun canal de Cadeaux n'est configure pour ce jeu.",
+                "channelRegisteredForOtherGame": "{emoji.1050} {channel} est deja enregistre pour **{game}**. Un canal ne peut pas etre partage entre plusieurs types de jeu.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide."
             }
         }
     },
@@ -2737,30 +2811,56 @@
             "content": {
                 "title": "### {emoji.1041} Calculatrice de bâtiments",
                 "buildings": {
-                    "barricade": "Barricade",
-                    "marksmanCamp": "Camp de tireurs d'élite",
-                    "lancerCamp": "Camp de lanciers",
-                    "infantryCamp": "Camp d'infanterie",
-                    "researchCenter": "Centre de recherche",
-                    "infirmary": "Infirmerie",
-                    "commandCenter": "Centre de commandement",
-                    "embassy": "Ambassade",
-                    "storehouse": "Entrepôt",
-                    "furnace": "Fournaise",
-                    "warAcademy": "Académie de guerre"
+                    "wos": {
+                        "barricade": "Barricade",
+                        "marksmanCamp": "Camp de tireurs d'??lite",
+                        "lancerCamp": "Camp de lanciers",
+                        "infantryCamp": "Camp d'infanterie",
+                        "researchCenter": "Centre de recherche",
+                        "infirmary": "Infirmerie",
+                        "commandCenter": "Centre de commandement",
+                        "embassy": "Ambassade",
+                        "storehouse": "Entrep??t",
+                        "furnace": "Fournaise",
+                        "warAcademy": "Acad??mie de guerre"
+                    },
+                    "ks": {
+                        "academy": "Acad??mie",
+                        "barracks": "Caserne",
+                        "commandCenter": "Centre de commandement",
+                        "embassy": "Ambassade",
+                        "guardStation": "Poste de garde",
+                        "infirmary": "Infirmerie",
+                        "range": "Champ de tir",
+                        "stable": "??curie",
+                        "storehouse": "Entrep??t",
+                        "townCenter": "Centre-ville",
+                        "warAcademy": "Acad??mie de guerre"
+                    }
                 },
                 "resources": {
-                    "meat": "Viande",
-                    "wood": "Bois",
-                    "iron": "Fer",
-                    "coal": "Charbon",
-                    "fireCrystal": "Cristal de feu",
-                    "refinedFireCrystal": "Cristal de feu raffiné"
+                    "wos": {
+                        "meat": "Viande",
+                        "wood": "Bois",
+                        "iron": "Fer",
+                        "coal": "Charbon",
+                        "fireCrystal": "Cristal de feu",
+                        "refinedFireCrystal": "Cristal de feu raffin??"
+                    },
+                    "ks": {
+                        "food": "Nourriture",
+                        "wood": "Bois",
+                        "stone": "Pierre",
+                        "iron": "Fer",
+                        "trueGold": "Or v??ritable",
+                        "temperedTrueGold": "Or v??ritable tremp??"
+                    }
                 }
             },
             "types": {
                 "basic": "Basique",
-                "fireCrystal": "Cristal de feu"
+                "fireCrystal": "Cristal de feu",
+                "trueGold": "Or v??ritable"
             },
             "levelDisplay": "Niveau {key}",
             "notBuilt": "Non construit",
@@ -2768,7 +2868,8 @@
                 "typeSelection": "### Calculatrice d'amélioration de bâtiment\nChoisissez la catégorie de bâtiment :",
                 "controls": "### Bâtiments {type}",
                 "from": "**Depuis :** {level}",
-                "selected": "**Bâtiment :** {name}"
+                "selected": "**Bâtiment :** {name}",
+                "gameSelection": "### Calculatrice d'am??lioration de b??timent\nChoisissez le jeu :"
             },
             "buttons": {
                 "basic": "Bâtiments basiques",
@@ -2778,7 +2879,8 @@
                 "prev": "Précédent",
                 "next": "Suivant",
                 "copy": "Copier",
-                "remove": "Supprimer"
+                "remove": "Supprimer",
+                "trueGold": "B??timents or v??ritable"
             },
             "placeholders": {
                 "selectBuilding": "Choisissez un bâtiment",
@@ -2796,6 +2898,23 @@
                     "doubleTime": "Double Time (+20%)",
                     "vp10dt": "VP 10% + Double Time (+30%)",
                     "vp15dt": "VP 15% + Double Time (+35%)"
+                },
+                "ks": {
+                    "vpDoubleTime": {
+                        "label": "Bonus CM / Double Time",
+                        "placeholder": "Choisissez CM / Double Time",
+                        "vp10": "CM 10%",
+                        "vp15": "CM 15%",
+                        "vp10dt": "CM 10% + Double Time (+30%)",
+                        "vp15dt": "CM 15% + Double Time (+35%)"
+                    },
+                    "pet": {
+                        "label": "Familier Loup rusé (vitesse de construction)"
+                    },
+                    "zinman": {
+                        "label": "Saul (réduction de ressources)",
+                        "placeholder": "Choisissez le niveau de Saul"
+                    }
                 },
                 "pet": {
                     "label": "Familier Hyène des cavernes (vitesse de construction)",
@@ -2841,6 +2960,12 @@
                     "pet": "Familier Nv.{n} (+{pct}% vitesse)",
                     "zinman": "Zinman Nv.{n} ({pct}% réduction de ressources)",
                     "expert": "Expert Nv.{n} (-{time}/amélioration x {levels})"
+                },
+                "ks": {
+                    "buffs": {
+                        "pet": "Loup rusé Nv.{n} (+{pct}% vitesse)",
+                        "zinman": "Saul Nv.{n} ({pct}% réduction de ressources)"
+                    }
                 }
             },
             "errors": {
@@ -2852,56 +2977,113 @@
         "warAcademy": {
             "content": {
                 "resources": {
-                    "meat": "Viande",
-                    "wood": "Bois",
-                    "coal": "Charbon",
-                    "iron": "Fer",
-                    "steel": "Acier",
-                    "fcShards": "Fragments FC"
+                    "wos": {
+                        "meat": "Viande",
+                        "wood": "Bois",
+                        "coal": "Charbon",
+                        "iron": "Fer",
+                        "steel": "Acier",
+                        "fcShards": "Fragments FC"
+                    },
+                    "ks": {
+                        "food": "Nourriture",
+                        "wood": "Bois",
+                        "stone": "Pierre",
+                        "iron": "Fer",
+                        "gold": "Or",
+                        "truegoldDust": "Poussiere d'or veritable"
+                    }
                 },
                 "skills": {
-                    "infantry": {
-                        "flameSquad": "Escouade de flammes",
-                        "flameShield": "Bouclier de flammes",
-                        "flameStrike": "Frappe de flammes",
-                        "flameTomahawk": "Tomahawk de flammes",
-                        "flameProtection": "Protection de flammes",
-                        "flameLegion": "Légion de flammes",
-                        "helios": "Infanterie Hélios",
-                        "heliosHealing": "Guérison infanterie Hélios",
-                        "heliosTraining": "Entraînement infanterie Hélios",
-                        "heliosFirstAid": "Premiers soins infanterie Hélios"
+                    "wos": {
+                        "infantry": {
+                            "flameSquad": "Escouade de flammes",
+                            "flameShield": "Bouclier de flammes",
+                            "flameStrike": "Frappe de flammes",
+                            "flameTomahawk": "Tomahawk de flammes",
+                            "flameProtection": "Protection de flammes",
+                            "flameLegion": "Légion de flammes",
+                            "helios": "Infanterie Hélios",
+                            "heliosHealing": "Guérison infanterie Hélios",
+                            "heliosTraining": "Entraînement infanterie Hélios",
+                            "heliosFirstAid": "Premiers soins infanterie Hélios"
+                        },
+                        "marksman": {
+                            "flameSquad": "Escouade de flammes",
+                            "crystalArmor": "Armure de cristal",
+                            "crystalVision": "Vision de cristal",
+                            "crystalArrow": "Flèche de cristal",
+                            "crystalProtection": "Protection de cristal",
+                            "flameLegion": "Légion de flammes",
+                            "helios": "Tireur d'élite Hélios",
+                            "heliosHealing": "Guérison tireur Hélios",
+                            "heliosTraining": "Entraînement tireur Hélios",
+                            "heliosFirstAid": "Premiers soins tireur Hélios"
+                        },
+                        "lancer": {
+                            "flameSquad": "Escouade de flammes",
+                            "blazingArmor": "Armure flamboyante",
+                            "blazingCharge": "Charge flamboyante",
+                            "blazingLance": "Lance flamboyante",
+                            "blazingGuardian": "Gardien flamboyant",
+                            "flameLegion": "Légion de flammes",
+                            "helios": "Lancier Hélios",
+                            "heliosHealing": "Guérison lancier Hélios",
+                            "heliosTraining": "Entraînement lancier Hélios",
+                            "heliosFirstAid": "Premiers soins lancier Hélios"
+                        }
                     },
-                    "marksman": {
-                        "flameSquad": "Escouade de flammes",
-                        "crystalArmor": "Armure de cristal",
-                        "crystalVision": "Vision de cristal",
-                        "crystalArrow": "Flèche de cristal",
-                        "crystalProtection": "Protection de cristal",
-                        "flameLegion": "Légion de flammes",
-                        "helios": "Tireur d'élite Hélios",
-                        "heliosHealing": "Guérison tireur Hélios",
-                        "heliosTraining": "Entraînement tireur Hélios",
-                        "heliosFirstAid": "Premiers soins tireur Hélios"
-                    },
-                    "lancer": {
-                        "flameSquad": "Escouade de flammes",
-                        "blazingArmor": "Armure flamboyante",
-                        "blazingCharge": "Charge flamboyante",
-                        "blazingLance": "Lance flamboyante",
-                        "blazingGuardian": "Gardien flamboyant",
-                        "flameLegion": "Légion de flammes",
-                        "helios": "Lancier Hélios",
-                        "heliosHealing": "Guérison lancier Hélios",
-                        "heliosTraining": "Entraînement lancier Hélios",
-                        "heliosFirstAid": "Premiers soins lancier Hélios"
+                    "ks": {
+                        "infantry": {
+                            "truegoldBattalion": "Bataillon or veritable",
+                            "truegoldBlades": "Lames or veritable",
+                            "truegoldShields": "Boucliers or veritable",
+                            "truegoldLegionaries": "Legionnaires or veritable",
+                            "truegoldPlating": "Placage or veritable",
+                            "truegoldMauls": "Massues or veritable",
+                            "truegoldInfantry": "Infanterie or veritable",
+                            "truegoldInfantryTraining": "Entrainement infanterie or veritable",
+                            "truegoldInfantryAid": "Assistance infanterie or veritable",
+                            "truegoldInfantryHealing": "Guerison infanterie or veritable"
+                        },
+                        "archer": {
+                            "truegoldBattalion": "Bataillon or veritable",
+                            "truegoldBows": "Arcs or veritable",
+                            "truegoldBracers": "Brassards or veritable",
+                            "truegoldLegionaries": "Legionnaires or veritable",
+                            "truegoldVests": "Gilets or veritable",
+                            "truegoldArrows": "Fleches or veritable",
+                            "truegoldArchers": "Archers or veritable",
+                            "truegoldArcherTraining": "Entrainement archer or veritable",
+                            "truegoldArcherAid": "Assistance archer or veritable",
+                            "truegoldArcherHealing": "Guerison archer or veritable"
+                        },
+                        "cavalry": {
+                            "truegoldBattalion": "Bataillon or veritable",
+                            "truegoldCharge": "Charge or veritable",
+                            "truegoldFarriery": "Marechalerie or veritable",
+                            "truegoldLegionaries": "Legionnaires or veritable",
+                            "truegoldPlatecraft": "Platecraft or veritable",
+                            "truegoldLances": "Lances or veritable",
+                            "truegoldCavalry": "Cavalerie or veritable",
+                            "truegoldCavalryTraining": "Entrainement cavalerie or veritable",
+                            "truegoldCavalryAid": "Assistance cavalerie or veritable",
+                            "truegoldCavalryHealing": "Guerison cavalerie or veritable"
+                        }
                     }
                 }
             },
             "categories": {
-                "infantry": "Infanterie",
-                "marksman": "Tireur d'élite",
-                "lancer": "Lancier"
+                "wos": {
+                    "infantry": "Infanterie",
+                    "marksman": "Tireur d'elite",
+                    "lancer": "Lancier"
+                },
+                "ks": {
+                    "infantry": "Infanterie",
+                    "archer": "Archer",
+                    "cavalry": "Cavalerie"
+                }
             },
             "levelDisplay": "Niveau {key}",
             "notResearched": "Non recherché",
@@ -2909,7 +3091,8 @@
                 "categorySelection": "### Calculatrice d'Académie de guerre\nChoisissez la catégorie de troupes :",
                 "controls": "### Compétences {category}",
                 "from": "**De :** Niveau {level}",
-                "selected": "**Compétence :** {name}"
+                "selected": "**Compétence :** {name}",
+                "gameSelection": "### Calculatrice d'Academie de guerre\nChoisissez le jeu :"
             },
             "buttons": {
                 "infantry": "Infanterie",
@@ -2935,6 +3118,14 @@
                     "off": "Désactivé",
                     "vp10": "VP 10%",
                     "vp15": "VP 15%"
+                },
+                "ks": {
+                    "vp": {
+                        "label": "Bonus vitesse de recherche CM",
+                        "placeholder": "Choisir le bonus CM",
+                        "vp10": "CM 10%",
+                        "vp15": "CM 15%"
+                    }
                 },
                 "speed": {
                     "label": "Vitesse de recherche %",
@@ -2962,6 +3153,11 @@
                 "buffs": {
                     "researchSpeed": "Vitesse de recherche : {pct}%",
                     "vpBonus": "Bonus VP : +{pct}%"
+                },
+                "ks": {
+                    "buffs": {
+                        "vpBonus": "Bonus CM : +{pct}%"
+                    }
                 }
             },
             "errors": {
@@ -3035,17 +3231,30 @@
             "description": "Accès administratif complet"
         },
         "guides": {
-        "name": "Guides",
-        "description": "Créer/Modifier/Publier/Assigner du contenu guide"
+            "name": "Guides",
+            "description": "Créer/Modifier/Publier/Assigner du contenu guide"
         }
     },
     "common": {
         "notForYou": "{emoji.1050} Cette interaction n'est pas pour vous.",
         "noPermission": "{emoji.1050} Vous n'avez pas la permission d'effectuer cette action.",
         "error": "{emoji.1050} Une erreur est survenue. Réessayez plus tard.",
+        "gameSelection": {
+            "label": "Jeu",
+            "placeholder": "Choisissez un jeu",
+            "options": {
+                "wos": "Whiteout Survival",
+                "ks": "Kingshot"
+            }
+        },
         "furnaceCrystal": "FC",
         "botMissingPermissions": "{emoji.1050} Permissions manquantes dans ce canal : {permissions}. Accordez-les au bot pour qu'il fonctionne.",
-        "botMissingChannelPermissions": "{emoji.1050} Permissions manquantes ({permissions}) dans <#{channelId}>. Les mises à jour de progression ne s'afficheront pas là-bas - accordez ces permissions au bot."
+        "botMissingChannelPermissions": "{emoji.1050} Permissions manquantes ({permissions}) dans <#{channelId}>. Les mises à jour de progression ne s'afficheront pas là-bas - accordez ces permissions au bot.",
+        "furnace": "Fournaise",
+        "furnaceLevel": "Niveau de Fournaise",
+        "townCenter": "Centre-ville",
+        "townCenterLevel": "Niveau du Centre-ville",
+        "townCenterGold": "TG"
     },
     "logs": {
         "alliance": {

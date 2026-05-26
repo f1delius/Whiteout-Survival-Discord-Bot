@@ -4,8 +4,10 @@ const { createProcess, updateProcessStatus, PROCESS_STATUS } = require('../Proce
 const { queueManager } = require('../Processes/queueManager');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { autoRefreshManager } = require('./refreshAlliance');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
 
 /**
@@ -44,17 +46,22 @@ async function handleTriggerRefreshButton(interaction) {
             });
         }
 
-        // Get available alliances based on permissions
-        let availableAlliances;
-        if (hasFullAccess) {
-            // Owner/full access: show all alliances
-            availableAlliances = allianceQueries.getAllAlliances();
-        } else {
-            // Alliance management: show only assigned alliances
-            const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
-            availableAlliances = allianceQueries.getAllAlliances()
-                .filter(alliance => assignedAllianceIds.includes(alliance.id));
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_trigger_refresh_game',
+                title: lang.alliance.refreshAlliance.content.title.base,
+                description: lang.alliance.refreshAlliance.content.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
         }
+
+        const availableAlliances = getAlliancesForUserByGame(adminData, getDefaultGameType(), PERMISSIONS.ALLIANCE_MANAGEMENT);
 
         // Filter alliances that have players
         const { alliances: alliancesWithPlayers } = getAlliancesWithPlayers(availableAlliances);
@@ -67,7 +74,7 @@ async function handleTriggerRefreshButton(interaction) {
         }
 
         // Show alliance selection with pagination (page 0)
-        await showTriggerRefreshAllianceSelection(interaction, 0);
+        await showTriggerRefreshAllianceSelection(interaction, 0, getDefaultGameType());
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleTriggerRefreshButton');
@@ -79,11 +86,11 @@ async function handleTriggerRefreshButton(interaction) {
  * @param {import('discord.js').ButtonInteraction|import('discord.js').StringSelectMenuInteraction} interaction 
  * @param {number} page - Current page number
  */
-async function showTriggerRefreshAllianceSelection(interaction, page = 0) {
+async function showTriggerRefreshAllianceSelection(interaction, page = 0, gameType = getDefaultGameType()) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
+    const resolvedGameType = normalizeGameType(gameType);
 
     // Get available alliances based on permissions
-    let availableAlliances;
     const hasFullAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS);
     const hasAccess = hasPermission(adminData, PERMISSIONS.ALLIANCE_MANAGEMENT);
 
@@ -94,15 +101,7 @@ async function showTriggerRefreshAllianceSelection(interaction, page = 0) {
         });
     }
 
-    if (hasFullAccess) {
-        // Owner/full access: show all alliances
-        availableAlliances = allianceQueries.getAllAlliances();
-    } else if (hasAccess) {
-        // Alliance management: show only assigned alliances
-        const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
-        availableAlliances = allianceQueries.getAllAlliances()
-            .filter(alliance => assignedAllianceIds.includes(alliance.id));
-    }
+    const availableAlliances = getAlliancesForUserByGame(adminData, resolvedGameType, PERMISSIONS.ALLIANCE_MANAGEMENT);
 
     // Filter alliances that have players
     const { alliances: alliancesWithPlayers, counts: playerCounts } = getAlliancesWithPlayers(availableAlliances);
@@ -128,7 +127,7 @@ async function showTriggerRefreshAllianceSelection(interaction, page = 0) {
 
     // Create select menu
     const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId(`select_trigger_refresh_${interaction.user.id}_${page}`)
+        .setCustomId(`select_trigger_refresh_${interaction.user.id}_${page}_${resolvedGameType}`)
         .setPlaceholder(lang.alliance.refreshAlliance.selectMenu.selectAlliance.placeholder)
         .setMinValues(1)
         .setMaxValues(Math.min(currentPageAlliances.length, 10)) // Max 10 selections
@@ -142,7 +141,8 @@ async function showTriggerRefreshAllianceSelection(interaction, page = 0) {
         userId: interaction.user.id,
         currentPage: page,
         totalPages: totalPages,
-        lang: lang
+        lang: lang,
+        contextData: [resolvedGameType]
     });
 
     actionRow.push(selectRow);
@@ -187,7 +187,8 @@ async function handleTriggerRefreshSelection(interaction) {
     try {
         // Extract user ID from custom ID and verify it matches
         const customIdParts = interaction.customId.split('_');
-        const expectedUserId = customIdParts[3]; // select_trigger_refresh_userId_page
+        const expectedUserId = customIdParts[3]; // select_trigger_refresh_userId_page_gameType
+        const gameType = customIdParts[5] || getDefaultGameType();
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         // Check permissions
@@ -250,7 +251,7 @@ async function handleTriggerRefreshSelection(interaction) {
         // Create manual refresh processes
         for (const allianceId of selectedAllianceIds) {
             try {
-                const alliance = allianceQueries.getAllianceById(allianceId);
+                const alliance = allianceQueries.getAllianceByIdAny(allianceId);
                 if (!alliance) {
                     results.push(lang.alliance.refreshAlliance.errors.allianceNotFound.replace('{allianceId}', allianceId));
                     errorCount++;
@@ -258,7 +259,7 @@ async function handleTriggerRefreshSelection(interaction) {
                 }
 
                 // Get players for this alliance
-                const players = playerQueries.getPlayersByAlliance(allianceId);
+                const players = playerQueries.getPlayersByAlliance(allianceId, alliance.game_type);
                 if (players.length === 0) {
                     results.push(lang.alliance.refreshAlliance.errors.allianceHasNoPlayers.replace('{allianceId}', allianceId));
                     continue;
@@ -272,7 +273,8 @@ async function handleTriggerRefreshSelection(interaction) {
                     admin_id: interaction.user.id,
                     alliance_id: allianceId,
                     player_ids: playerIds,
-                    action: 'refresh' // This uses REFRESH priority (300000) vs AUTO_REFRESH (400000)
+                    action: 'refresh', // This uses REFRESH priority (300000) vs AUTO_REFRESH (400000)
+                    game_type: alliance.game_type
                 });
 
                 // Queue the process for execution
@@ -325,13 +327,14 @@ async function handleTriggerRefreshPagination(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
         // Extract user ID and page from custom ID
-        const { userId: expectedUserId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId: expectedUserId, newPage, contextData } = parsePaginationCustomId(interaction.customId, 1);
+        const gameType = contextData[0] || getDefaultGameType();
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         // Show new page
-        await showTriggerRefreshAllianceSelection(interaction, newPage);
+        await showTriggerRefreshAllianceSelection(interaction, newPage, gameType);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleTriggerRefreshPagination');
@@ -344,22 +347,59 @@ async function handleTriggerRefreshPagination(interaction) {
  * @returns {Object} { alliances: filtered alliances with players, counts: Map of allianceId -> playerCount }
  */
 function getAlliancesWithPlayers(availableAlliances) {
-    const allianceIds = availableAlliances.map(alliance => alliance.id);
-    const playerCountResults = playerQueries.getPlayerCountsByAllianceIds(allianceIds);
-
-    // Convert to Map for O(1) lookup
     const playerCounts = new Map();
-    playerCountResults.forEach(row => {
-        playerCounts.set(row.alliance_id, row.player_count);
-    });
+    for (const alliance of availableAlliances) {
+        const count = playerQueries.getPlayersByAlliance(alliance.id, alliance.game_type).length;
+        playerCounts.set(alliance.id, count);
+    }
 
     const alliancesWithPlayers = availableAlliances.filter(alliance => (playerCounts.get(alliance.id) || 0) > 0);
     return { alliances: alliancesWithPlayers, counts: playerCounts };
+}
+
+async function handleTriggerRefreshGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_trigger_refresh_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.ALLIANCE_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const gameType = normalizeGameType(interaction.values[0], null);
+        if (!gameType) {
+            return await interaction.reply({
+                content: lang.alliance.refreshAlliance.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const availableAlliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.ALLIANCE_MANAGEMENT);
+        const { alliances: alliancesWithPlayers } = getAlliancesWithPlayers(availableAlliances);
+
+        if (alliancesWithPlayers.length === 0) {
+            return await interaction.reply({
+                content: lang.alliance.refreshAlliance.errors.noAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        await showTriggerRefreshAllianceSelection(interaction, 0, gameType);
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleTriggerRefreshGameSelection');
+    }
 }
 
 module.exports = {
     createTriggerRefreshButton,
     handleTriggerRefreshButton,
     handleTriggerRefreshPagination,
-    handleTriggerRefreshSelection
+    handleTriggerRefreshSelection,
+    handleTriggerRefreshGameSelection
 };

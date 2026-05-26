@@ -1,0 +1,5391 @@
+{
+    "guardStation": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 0,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {}
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 0
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 5300,
+                "stone": 1000,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "7"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 10
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 88000,
+                "stone": 17000,
+                "iron": 4400
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 21,
+                "seconds": 30
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 420000,
+                "wood": 420000,
+                "stone": 84000,
+                "iron": 21000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 4,
+                "seconds": 30
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 1400000,
+                "wood": 1400000,
+                "stone": 290000,
+                "iron": 74000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "16"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 3,
+                "minutes": 39,
+                "seconds": 0
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 5300000,
+                "wood": 5300000,
+                "stone": 1000000,
+                "iron": 260000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "20"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 52,
+                "seconds": 30
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 15000000,
+                "wood": 15000000,
+                "stone": 3000000,
+                "iron": 750000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "24"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 13,
+                "minutes": 44,
+                "seconds": 0
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 37000000,
+                "wood": 37000000,
+                "stone": 7400000,
+                "iron": 1800000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "27"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 0,
+                "minutes": 55,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 61000000,
+                "wood": 61000000,
+                "stone": 12000000,
+                "iron": 3000000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "29"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 0,
+                "minutes": 26,
+                "seconds": 0
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 75000000,
+                "wood": 75000000,
+                "stone": 15000000,
+                "iron": 3700000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "30"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 19,
+                "minutes": 44,
+                "seconds": 0
+            }
+        }
+    },
+    "barracks": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 95,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 2
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 140,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 9
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 645,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 45
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 0,
+                "wood": 1400,
+                "stone": 285,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 2,
+                "seconds": 15
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 0,
+                "wood": 6000,
+                "stone": 1200,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 30
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 0,
+                "wood": 15000,
+                "stone": 3000,
+                "iron": 765
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 0,
+                "wood": 55000,
+                "stone": 11000,
+                "iron": 2700
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 18,
+                "seconds": 0
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 0,
+                "wood": 100000,
+                "stone": 20000,
+                "iron": 5000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 27,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 0,
+                "wood": 200000,
+                "stone": 41000,
+                "iron": 10000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 30
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 0,
+                "wood": 360000,
+                "stone": 73000,
+                "iron": 18000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 54,
+                "seconds": 0
+            }
+        },
+        "11": {
+            "cost": {
+                "food": 460000,
+                "wood": 460000,
+                "stone": 92000,
+                "iron": 23000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "11"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 7,
+                "seconds": 30
+            }
+        },
+        "12": {
+            "cost": {
+                "food": 580000,
+                "wood": 580000,
+                "stone": 110000,
+                "iron": 29000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "12"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 21,
+                "seconds": 0
+            }
+        },
+        "13": {
+            "cost": {
+                "food": 830000,
+                "wood": 830000,
+                "stone": 160000,
+                "iron": 41000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 39,
+                "seconds": 0
+            }
+        },
+        "14": {
+            "cost": {
+                "food": 1100000,
+                "wood": 1100000,
+                "stone": 220000,
+                "iron": 55000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "14"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 6,
+                "seconds": 0
+            }
+        },
+        "15": {
+            "cost": {
+                "food": 1600000,
+                "wood": 1600000,
+                "stone": 320000,
+                "iron": 81000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "15"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "16": {
+            "cost": {
+                "food": 2000000,
+                "wood": 2000000,
+                "stone": 410000,
+                "iron": 100000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "16"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 4,
+                "minutes": 34,
+                "seconds": 0
+            }
+        },
+        "17": {
+            "cost": {
+                "food": 3200000,
+                "wood": 3200000,
+                "stone": 650000,
+                "iron": 160000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "17"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 5,
+                "minutes": 29,
+                "seconds": 0
+            }
+        },
+        "18": {
+            "cost": {
+                "food": 4300000,
+                "wood": 4300000,
+                "stone": 870000,
+                "iron": 210000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "18"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 6,
+                "minutes": 35,
+                "seconds": 0
+            }
+        },
+        "19": {
+            "cost": {
+                "food": 5400000,
+                "wood": 5400000,
+                "stone": 1000000,
+                "iron": 270000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "19"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 52,
+                "seconds": 30
+            }
+        },
+        "20": {
+            "cost": {
+                "food": 7500000,
+                "wood": 7500000,
+                "stone": 1500000,
+                "iron": 370000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "20"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 12,
+                "minutes": 20,
+                "seconds": 30
+            }
+        },
+        "21": {
+            "cost": {
+                "food": 9500000,
+                "wood": 9500000,
+                "stone": 1900000,
+                "iron": 470000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "21"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 16,
+                "minutes": 2,
+                "seconds": 30
+            }
+        },
+        "22": {
+            "cost": {
+                "food": 12000000,
+                "wood": 12000000,
+                "stone": 2500000,
+                "iron": 630000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "22"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 0
+            }
+        },
+        "23": {
+            "cost": {
+                "food": 15000000,
+                "wood": 15000000,
+                "stone": 3100000,
+                "iron": 780000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "23"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 9,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "24": {
+            "cost": {
+                "food": 21000000,
+                "wood": 21000000,
+                "stone": 4200000,
+                "iron": 1000000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "24"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 23,
+                "minutes": 11,
+                "seconds": 0
+            }
+        },
+        "25": {
+            "cost": {
+                "food": 28000000,
+                "wood": 28000000,
+                "stone": 5700000,
+                "iron": 1400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "25"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 18,
+                "minutes": 3,
+                "seconds": 0
+            }
+        },
+        "26": {
+            "cost": {
+                "food": 36000000,
+                "wood": 36000000,
+                "stone": 7300000,
+                "iron": 1800000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "26"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 3,
+                "minutes": 57,
+                "seconds": 0
+            }
+        },
+        "27": {
+            "cost": {
+                "food": 52000000,
+                "wood": 52000000,
+                "stone": 10000000,
+                "iron": 2600000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "27"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 19,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "28": {
+            "cost": {
+                "food": 69000000,
+                "wood": 69000000,
+                "stone": 13000000,
+                "iron": 3400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "28"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 8,
+                "minutes": 49,
+                "seconds": 0
+            }
+        },
+        "29": {
+            "cost": {
+                "food": 86000000,
+                "wood": 86000000,
+                "stone": 17000000,
+                "iron": 4300000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "29"
+                }
+            },
+            "time": {
+                "days": 5,
+                "hours": 0,
+                "minutes": 33,
+                "seconds": 0
+            }
+        },
+        "30": {
+            "cost": {
+                "food": 100000000,
+                "wood": 100000000,
+                "stone": 21000000,
+                "iron": 5200000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "30"
+                }
+            },
+            "time": {
+                "days": 6,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 0
+            }
+        }
+    },
+    "range": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 95,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 2
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 140,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 9
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 645,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 45
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 0,
+                "wood": 1400,
+                "stone": 285,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 2,
+                "seconds": 15
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 0,
+                "wood": 6000,
+                "stone": 1200,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 30
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 0,
+                "wood": 15000,
+                "stone": 3000,
+                "iron": 765
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 0,
+                "wood": 55000,
+                "stone": 11000,
+                "iron": 2700
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 18,
+                "seconds": 0
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 0,
+                "wood": 100000,
+                "stone": 20000,
+                "iron": 5000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 27,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 0,
+                "wood": 200000,
+                "stone": 41000,
+                "iron": 10000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 30
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 0,
+                "wood": 360000,
+                "stone": 73000,
+                "iron": 18000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 54,
+                "seconds": 0
+            }
+        },
+        "11": {
+            "cost": {
+                "food": 460000,
+                "wood": 460000,
+                "stone": 92000,
+                "iron": 23000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "11"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 7,
+                "seconds": 30
+            }
+        },
+        "12": {
+            "cost": {
+                "food": 580000,
+                "wood": 580000,
+                "stone": 110000,
+                "iron": 29000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "12"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 21,
+                "seconds": 0
+            }
+        },
+        "13": {
+            "cost": {
+                "food": 830000,
+                "wood": 830000,
+                "stone": 160000,
+                "iron": 41000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 39,
+                "seconds": 0
+            }
+        },
+        "14": {
+            "cost": {
+                "food": 1100000,
+                "wood": 1100000,
+                "stone": 220000,
+                "iron": 55000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "14"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 6,
+                "seconds": 0
+            }
+        },
+        "15": {
+            "cost": {
+                "food": 1600000,
+                "wood": 1600000,
+                "stone": 320000,
+                "iron": 81000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "15"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "16": {
+            "cost": {
+                "food": 2000000,
+                "wood": 2000000,
+                "stone": 410000,
+                "iron": 100000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "16"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 4,
+                "minutes": 34,
+                "seconds": 0
+            }
+        },
+        "17": {
+            "cost": {
+                "food": 3200000,
+                "wood": 3200000,
+                "stone": 650000,
+                "iron": 160000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "17"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 5,
+                "minutes": 29,
+                "seconds": 0
+            }
+        },
+        "18": {
+            "cost": {
+                "food": 4300000,
+                "wood": 4300000,
+                "stone": 870000,
+                "iron": 210000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "18"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 6,
+                "minutes": 35,
+                "seconds": 0
+            }
+        },
+        "19": {
+            "cost": {
+                "food": 5400000,
+                "wood": 5400000,
+                "stone": 1000000,
+                "iron": 270000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "19"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 52,
+                "seconds": 30
+            }
+        },
+        "20": {
+            "cost": {
+                "food": 7500000,
+                "wood": 7500000,
+                "stone": 1500000,
+                "iron": 370000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "20"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 12,
+                "minutes": 20,
+                "seconds": 30
+            }
+        },
+        "21": {
+            "cost": {
+                "food": 9500000,
+                "wood": 9500000,
+                "stone": 1900000,
+                "iron": 470000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "21"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 16,
+                "minutes": 2,
+                "seconds": 30
+            }
+        },
+        "22": {
+            "cost": {
+                "food": 12000000,
+                "wood": 12000000,
+                "stone": 2500000,
+                "iron": 630000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "22"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 0
+            }
+        },
+        "23": {
+            "cost": {
+                "food": 15000000,
+                "wood": 15000000,
+                "stone": 3100000,
+                "iron": 780000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "23"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 9,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "24": {
+            "cost": {
+                "food": 21000000,
+                "wood": 21000000,
+                "stone": 4200000,
+                "iron": 1000000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "24"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 23,
+                "minutes": 11,
+                "seconds": 0
+            }
+        },
+        "25": {
+            "cost": {
+                "food": 28000000,
+                "wood": 28000000,
+                "stone": 5700000,
+                "iron": 1400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "25"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 18,
+                "minutes": 3,
+                "seconds": 0
+            }
+        },
+        "26": {
+            "cost": {
+                "food": 36000000,
+                "wood": 36000000,
+                "stone": 7300000,
+                "iron": 1800000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "26"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 3,
+                "minutes": 57,
+                "seconds": 0
+            }
+        },
+        "27": {
+            "cost": {
+                "food": 52000000,
+                "wood": 52000000,
+                "stone": 10000000,
+                "iron": 2600000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "27"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 19,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "28": {
+            "cost": {
+                "food": 69000000,
+                "wood": 69000000,
+                "stone": 13000000,
+                "iron": 3400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "28"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 8,
+                "minutes": 49,
+                "seconds": 0
+            }
+        },
+        "29": {
+            "cost": {
+                "food": 86000000,
+                "wood": 86000000,
+                "stone": 17000000,
+                "iron": 4300000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "29"
+                }
+            },
+            "time": {
+                "days": 5,
+                "hours": 0,
+                "minutes": 33,
+                "seconds": 0
+            }
+        },
+        "30": {
+            "cost": {
+                "food": 100000000,
+                "wood": 100000000,
+                "stone": 21000000,
+                "iron": 5200000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "30"
+                }
+            },
+            "time": {
+                "days": 6,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 0
+            }
+        }
+    },
+    "stable": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 95,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 2
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 140,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 9
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 645,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 45
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 0,
+                "wood": 1400,
+                "stone": 285,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 2,
+                "seconds": 15
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 0,
+                "wood": 6000,
+                "stone": 1200,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 30
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 0,
+                "wood": 15000,
+                "stone": 3000,
+                "iron": 765
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 0,
+                "wood": 55000,
+                "stone": 11000,
+                "iron": 2700
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 18,
+                "seconds": 0
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 0,
+                "wood": 100000,
+                "stone": 20000,
+                "iron": 5000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 27,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 0,
+                "wood": 200000,
+                "stone": 41000,
+                "iron": 10000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 30
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 0,
+                "wood": 360000,
+                "stone": 73000,
+                "iron": 18000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 54,
+                "seconds": 0
+            }
+        },
+        "11": {
+            "cost": {
+                "food": 460000,
+                "wood": 460000,
+                "stone": 92000,
+                "iron": 23000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "11"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 7,
+                "seconds": 30
+            }
+        },
+        "12": {
+            "cost": {
+                "food": 580000,
+                "wood": 580000,
+                "stone": 110000,
+                "iron": 29000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "12"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 21,
+                "seconds": 0
+            }
+        },
+        "13": {
+            "cost": {
+                "food": 830000,
+                "wood": 830000,
+                "stone": 160000,
+                "iron": 41000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 39,
+                "seconds": 0
+            }
+        },
+        "14": {
+            "cost": {
+                "food": 1100000,
+                "wood": 1100000,
+                "stone": 220000,
+                "iron": 55000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "14"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 6,
+                "seconds": 0
+            }
+        },
+        "15": {
+            "cost": {
+                "food": 1600000,
+                "wood": 1600000,
+                "stone": 320000,
+                "iron": 81000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "15"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "16": {
+            "cost": {
+                "food": 2000000,
+                "wood": 2000000,
+                "stone": 410000,
+                "iron": 100000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "16"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 4,
+                "minutes": 34,
+                "seconds": 0
+            }
+        },
+        "17": {
+            "cost": {
+                "food": 3200000,
+                "wood": 3200000,
+                "stone": 650000,
+                "iron": 160000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "17"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 5,
+                "minutes": 29,
+                "seconds": 0
+            }
+        },
+        "18": {
+            "cost": {
+                "food": 4300000,
+                "wood": 4300000,
+                "stone": 870000,
+                "iron": 210000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "18"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 6,
+                "minutes": 35,
+                "seconds": 0
+            }
+        },
+        "19": {
+            "cost": {
+                "food": 5400000,
+                "wood": 5400000,
+                "stone": 1000000,
+                "iron": 270000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "19"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 52,
+                "seconds": 30
+            }
+        },
+        "20": {
+            "cost": {
+                "food": 7500000,
+                "wood": 7500000,
+                "stone": 1500000,
+                "iron": 370000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "20"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 12,
+                "minutes": 20,
+                "seconds": 30
+            }
+        },
+        "21": {
+            "cost": {
+                "food": 9500000,
+                "wood": 9500000,
+                "stone": 1900000,
+                "iron": 470000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "21"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 16,
+                "minutes": 2,
+                "seconds": 30
+            }
+        },
+        "22": {
+            "cost": {
+                "food": 12000000,
+                "wood": 12000000,
+                "stone": 2500000,
+                "iron": 630000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "22"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 0
+            }
+        },
+        "23": {
+            "cost": {
+                "food": 15000000,
+                "wood": 15000000,
+                "stone": 3100000,
+                "iron": 780000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "23"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 9,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "24": {
+            "cost": {
+                "food": 21000000,
+                "wood": 21000000,
+                "stone": 4200000,
+                "iron": 1000000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "24"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 23,
+                "minutes": 11,
+                "seconds": 0
+            }
+        },
+        "25": {
+            "cost": {
+                "food": 28000000,
+                "wood": 28000000,
+                "stone": 5700000,
+                "iron": 1400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "25"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 18,
+                "minutes": 3,
+                "seconds": 0
+            }
+        },
+        "26": {
+            "cost": {
+                "food": 36000000,
+                "wood": 36000000,
+                "stone": 7300000,
+                "iron": 1800000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "26"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 3,
+                "minutes": 57,
+                "seconds": 0
+            }
+        },
+        "27": {
+            "cost": {
+                "food": 52000000,
+                "wood": 52000000,
+                "stone": 10000000,
+                "iron": 2600000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "27"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 19,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "28": {
+            "cost": {
+                "food": 69000000,
+                "wood": 69000000,
+                "stone": 13000000,
+                "iron": 3400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "28"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 8,
+                "minutes": 49,
+                "seconds": 0
+            }
+        },
+        "29": {
+            "cost": {
+                "food": 86000000,
+                "wood": 86000000,
+                "stone": 17000000,
+                "iron": 4300000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "29"
+                }
+            },
+            "time": {
+                "days": 5,
+                "hours": 0,
+                "minutes": 33,
+                "seconds": 0
+            }
+        },
+        "30": {
+            "cost": {
+                "food": 100000000,
+                "wood": 100000000,
+                "stone": 21000000,
+                "iron": 5200000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "30"
+                }
+            },
+            "time": {
+                "days": 6,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 0
+            }
+        }
+    },
+    "academy": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 105,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 2
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 160,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 9
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 725,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 45
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 0,
+                "wood": 1600,
+                "stone": 320,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 2,
+                "seconds": 15
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 0,
+                "wood": 6800,
+                "stone": 1300,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 30
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 0,
+                "wood": 17000,
+                "stone": 3400,
+                "iron": 860
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 0,
+                "wood": 62000,
+                "stone": 12000,
+                "iron": 3100
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 18,
+                "seconds": 0
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 0,
+                "wood": 110000,
+                "stone": 22000,
+                "iron": 5600
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 27,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 0,
+                "wood": 230000,
+                "stone": 47000,
+                "iron": 11000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 30
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 0,
+                "wood": 410000,
+                "stone": 82000,
+                "iron": 20000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 54,
+                "seconds": 0
+            }
+        },
+        "11": {
+            "cost": {
+                "food": 520000,
+                "wood": 520000,
+                "stone": 100000,
+                "iron": 26000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "11"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 7,
+                "seconds": 30
+            }
+        },
+        "12": {
+            "cost": {
+                "food": 670000,
+                "wood": 670000,
+                "stone": 130000,
+                "iron": 33000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "12"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 21,
+                "seconds": 0
+            }
+        },
+        "13": {
+            "cost": {
+                "food": 950000,
+                "wood": 950000,
+                "stone": 190000,
+                "iron": 47000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 39,
+                "seconds": 0
+            }
+        },
+        "14": {
+            "cost": {
+                "food": 1200000,
+                "wood": 1200000,
+                "stone": 250000,
+                "iron": 63000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "14"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 6,
+                "seconds": 0
+            }
+        },
+        "15": {
+            "cost": {
+                "food": 1800000,
+                "wood": 1800000,
+                "stone": 370000,
+                "iron": 93000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "15"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "16": {
+            "cost": {
+                "food": 2300000,
+                "wood": 2300000,
+                "stone": 470000,
+                "iron": 110000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "16"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 4,
+                "minutes": 34,
+                "seconds": 0
+            }
+        },
+        "17": {
+            "cost": {
+                "food": 3700000,
+                "wood": 3700000,
+                "stone": 740000,
+                "iron": 180000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "17"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 5,
+                "minutes": 29,
+                "seconds": 0
+            }
+        },
+        "18": {
+            "cost": {
+                "food": 5000000,
+                "wood": 5000000,
+                "stone": 1000000,
+                "iron": 250000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "18"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 6,
+                "minutes": 35,
+                "seconds": 0
+            }
+        },
+        "19": {
+            "cost": {
+                "food": 6200000,
+                "wood": 6200000,
+                "stone": 1200000,
+                "iron": 310000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "19"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 52,
+                "seconds": 30
+            }
+        },
+        "20": {
+            "cost": {
+                "food": 8600000,
+                "wood": 8600000,
+                "stone": 1700000,
+                "iron": 430000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "20"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 12,
+                "minutes": 20,
+                "seconds": 30
+            }
+        },
+        "21": {
+            "cost": {
+                "food": 10000000,
+                "wood": 10000000,
+                "stone": 2100000,
+                "iron": 540000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "21"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 16,
+                "minutes": 2,
+                "seconds": 30
+            }
+        },
+        "22": {
+            "cost": {
+                "food": 14000000,
+                "wood": 14000000,
+                "stone": 2800000,
+                "iron": 720000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "22"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 0
+            }
+        },
+        "23": {
+            "cost": {
+                "food": 17000000,
+                "wood": 17000000,
+                "stone": 3500000,
+                "iron": 890000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "23"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 9,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "24": {
+            "cost": {
+                "food": 24000000,
+                "wood": 24000000,
+                "stone": 4800000,
+                "iron": 1200000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "24"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 23,
+                "minutes": 11,
+                "seconds": 0
+            }
+        },
+        "25": {
+            "cost": {
+                "food": 32000000,
+                "wood": 32000000,
+                "stone": 6500000,
+                "iron": 1600000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "25"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 18,
+                "minutes": 3,
+                "seconds": 0
+            }
+        },
+        "26": {
+            "cost": {
+                "food": 42000000,
+                "wood": 42000000,
+                "stone": 8400000,
+                "iron": 2100000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "26"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 3,
+                "minutes": 57,
+                "seconds": 0
+            }
+        },
+        "27": {
+            "cost": {
+                "food": 59000000,
+                "wood": 59000000,
+                "stone": 11000000,
+                "iron": 2900000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "27"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 19,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "28": {
+            "cost": {
+                "food": 79000000,
+                "wood": 79000000,
+                "stone": 15000000,
+                "iron": 3900000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "28"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 8,
+                "minutes": 49,
+                "seconds": 0
+            }
+        },
+        "29": {
+            "cost": {
+                "food": 98000000,
+                "wood": 98000000,
+                "stone": 19000000,
+                "iron": 4900000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "29"
+                }
+            },
+            "time": {
+                "days": 5,
+                "hours": 0,
+                "minutes": 33,
+                "seconds": 0
+            }
+        },
+        "30": {
+            "cost": {
+                "food": 120000000,
+                "wood": 120000000,
+                "stone": 24000000,
+                "iron": 6000000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "30"
+                }
+            },
+            "time": {
+                "days": 6,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 0
+            }
+        }
+    },
+    "infirmary": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 0,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 2
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 100,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 9
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 460,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 40
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 0,
+                "wood": 1000,
+                "stone": 205,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 2,
+                "seconds": 5
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 0,
+                "wood": 4300,
+                "stone": 865,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 10
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 0,
+                "wood": 10000,
+                "stone": 2100,
+                "iron": 545
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 8,
+                "seconds": 20
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 0,
+                "wood": 39000,
+                "stone": 7800,
+                "iron": 1900
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 16,
+                "seconds": 30
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 0,
+                "wood": 72000,
+                "stone": 14000,
+                "iron": 3600
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 25,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 0,
+                "wood": 140000,
+                "stone": 29000,
+                "iron": 7400
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 27,
+                "seconds": 30
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 0,
+                "wood": 260000,
+                "stone": 52000,
+                "iron": 13000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 50,
+                "seconds": 0
+            }
+        },
+        "11": {
+            "cost": {
+                "food": 320000,
+                "wood": 320000,
+                "stone": 65000,
+                "iron": 16000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "11"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 3,
+                "seconds": 0
+            }
+        },
+        "12": {
+            "cost": {
+                "food": 420000,
+                "wood": 420000,
+                "stone": 54000,
+                "iron": 21000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "12"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 15,
+                "seconds": 30
+            }
+        },
+        "13": {
+            "cost": {
+                "food": 590000,
+                "wood": 590000,
+                "stone": 110000,
+                "iron": 29000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 32,
+                "seconds": 0
+            }
+        },
+        "14": {
+            "cost": {
+                "food": 780000,
+                "wood": 780000,
+                "stone": 150000,
+                "iron": 39000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "14"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 57,
+                "seconds": 30
+            }
+        },
+        "15": {
+            "cost": {
+                "food": 1100000,
+                "wood": 1100000,
+                "stone": 230000,
+                "iron": 58000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "15"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 31,
+                "seconds": 0
+            }
+        },
+        "16": {
+            "cost": {
+                "food": 1400000,
+                "wood": 1400000,
+                "stone": 290000,
+                "iron": 74000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "16"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 4,
+                "minutes": 16,
+                "seconds": 0
+            }
+        },
+        "17": {
+            "cost": {
+                "food": 2300000,
+                "wood": 2300000,
+                "stone": 460000,
+                "iron": 110000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "17"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 5,
+                "minutes": 7,
+                "seconds": 0
+            }
+        },
+        "18": {
+            "cost": {
+                "food": 3100000,
+                "wood": 3100000,
+                "stone": 620000,
+                "iron": 150000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "18"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 6,
+                "minutes": 8,
+                "seconds": 30
+            }
+        },
+        "19": {
+            "cost": {
+                "food": 3900000,
+                "wood": 3900000,
+                "stone": 780000,
+                "iron": 190000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "19"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 13,
+                "seconds": 0
+            }
+        },
+        "20": {
+            "cost": {
+                "food": 5300000,
+                "wood": 5300000,
+                "stone": 1000000,
+                "iron": 260000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "20"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 11,
+                "minutes": 31,
+                "seconds": 0
+            }
+        },
+        "21": {
+            "cost": {
+                "food": 6800000,
+                "wood": 6800000,
+                "stone": 1300000,
+                "iron": 340000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "21"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 14,
+                "minutes": 58,
+                "seconds": 30
+            }
+        },
+        "22": {
+            "cost": {
+                "food": 9000000,
+                "wood": 9000000,
+                "stone": 1800000,
+                "iron": 450000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "22"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 22,
+                "minutes": 28,
+                "seconds": 0
+            }
+        },
+        "23": {
+            "cost": {
+                "food": 11000000,
+                "wood": 11000000,
+                "stone": 2200000,
+                "iron": 560000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "23"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 7,
+                "minutes": 27,
+                "seconds": 0
+            }
+        },
+        "24": {
+            "cost": {
+                "food": 15000000,
+                "wood": 15000000,
+                "stone": 3000000,
+                "iron": 750000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "24"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 20,
+                "minutes": 2,
+                "seconds": 0
+            }
+        },
+        "25": {
+            "cost": {
+                "food": 20000000,
+                "wood": 20000000,
+                "stone": 4000000,
+                "iron": 1000000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "25"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 13,
+                "minutes": 39,
+                "seconds": 0
+            }
+        },
+        "26": {
+            "cost": {
+                "food": 26000000,
+                "wood": 26000000,
+                "stone": 5200000,
+                "iron": 1300000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "26"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 22,
+                "minutes": 54,
+                "seconds": 0
+            }
+        },
+        "27": {
+            "cost": {
+                "food": 37000000,
+                "wood": 37000000,
+                "stone": 7400000,
+                "iron": 1800000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "27"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 13,
+                "minutes": 4,
+                "seconds": 0
+            }
+        },
+        "28": {
+            "cost": {
+                "food": 49000000,
+                "wood": 49000000,
+                "stone": 9900000,
+                "iron": 2400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "28"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 1,
+                "minutes": 50,
+                "seconds": 0
+            }
+        },
+        "29": {
+            "cost": {
+                "food": 61000000,
+                "wood": 61000000,
+                "stone": 12000000,
+                "iron": 3000000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "29"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 16,
+                "minutes": 31,
+                "seconds": 0
+            }
+        },
+        "30": {
+            "cost": {
+                "food": 75000000,
+                "wood": 75000000,
+                "stone": 15000000,
+                "iron": 3700000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "30"
+                }
+            },
+            "time": {
+                "days": 5,
+                "hours": 15,
+                "minutes": 1,
+                "seconds": 0
+            }
+        }
+    },
+    "commandCenter": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 80,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "1"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 2
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 125,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "2"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 8
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 565,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "3"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 35
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 0,
+                "wood": 1200,
+                "stone": 250,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "4"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 1,
+                "seconds": 45
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 0,
+                "wood": 5300,
+                "stone": 1000,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "5"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 3,
+                "seconds": 35
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 0,
+                "wood": 13000,
+                "stone": 2600,
+                "iron": 670
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "6"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 7,
+                "seconds": 10
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 0,
+                "wood": 48000,
+                "stone": 9600,
+                "iron": 2400
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "7"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 14,
+                "seconds": 0
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 0,
+                "wood": 88000,
+                "stone": 17000,
+                "iron": 4400
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 21,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 0,
+                "wood": 180000,
+                "stone": 36000,
+                "iron": 9100
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 32,
+                "seconds": 0
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 0,
+                "wood": 320000,
+                "stone": 64000,
+                "iron": 16000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10",
+                    "embassy": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 43,
+                "seconds": 0
+            }
+        },
+        "11": {
+            "cost": {
+                "food": 390000,
+                "wood": 390000,
+                "stone": 79000,
+                "iron": 19000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "11",
+                    "embassy": "11"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 54,
+                "seconds": 0
+            }
+        },
+        "12": {
+            "cost": {
+                "food": 500000,
+                "wood": 500000,
+                "stone": 100000,
+                "iron": 25000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "12",
+                    "embassy": "12"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 4,
+                "seconds": 30
+            }
+        },
+        "13": {
+            "cost": {
+                "food": 710000,
+                "wood": 710000,
+                "stone": 140000,
+                "iron": 35000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "13",
+                    "embassy": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 19,
+                "seconds": 0
+            }
+        },
+        "14": {
+            "cost": {
+                "food": 940000,
+                "wood": 940000,
+                "stone": 180000,
+                "iron": 47000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "14",
+                    "embassy": "14"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 40,
+                "seconds": 30
+            }
+        },
+        "15": {
+            "cost": {
+                "food": 1300000,
+                "wood": 1300000,
+                "stone": 270000,
+                "iron": 69000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "15",
+                    "embassy": "15"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 9,
+                "seconds": 30
+            }
+        },
+        "16": {
+            "cost": {
+                "food": 1700000,
+                "wood": 1700000,
+                "stone": 350000,
+                "iron": 89000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "16",
+                    "embassy": "16"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 3,
+                "minutes": 39,
+                "seconds": 0
+            }
+        },
+        "17": {
+            "cost": {
+                "food": 2700000,
+                "wood": 2700000,
+                "stone": 550000,
+                "iron": 130000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "17",
+                    "embassy": "17"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 4,
+                "minutes": 23,
+                "seconds": 0
+            }
+        },
+        "18": {
+            "cost": {
+                "food": 3700000,
+                "wood": 3700000,
+                "stone": 750000,
+                "iron": 180000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "18",
+                    "embassy": "18"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 5,
+                "minutes": 16,
+                "seconds": 0
+            }
+        },
+        "19": {
+            "cost": {
+                "food": 4700000,
+                "wood": 4700000,
+                "stone": 940000,
+                "iron": 230000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "19",
+                    "embassy": "19"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 7,
+                "minutes": 54,
+                "seconds": 0
+            }
+        },
+        "20": {
+            "cost": {
+                "food": 6400000,
+                "wood": 6400000,
+                "stone": 1200000,
+                "iron": 320000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "20",
+                    "embassy": "20"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 52,
+                "seconds": 30
+            }
+        },
+        "21": {
+            "cost": {
+                "food": 8100000,
+                "wood": 8100000,
+                "stone": 1600000,
+                "iron": 400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "21",
+                    "embassy": "21"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 12,
+                "minutes": 50,
+                "seconds": 0
+            }
+        },
+        "22": {
+            "cost": {
+                "food": 10000000,
+                "wood": 10000000,
+                "stone": 2100000,
+                "iron": 540000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "22",
+                    "embassy": "22"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 19,
+                "minutes": 15,
+                "seconds": 30
+            }
+        },
+        "23": {
+            "cost": {
+                "food": 13000000,
+                "wood": 13000000,
+                "stone": 2600000,
+                "iron": 670000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "23",
+                    "embassy": "23"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 2,
+                "minutes": 57,
+                "seconds": 0
+            }
+        },
+        "24": {
+            "cost": {
+                "food": 18000000,
+                "wood": 18000000,
+                "stone": 3600000,
+                "iron": 900000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "24",
+                    "embassy": "24"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 13,
+                "minutes": 44,
+                "seconds": 0
+            }
+        },
+        "25": {
+            "cost": {
+                "food": 24000000,
+                "wood": 24000000,
+                "stone": 4900000,
+                "iron": 1200000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "25",
+                    "embassy": "25"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 4,
+                "minutes": 50,
+                "seconds": 0
+            }
+        },
+        "26": {
+            "cost": {
+                "food": 31000000,
+                "wood": 31000000,
+                "stone": 6300000,
+                "iron": 1500000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "26",
+                    "embassy": "26"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 12,
+                "minutes": 46,
+                "seconds": 0
+            }
+        },
+        "27": {
+            "cost": {
+                "food": 44000000,
+                "wood": 44000000,
+                "stone": 8900000,
+                "iron": 2200000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "27",
+                    "embassy": "27"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 0,
+                "minutes": 55,
+                "seconds": 0
+            }
+        },
+        "28": {
+            "cost": {
+                "food": 59000000,
+                "wood": 59000000,
+                "stone": 11000000,
+                "iron": 2900000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "28",
+                    "embassy": "28"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 11,
+                "minutes": 51,
+                "seconds": 0
+            }
+        },
+        "29": {
+            "cost": {
+                "food": 73000000,
+                "wood": 73000000,
+                "stone": 18000000,
+                "iron": 4500000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "29",
+                    "embassy": "29"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 0,
+                "minutes": 26,
+                "seconds": 0
+            }
+        },
+        "30": {
+            "cost": {
+                "food": 90000000,
+                "wood": 90000000,
+                "stone": 18000000,
+                "iron": 4500000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "30",
+                    "embassy": "30"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 19,
+                "minutes": 44,
+                "seconds": 0
+            }
+        }
+    },
+    "embassy": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 60,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 2
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 90,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 10
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 400,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 1,
+                "seconds": 0
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 0,
+                "wood": 900,
+                "stone": 180,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 2,
+                "seconds": 0
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 0,
+                "wood": 3800,
+                "stone": 760,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 6,
+                "seconds": 40
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 0,
+                "wood": 9600,
+                "stone": 1900,
+                "iron": 480
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 13,
+                "seconds": 20
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 0,
+                "wood": 34000,
+                "stone": 6900,
+                "iron": 1700
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 25,
+                "seconds": 0
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 0,
+                "wood": 63000,
+                "stone": 12000,
+                "iron": 3100
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "8"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 45,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 0,
+                "wood": 130000,
+                "stone": 26000,
+                "iron": 6500
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 0,
+                "seconds": 0
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 0,
+                "wood": 230000,
+                "stone": 46000,
+                "iron": 11000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 3,
+                "minutes": 57,
+                "seconds": 30
+            }
+        },
+        "11": {
+            "cost": {
+                "food": 260000,
+                "wood": 260000,
+                "stone": 52000,
+                "iron": 13000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "11"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 4,
+                "minutes": 57,
+                "seconds": 0
+            }
+        },
+        "12": {
+            "cost": {
+                "food": 330000,
+                "wood": 330000,
+                "stone": 67000,
+                "iron": 16000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "12"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 5,
+                "minutes": 56,
+                "seconds": 0
+            }
+        },
+        "13": {
+            "cost": {
+                "food": 470000,
+                "wood": 470000,
+                "stone": 95000,
+                "iron": 23000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 7,
+                "minutes": 15,
+                "seconds": 30
+            }
+        },
+        "14": {
+            "cost": {
+                "food": 630000,
+                "wood": 630000,
+                "stone": 120000,
+                "iron": 31000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "14"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 14,
+                "seconds": 0
+            }
+        },
+        "15": {
+            "cost": {
+                "food": 930000,
+                "wood": 930000,
+                "stone": 180000,
+                "iron": 46000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "15"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 11,
+                "minutes": 52,
+                "seconds": 30
+            }
+        },
+        "16": {
+            "cost": {
+                "food": 1100000,
+                "wood": 1100000,
+                "stone": 230000,
+                "iron": 59000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "16"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 20,
+                "minutes": 7,
+                "seconds": 0
+            }
+        },
+        "17": {
+            "cost": {
+                "food": 1800000,
+                "wood": 1800000,
+                "stone": 370000,
+                "iron": 93000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "17"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 0,
+                "minutes": 8,
+                "seconds": 0
+            }
+        },
+        "18": {
+            "cost": {
+                "food": 2500000,
+                "wood": 2500000,
+                "stone": 500000,
+                "iron": 120000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "18"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 4,
+                "minutes": 58,
+                "seconds": 0
+            }
+        },
+        "19": {
+            "cost": {
+                "food": 3100000,
+                "wood": 3100000,
+                "stone": 620000,
+                "iron": 150000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "19"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 19,
+                "minutes": 27,
+                "seconds": 0
+            }
+        },
+        "20": {
+            "cost": {
+                "food": 4300000,
+                "wood": 4300000,
+                "stone": 860000,
+                "iron": 210000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "20"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 6,
+                "minutes": 19,
+                "seconds": 0
+            }
+        },
+        "21": {
+            "cost": {
+                "food": 5400000,
+                "wood": 5400000,
+                "stone": 1000000,
+                "iron": 270000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "21"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 22,
+                "minutes": 36,
+                "seconds": 0
+            }
+        },
+        "22": {
+            "cost": {
+                "food": 7200000,
+                "wood": 7200000,
+                "stone": 1400000,
+                "iron": 360000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "22"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 9,
+                "minutes": 55,
+                "seconds": 0
+            }
+        },
+        "23": {
+            "cost": {
+                "food": 8900000,
+                "wood": 8900000,
+                "stone": 1700000,
+                "iron": 440000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "23"
+                }
+            },
+            "time": {
+                "days": 6,
+                "hours": 4,
+                "minutes": 17,
+                "seconds": 0
+            }
+        },
+        "24": {
+            "cost": {
+                "food": 12000000,
+                "wood": 12000000,
+                "stone": 2400000,
+                "iron": 600000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "24"
+                }
+            },
+            "time": {
+                "days": 8,
+                "hours": 15,
+                "minutes": 36,
+                "seconds": 0
+            }
+        },
+        "25": {
+            "cost": {
+                "food": 16000000,
+                "wood": 16000000,
+                "stone": 3200000,
+                "iron": 810000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "25"
+                }
+            },
+            "time": {
+                "days": 12,
+                "hours": 2,
+                "minutes": 38,
+                "seconds": 0
+            }
+        },
+        "26": {
+            "cost": {
+                "food": 21000000,
+                "wood": 21000000,
+                "stone": 4200000,
+                "iron": 1000000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "26"
+                }
+            },
+            "time": {
+                "days": 13,
+                "hours": 22,
+                "minutes": 14,
+                "seconds": 0
+            }
+        },
+        "27": {
+            "cost": {
+                "food": 29000000,
+                "wood": 29000000,
+                "stone": 5900000,
+                "iron": 1400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "27"
+                }
+            },
+            "time": {
+                "days": 16,
+                "hours": 17,
+                "minutes": 5,
+                "seconds": 0
+            }
+        },
+        "28": {
+            "cost": {
+                "food": 39000000,
+                "wood": 39000000,
+                "stone": 7900000,
+                "iron": 1900000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "28"
+                }
+            },
+            "time": {
+                "days": 19,
+                "hours": 5,
+                "minutes": 15,
+                "seconds": 0
+            }
+        },
+        "29": {
+            "cost": {
+                "food": 49000000,
+                "wood": 49000000,
+                "stone": 9800000,
+                "iron": 2400000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "29"
+                }
+            },
+            "time": {
+                "days": 22,
+                "hours": 2,
+                "minutes": 26,
+                "seconds": 0
+            }
+        },
+        "30": {
+            "cost": {
+                "food": 60000000,
+                "wood": 60000000,
+                "stone": 12000000,
+                "iron": 3000000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "30"
+                }
+            },
+            "time": {
+                "days": 26,
+                "hours": 12,
+                "minutes": 32,
+                "seconds": 0
+            }
+        }
+    },
+    "storehouse": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 60,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 2
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 90,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 9
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 400,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 45
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 0,
+                "wood": 900,
+                "stone": 180,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 2,
+                "seconds": 15
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 0,
+                "wood": 3800,
+                "stone": 760,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 30
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 0,
+                "wood": 9600,
+                "stone": 1900,
+                "iron": 480
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 0,
+                "wood": 34000,
+                "stone": 6900,
+                "iron": 1700
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 18,
+                "seconds": 0
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 0,
+                "wood": 63000,
+                "stone": 12000,
+                "iron": 3100
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 27,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 0,
+                "wood": 130000,
+                "stone": 26000,
+                "iron": 6500
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "9"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 30
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 0,
+                "wood": 230000,
+                "stone": 46000,
+                "iron": 11000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 54,
+                "seconds": 0
+            }
+        },
+        "11": {
+            "cost": {
+                "food": 280000,
+                "wood": 280000,
+                "stone": 57000,
+                "iron": 14000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "11"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 7,
+                "seconds": 30
+            }
+        },
+        "12": {
+            "cost": {
+                "food": 370000,
+                "wood": 370000,
+                "stone": 74000,
+                "iron": 18000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "12"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 21,
+                "seconds": 0
+            }
+        },
+        "13": {
+            "cost": {
+                "food": 520000,
+                "wood": 520000,
+                "stone": 100000,
+                "iron": 26000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 39,
+                "seconds": 0
+            }
+        },
+        "14": {
+            "cost": {
+                "food": 690000,
+                "wood": 690000,
+                "stone": 130000,
+                "iron": 34000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "14"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 6,
+                "seconds": 0
+            }
+        },
+        "15": {
+            "cost": {
+                "food": 1000000,
+                "wood": 1000000,
+                "stone": 200000,
+                "iron": 51000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "15"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "16": {
+            "cost": {
+                "food": 1300000,
+                "wood": 1300000,
+                "stone": 260000,
+                "iron": 65000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "16"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 4,
+                "minutes": 34,
+                "seconds": 0
+            }
+        },
+        "17": {
+            "cost": {
+                "food": 2000000,
+                "wood": 2000000,
+                "stone": 400000,
+                "iron": 100000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "17"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 5,
+                "minutes": 29,
+                "seconds": 0
+            }
+        },
+        "18": {
+            "cost": {
+                "food": 2700000,
+                "wood": 2700000,
+                "stone": 550000,
+                "iron": 130000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "18"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 6,
+                "minutes": 35,
+                "seconds": 0
+            }
+        },
+        "19": {
+            "cost": {
+                "food": 3400000,
+                "wood": 3400000,
+                "stone": 690000,
+                "iron": 170000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "19"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 52,
+                "seconds": 30
+            }
+        },
+        "20": {
+            "cost": {
+                "food": 4700000,
+                "wood": 4700000,
+                "stone": 940000,
+                "iron": 230000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "20"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 12,
+                "minutes": 20,
+                "seconds": 30
+            }
+        },
+        "21": {
+            "cost": {
+                "food": 6000000,
+                "wood": 6000000,
+                "stone": 1200000,
+                "iron": 300000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "21"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 16,
+                "minutes": 2,
+                "seconds": 30
+            }
+        },
+        "22": {
+            "cost": {
+                "food": 7900000,
+                "wood": 7900000,
+                "stone": 1500000,
+                "iron": 390000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "22"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 0,
+                "minutes": 4,
+                "seconds": 0
+            }
+        },
+        "23": {
+            "cost": {
+                "food": 9800000,
+                "wood": 9800000,
+                "stone": 1900000,
+                "iron": 490000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "23"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 9,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "24": {
+            "cost": {
+                "food": 13000000,
+                "wood": 13000000,
+                "stone": 2600000,
+                "iron": 660000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "24"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 23,
+                "minutes": 11,
+                "seconds": 0
+            }
+        },
+        "25": {
+            "cost": {
+                "food": 17000000,
+                "wood": 17000000,
+                "stone": 3500000,
+                "iron": 890000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "25"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 18,
+                "minutes": 3,
+                "seconds": 0
+            }
+        },
+        "26": {
+            "cost": {
+                "food": 23000000,
+                "wood": 23000000,
+                "stone": 4600000,
+                "iron": 1100000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "26"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 3,
+                "minutes": 57,
+                "seconds": 0
+            }
+        },
+        "27": {
+            "cost": {
+                "food": 32000000,
+                "wood": 32000000,
+                "stone": 6500000,
+                "iron": 1600000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "27"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 19,
+                "minutes": 9,
+                "seconds": 0
+            }
+        },
+        "28": {
+            "cost": {
+                "food": 43000000,
+                "wood": 43000000,
+                "stone": 8700000,
+                "iron": 2100000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "28"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 8,
+                "minutes": 49,
+                "seconds": 0
+            }
+        },
+        "29": {
+            "cost": {
+                "food": 54000000,
+                "wood": 54000000,
+                "stone": 10000000,
+                "iron": 2700000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "29"
+                }
+            },
+            "time": {
+                "days": 5,
+                "hours": 0,
+                "minutes": 33,
+                "seconds": 0
+            }
+        },
+        "30": {
+            "cost": {
+                "food": 66000000,
+                "wood": 66000000,
+                "stone": 13000000,
+                "iron": 3300000
+            },
+            "requirements": {
+                "buildings": {
+                    "townCenter": "30"
+                }
+            },
+            "time": {
+                "days": 6,
+                "hours": 0,
+                "minutes": 40,
+                "seconds": 0
+            }
+        }
+    },
+    "townCenter": {
+        "1": {
+            "cost": {
+                "food": 0,
+                "wood": 0,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {}
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 0
+            }
+        },
+        "2": {
+            "cost": {
+                "food": 0,
+                "wood": 180,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "sawmill": "1"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 0,
+                "seconds": 6
+            }
+        },
+        "3": {
+            "cost": {
+                "food": 0,
+                "wood": 805,
+                "stone": 0,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "house1": "2"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 1,
+                "seconds": 0
+            }
+        },
+        "4": {
+            "cost": {
+                "food": 0,
+                "wood": 1800,
+                "stone": 360,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "quarry": "3"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 3,
+                "seconds": 0
+            }
+        },
+        "5": {
+            "cost": {
+                "food": 0,
+                "wood": 7600,
+                "stone": 1500,
+                "iron": 0
+            },
+            "requirements": {
+                "buildings": {
+                    "heroHall": "1",
+                    "house3": "3"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 10,
+                "seconds": 0
+            }
+        },
+        "6": {
+            "cost": {
+                "food": 0,
+                "wood": 19000,
+                "stone": 3800,
+                "iron": 960
+            },
+            "requirements": {
+                "buildings": {
+                    "ironMine": "5"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 0,
+                "minutes": 30,
+                "seconds": 0
+            }
+        },
+        "7": {
+            "cost": {
+                "food": 0,
+                "wood": 69000,
+                "stone": 13000,
+                "iron": 3400
+            },
+            "requirements": {
+                "buildings": {
+                    "kitchen": "6"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 1,
+                "minutes": 0,
+                "seconds": 0
+            }
+        },
+        "8": {
+            "cost": {
+                "food": 0,
+                "wood": 120000,
+                "stone": 25000,
+                "iron": 6300
+            },
+            "requirements": {
+                "buildings": {
+                    "barracks": "7"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 2,
+                "minutes": 30,
+                "seconds": 0
+            }
+        },
+        "9": {
+            "cost": {
+                "food": 0,
+                "wood": 260000,
+                "stone": 52000,
+                "iron": 13000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "8",
+                    "infirmary": "1"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 4,
+                "minutes": 30,
+                "seconds": 0
+            }
+        },
+        "10": {
+            "cost": {
+                "food": 0,
+                "wood": 460000,
+                "stone": 92000,
+                "iron": 23000
+            },
+            "requirements": {
+                "buildings": {
+                    "range": "9",
+                    "academy": "1"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 6,
+                "minutes": 0,
+                "seconds": 0
+            }
+        },
+        "11": {
+            "cost": {
+                "food": 1300000,
+                "wood": 1300000,
+                "stone": 260000,
+                "iron": 65000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "10",
+                    "stable": "10"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 7,
+                "minutes": 30,
+                "seconds": 0
+            }
+        },
+        "12": {
+            "cost": {
+                "food": 1600000,
+                "wood": 1600000,
+                "stone": 330000,
+                "iron": 84000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "11",
+                    "commandCenter": "1"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 9,
+                "minutes": 0,
+                "seconds": 0
+            }
+        },
+        "13": {
+            "cost": {
+                "food": 2300000,
+                "wood": 2300000,
+                "stone": 470000,
+                "iron": 110000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "12",
+                    "barracks": "12"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 11,
+                "minutes": 0,
+                "seconds": 0
+            }
+        },
+        "14": {
+            "cost": {
+                "food": 3100000,
+                "wood": 3100000,
+                "stone": 630000,
+                "iron": 150000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "13",
+                    "range": "13"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 14,
+                "minutes": 0,
+                "seconds": 0
+            }
+        },
+        "15": {
+            "cost": {
+                "food": 4600000,
+                "wood": 4600000,
+                "stone": 930000,
+                "iron": 230000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "14",
+                    "stable": "14"
+                }
+            },
+            "time": {
+                "days": 0,
+                "hours": 18,
+                "minutes": 0,
+                "seconds": 0
+            }
+        },
+        "16": {
+            "cost": {
+                "food": 5900000,
+                "wood": 5900000,
+                "stone": 1100000,
+                "iron": 290000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "15",
+                    "academy": "15"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 6,
+                "minutes": 28,
+                "seconds": 0
+            }
+        },
+        "17": {
+            "cost": {
+                "food": 9300000,
+                "wood": 9300000,
+                "stone": 1800000,
+                "iron": 460000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "16",
+                    "barracks": "16"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 12,
+                "minutes": 34,
+                "seconds": 0
+            }
+        },
+        "18": {
+            "cost": {
+                "food": 12000000,
+                "wood": 12000000,
+                "stone": 2500000,
+                "iron": 620000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "17",
+                    "range": "17"
+                }
+            },
+            "time": {
+                "days": 1,
+                "hours": 19,
+                "minutes": 53,
+                "seconds": 0
+            }
+        },
+        "19": {
+            "cost": {
+                "food": 15000000,
+                "wood": 15000000,
+                "stone": 3100000,
+                "iron": 780000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "18",
+                    "stable": "18"
+                }
+            },
+            "time": {
+                "days": 2,
+                "hours": 17,
+                "minutes": 50,
+                "seconds": 0
+            }
+        },
+        "20": {
+            "cost": {
+                "food": 21000000,
+                "wood": 21000000,
+                "stone": 4300000,
+                "iron": 1000000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "19,",
+                    "academy": "19"
+                }
+            },
+            "time": {
+                "days": 3,
+                "hours": 10,
+                "minutes": 18,
+                "seconds": 0
+            }
+        },
+        "21": {
+            "cost": {
+                "food": 27000000,
+                "wood": 27000000,
+                "stone": 5400000,
+                "iron": 1300000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "20",
+                    "barracks": "20"
+                }
+            },
+            "time": {
+                "days": 4,
+                "hours": 10,
+                "minutes": 59,
+                "seconds": 0
+            }
+        },
+        "22": {
+            "cost": {
+                "food": 36000000,
+                "wood": 36000000,
+                "stone": 7200000,
+                "iron": 1800000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "21",
+                    "range": "21"
+                }
+            },
+            "time": {
+                "days": 6,
+                "hours": 16,
+                "minutes": 29,
+                "seconds": 0
+            }
+        },
+        "23": {
+            "cost": {
+                "food": 44000000,
+                "wood": 44000000,
+                "stone": 8900000,
+                "iron": 2200000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "22",
+                    "stable": "22"
+                }
+            },
+            "time": {
+                "days": 9,
+                "hours": 8,
+                "minutes": 40,
+                "seconds": 0
+            }
+        },
+        "24": {
+            "cost": {
+                "food": 60000000,
+                "wood": 60000000,
+                "stone": 12000000,
+                "iron": 3000000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "23",
+                    "academy": "23"
+                }
+            },
+            "time": {
+                "days": 13,
+                "hours": 2,
+                "minutes": 33,
+                "seconds": 0
+            }
+        },
+        "25": {
+            "cost": {
+                "food": 81000000,
+                "wood": 81000000,
+                "stone": 16000000,
+                "iron": 4000000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "24",
+                    "barracks": "24"
+                }
+            },
+            "time": {
+                "days": 18,
+                "hours": 8,
+                "minutes": 22,
+                "seconds": 0
+            }
+        },
+        "26": {
+            "cost": {
+                "food": 100000000,
+                "wood": 100000000,
+                "stone": 21000000,
+                "iron": 5200000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "25",
+                    "range": "25"
+                }
+            },
+            "time": {
+                "days": 21,
+                "hours": 2,
+                "minutes": 26,
+                "seconds": 0
+            }
+        },
+        "27": {
+            "cost": {
+                "food": 140000000,
+                "wood": 140000000,
+                "stone": 24000000,
+                "iron": 7400000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "26",
+                    "stable": "26"
+                }
+            },
+            "time": {
+                "days": 25,
+                "hours": 7,
+                "minutes": 43,
+                "seconds": 0
+            }
+        },
+        "28": {
+            "cost": {
+                "food": 190000000,
+                "wood": 190000000,
+                "stone": 39000000,
+                "iron": 9900000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "27",
+                    "academy": "27"
+                }
+            },
+            "time": {
+                "days": 29,
+                "hours": 2,
+                "minutes": 52,
+                "seconds": 0
+            }
+        },
+        "29": {
+            "cost": {
+                "food": 240000000,
+                "wood": 240000000,
+                "stone": 49000000,
+                "iron": 12000000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "28",
+                    "barracks": "28"
+                }
+            },
+            "time": {
+                "days": 33,
+                "hours": 11,
+                "minutes": 42,
+                "seconds": 0
+            }
+        },
+        "30": {
+            "cost": {
+                "food": 300000000,
+                "wood": 300000000,
+                "stone": 60000000,
+                "iron": 15000000
+            },
+            "requirements": {
+                "buildings": {
+                    "embassy": "29",
+                    "range": "29"
+                }
+            },
+            "time": {
+                "days": 40,
+                "hours": 4,
+                "minutes": 27,
+                "seconds": 0
+            }
+        }
+    }
+}

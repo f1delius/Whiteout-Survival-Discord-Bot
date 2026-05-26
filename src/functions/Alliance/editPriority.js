@@ -1,10 +1,11 @@
-const { ButtonBuilder, ButtonStyle, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = require('discord.js');
+const { ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = require('discord.js');
 const { db, allianceQueries, playerQueries } = require('../utility/database');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji, replaceEmojiPlaceholders } = require('./../utility/emojis');
-
 
 /**
  * Creates an edit priority button
@@ -20,24 +21,22 @@ function createEditPriorityButton(userId, lang = {}) {
         .setEmoji(getComponentEmoji(getEmojiMapForUser(userId), '1028'));
 }
 
+function getPriorityAlliances(gameType = getDefaultGameType()) {
+    return allianceQueries.getAllAlliances(normalizeGameType(gameType));
+}
+
 /**
  * Handles edit priority button interaction and shows alliance selection
- * @param {import('discord.js').ButtonInteraction} interaction 
+ * @param {import('discord.js').ButtonInteraction} interaction
  */
 async function handleEditPriorityButton(interaction) {
-    // Get admin language preference
     const { adminData, lang } = getUserInfo(interaction.user.id);
     try {
-        // Extract user ID from custom ID
         const expectedUserId = interaction.customId.split('_')[2];
 
-        // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-
-        // Check permissions: must be owner, have FULL_ACCESS, or have ALLIANCE_MANAGEMENT
         const hasFullAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS);
-
         if (!hasFullAccess) {
             return await interaction.reply({
                 content: lang.common.noPermission,
@@ -45,9 +44,23 @@ async function handleEditPriorityButton(interaction) {
             });
         }
 
-        // Get all alliances ordered by priority
-        const alliances = allianceQueries.getAllAlliances();
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_edit_priority_game',
+                title: lang.alliance.editPriority.content.title.base,
+                description: lang.alliance.editPriority.content.selectGameDescription
+            });
 
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
+        const gameType = getDefaultGameType();
+        const alliances = getPriorityAlliances(gameType);
         if (!alliances || alliances.length === 0) {
             await interaction.reply({
                 content: lang.alliance.editPriority.errors.noAlliances,
@@ -56,26 +69,59 @@ async function handleEditPriorityButton(interaction) {
             return;
         }
 
-        // Show first page
-        await showPrioritySelectPage(interaction, alliances, 0, lang);
-
+        await showPrioritySelectPage(interaction, alliances, 0, lang, gameType);
     } catch (error) {
         await handleError(interaction, lang, error, 'handleEditPriorityButton');
     }
 }
 
+async function handleEditPriorityGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+    try {
+        const expectedUserId = interaction.customId.split('_')[4];
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasFullAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS);
+        if (!hasFullAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const gameType = normalizeGameType(interaction.values[0], null);
+        if (!gameType) {
+            return await interaction.reply({
+                content: lang.alliance.editPriority.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const alliances = getPriorityAlliances(gameType);
+        if (!alliances || alliances.length === 0) {
+            return await interaction.reply({
+                content: lang.alliance.editPriority.errors.noAlliancesForGame || lang.alliance.editPriority.errors.noAlliances,
+                ephemeral: true
+            });
+        }
+
+        await showPrioritySelectPage(interaction, alliances, 0, lang, gameType);
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleEditPriorityGameSelection');
+    }
+}
+
 /**
  * Handles pagination for priority edit selection
- * @param {import('discord.js').ButtonInteraction} interaction 
+ * @param {import('discord.js').ButtonInteraction} interaction
  */
 async function handleEditPriorityPagination(interaction) {
-    // Get admin language preference first
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        // Extract page from custom ID
-        const { userId: expectedUserId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId: expectedUserId, newPage, contextData } = parsePaginationCustomId(interaction.customId, 1);
+        const gameType = normalizeGameType(contextData[0] || getDefaultGameType());
 
-        // Check if the interaction user matches the expected user
         if (interaction.user.id !== expectedUserId) {
             return await interaction.reply({
                 content: lang.common.notForYou,
@@ -83,20 +129,16 @@ async function handleEditPriorityPagination(interaction) {
             });
         }
 
-        // Get all alliances ordered by priority
-        const alliances = allianceQueries.getAllAlliances();
-
+        const alliances = getPriorityAlliances(gameType);
         if (!alliances || alliances.length === 0) {
             await interaction.reply({
-                content: lang.alliance.editPriority.errors.noAlliances,
+                content: lang.alliance.editPriority.errors.noAlliancesForGame || lang.alliance.editPriority.errors.noAlliances,
                 ephemeral: true
             });
             return;
         }
 
-        // Show requested page
-        await showPrioritySelectPage(interaction, alliances, newPage, lang);
-
+        await showPrioritySelectPage(interaction, alliances, newPage, lang, gameType);
     } catch (error) {
         await handleError(interaction, lang, error, 'handleEditPriorityPagination');
     }
@@ -104,17 +146,17 @@ async function handleEditPriorityPagination(interaction) {
 
 /**
  * Shows a specific page of alliances for priority editing
- * @param {import('discord.js').ButtonInteraction} interaction 
+ * @param {import('discord.js').ButtonInteraction} interaction
  * @param {Array} alliances - Array of all alliances
  * @param {number} page - Current page (0-based)
  * @param {Object} lang - Language object
- * @param {boolean} isReply - Whether to reply or update
+ * @param {string} gameType - Active game type
  */
-async function showPrioritySelectPage(interaction, alliances, page, lang) {
+async function showPrioritySelectPage(interaction, alliances, page, lang, gameType = getDefaultGameType()) {
+    const resolvedGameType = normalizeGameType(gameType);
     const itemsPerPage = 24;
     const totalPages = Math.ceil(alliances.length / itemsPerPage);
 
-    // Ensure page is within bounds
     page = Math.max(0, Math.min(page, totalPages - 1));
 
     const start = page * itemsPerPage;
@@ -122,7 +164,6 @@ async function showPrioritySelectPage(interaction, alliances, page, lang) {
     const currentAlliances = alliances.slice(start, end);
     const totalAlliances = alliances.length;
 
-    // Only show context if more than 2 alliances exist
     if (totalAlliances < 2) {
         return interaction.reply({
             content: lang.alliance.editPriority.errors.notEnoughAlliances,
@@ -130,19 +171,16 @@ async function showPrioritySelectPage(interaction, alliances, page, lang) {
         });
     }
 
-    // Create select menu
     const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId(`select_alliance_priority_${interaction.user.id}_${page}`)
+        .setCustomId(`select_alliance_priority_${interaction.user.id}_${page}_${resolvedGameType}`)
         .setPlaceholder(lang.alliance.editPriority.selectMenu.selectAlliance.placeholder);
 
-    // Batch fetch player counts (avoids N+1 query)
     const allianceIds = currentAlliances.map(a => a.id);
     const playerCountResults = allianceIds.length > 0
-        ? playerQueries.getPlayerCountsByAllianceIds(allianceIds)
+        ? playerQueries.getPlayerCountsByAllianceIds(allianceIds, resolvedGameType)
         : [];
     const playerCountMap = new Map(playerCountResults.map(r => [r.alliance_id, r.player_count]));
 
-    // Add alliance options
     for (const alliance of currentAlliances) {
         const playerCount = playerCountMap.get(alliance.id) || 0;
         const option = new StringSelectMenuOptionBuilder()
@@ -155,28 +193,25 @@ async function showPrioritySelectPage(interaction, alliances, page, lang) {
     }
 
     const component = [];
-
-    // Add select menu
     const selectRow = new ActionRowBuilder().addComponents(selectMenu);
 
-    // Add pagination buttons if more than 1 page (always show, disabled when needed)
     const paginationRow = createUniversalPaginationButtons({
         feature: 'edit_priority',
         userId: interaction.user.id,
         currentPage: page,
-        totalPages: totalPages,
-        lang: lang
+        totalPages,
+        lang,
+        contextData: [resolvedGameType]
     });
 
     component.push(selectRow);
-
     if (paginationRow) {
         component.push(paginationRow);
     }
 
     const container = [
         new ContainerBuilder()
-            .setAccentColor(2417109) // blue
+            .setAccentColor(2417109)
             .addTextDisplayComponents(
                 new TextDisplayBuilder().setContent(
                     `${lang.alliance.editPriority.content.title.base}\n` +
@@ -184,20 +219,16 @@ async function showPrioritySelectPage(interaction, alliances, page, lang) {
                     `${lang.pagination.text.pageInfo
                         .replace('{current}', page + 1)
                         .replace('{total}', totalPages)}`
-
                 )
             )
             .addSeparatorComponents(
                 new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
             )
-            .addActionRowComponents(
-                component
-            ),
+            .addActionRowComponents(component)
     ];
 
     const content = updateComponentsV2AfterSeparator(interaction, container);
 
-    // Send or update the message
     await interaction.update({
         components: content,
         flags: MessageFlags.IsComponentsV2
@@ -206,13 +237,14 @@ async function showPrioritySelectPage(interaction, alliances, page, lang) {
 
 /**
  * Handles alliance selection for priority editing
- * @param {import('discord.js').StringSelectMenuInteraction} interaction 
+ * @param {import('discord.js').StringSelectMenuInteraction} interaction
  */
 async function handlePriorityAllianceSelection(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        const selectedAllianceId = parseInt(interaction.values[0]);
-        const alliance = allianceQueries.getAllianceById(selectedAllianceId);
+        const selectedAllianceId = parseInt(interaction.values[0], 10);
+        const gameType = normalizeGameType(interaction.customId.split('_')[5] || getDefaultGameType());
+        const alliance = allianceQueries.getAllianceById(selectedAllianceId, gameType);
 
         if (!alliance) {
             await interaction.reply({
@@ -222,9 +254,7 @@ async function handlePriorityAllianceSelection(interaction) {
             return;
         }
 
-        // Show priority editing interface
-        await showPriorityEditInterface(interaction, alliance, lang);
-
+        await showPriorityEditInterface(interaction, alliance, lang, gameType);
     } catch (error) {
         await handleError(interaction, lang, error, 'handlePriorityAllianceSelection');
     }
@@ -232,16 +262,15 @@ async function handlePriorityAllianceSelection(interaction) {
 
 /**
  * Shows the priority editing interface for a specific alliance
- * @param {import('discord.js').StringSelectMenuInteraction} interaction 
+ * @param {import('discord.js').StringSelectMenuInteraction|import('discord.js').ButtonInteraction|import('discord.js').ModalSubmitInteraction} interaction
  * @param {Object} alliance - Alliance data
  * @param {Object} lang - Language object
+ * @param {string} gameType - Active game type
  */
-async function showPriorityEditInterface(interaction, alliance, lang) {
-    // Get all alliances to determine context
-    const allAlliances = allianceQueries.getAllAlliances();
+async function showPriorityEditInterface(interaction, alliance, lang, gameType = alliance?.game_type || getDefaultGameType()) {
+    const resolvedGameType = normalizeGameType(gameType);
+    const allAlliances = getPriorityAlliances(resolvedGameType);
     const totalAlliances = allAlliances.length;
-
-    // Get 3 alliances above and below current alliance by priority
     const currentIndex = allAlliances.findIndex(a => a.id === alliance.id);
     const contextAlliances = [];
 
@@ -249,35 +278,33 @@ async function showPriorityEditInterface(interaction, alliance, lang) {
         contextAlliances.push(allAlliances[i]);
     }
 
-    // Add context alliances
     const contextList = contextAlliances.map(a => {
         const indicator = a.id === alliance.id ? replaceEmojiPlaceholders('{emoji.1016} ', getEmojiMapForUser(interaction.user.id)) : '   ';
         return `\u200E${indicator}**${a.priority}.** ${a.name}`;
     }).join('\n');
 
-    // Create action buttons
     const actionRow = new ActionRowBuilder();
 
     const highestButton = new ButtonBuilder()
-        .setCustomId(`priority_highest_${alliance.id}`)
+        .setCustomId(`priority_highest_${alliance.id}_${resolvedGameType}`)
         .setLabel(lang.alliance.editPriority.buttons.highest)
         .setStyle(ButtonStyle.Success)
         .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1048'));
 
     const customButton = new ButtonBuilder()
-        .setCustomId(`priority_custom_${alliance.id}`)
+        .setCustomId(`priority_custom_${alliance.id}_${resolvedGameType}`)
         .setLabel(lang.alliance.editPriority.buttons.custom)
         .setStyle(ButtonStyle.Primary)
         .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1043'));
 
     const lowestButton = new ButtonBuilder()
-        .setCustomId(`priority_lowest_${alliance.id}`)
+        .setCustomId(`priority_lowest_${alliance.id}_${resolvedGameType}`)
         .setLabel(lang.alliance.editPriority.buttons.lowest)
         .setStyle(ButtonStyle.Secondary)
         .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1007'));
 
     const backButton = new ButtonBuilder()
-        .setCustomId(`back_to_priority_select_${interaction.user.id}`)
+        .setCustomId(`back_to_priority_select_${interaction.user.id}_${resolvedGameType}`)
         .setLabel(lang.alliance.editPriority.buttons.backToSelect)
         .setStyle(ButtonStyle.Secondary)
         .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1019'));
@@ -286,17 +313,15 @@ async function showPriorityEditInterface(interaction, alliance, lang) {
 
     const container = [
         new ContainerBuilder()
-            .setAccentColor(2417109) // blue
+            .setAccentColor(2417109)
             .addTextDisplayComponents(
                 new TextDisplayBuilder().setContent(
                     `${lang.alliance.editPriority.content.title.edit.replace('{allianceName}', alliance.name)}\n` +
                     `${lang.alliance.editPriority.content.description.edit}\n` +
-
                     `${lang.alliance.editPriority.content.currentPriorityField.name}\n` +
                     `${lang.alliance.editPriority.content.currentPriorityField.value
                         .replace('{priority}', alliance.priority)
                         .replace('{totalAlliances}', totalAlliances)}\n` +
-
                     `${lang.alliance.editPriority.content.priorityContextField.name}\n` +
                     `${contextList || lang.alliance.editPriority.content.priorityContextField.value}`
                 )
@@ -304,7 +329,7 @@ async function showPriorityEditInterface(interaction, alliance, lang) {
             .addSeparatorComponents(
                 new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
             )
-            .addActionRowComponents(actionRow),
+            .addActionRowComponents(actionRow)
     ];
 
     const content = updateComponentsV2AfterSeparator(interaction, container);
@@ -315,51 +340,38 @@ async function showPriorityEditInterface(interaction, alliance, lang) {
     });
 }
 
-/**
- * Handles priority change to highest (priority 1)
- * @param {import('discord.js').ButtonInteraction} interaction 
- */
 async function handlePriorityHighest(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        const allianceId = parseInt(interaction.customId.split('_')[2]);
-        await updateAlliancePriority(interaction, allianceId, 1);
+        const allianceId = parseInt(interaction.customId.split('_')[2], 10);
+        const gameType = normalizeGameType(interaction.customId.split('_')[3] || getDefaultGameType());
+        await updateAlliancePriority(interaction, allianceId, 1, gameType);
     } catch (error) {
         await handleError(interaction, lang, error, 'handlePriorityHighest');
     }
 }
 
-/**
- * Handles priority change to lowest
- * @param {import('discord.js').ButtonInteraction} interaction 
- */
 async function handlePriorityLowest(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        const allianceId = parseInt(interaction.customId.split('_')[2]);
-        const allAlliances = allianceQueries.getAllAlliances();
-        const maxPriority = allAlliances.length;
-
-        await updateAlliancePriority(interaction, allianceId, maxPriority);
+        const allianceId = parseInt(interaction.customId.split('_')[2], 10);
+        const gameType = normalizeGameType(interaction.customId.split('_')[3] || getDefaultGameType());
+        const maxPriority = getPriorityAlliances(gameType).length;
+        await updateAlliancePriority(interaction, allianceId, maxPriority, gameType);
     } catch (error) {
         await handleError(interaction, lang, error, 'handlePriorityLowest');
     }
 }
 
-/**
- * Handles custom priority input modal
- * @param {import('discord.js').ButtonInteraction} interaction 
- */
 async function handlePriorityCustom(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
         const allianceId = interaction.customId.split('_')[2];
-        const allAlliances = allianceQueries.getAllAlliances();
-        const maxPriority = allAlliances.length;
+        const gameType = normalizeGameType(interaction.customId.split('_')[3] || getDefaultGameType());
+        const maxPriority = getPriorityAlliances(gameType).length;
 
-        // Create modal
         const modal = new ModalBuilder()
-            .setCustomId(`priority_custom_modal_${allianceId}`)
+            .setCustomId(`priority_custom_modal_${allianceId}_${gameType}`)
             .setTitle(lang.alliance.editPriority.modal.title);
 
         const priorityInput = new TextInputBuilder()
@@ -378,24 +390,19 @@ async function handlePriorityCustom(interaction) {
         modal.addLabelComponents(priorityLabel);
 
         await interaction.showModal(modal);
-
     } catch (error) {
         await handleError(interaction, lang, error, 'handlePriorityCustom');
     }
 }
 
-/**
- * Handles custom priority modal submission
- * @param {import('discord.js').ModalSubmitInteraction} interaction 
- */
 async function handlePriorityCustomModal(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        const allianceId = parseInt(interaction.customId.split('_')[3]);
+        const allianceId = parseInt(interaction.customId.split('_')[3], 10);
+        const gameType = normalizeGameType(interaction.customId.split('_')[4] || getDefaultGameType());
         const priorityValue = interaction.fields.getTextInputValue('priority_value');
 
-        // Validate input
-        const priority = parseInt(priorityValue);
+        const priority = parseInt(priorityValue, 10);
         if (isNaN(priority) || priority < 1) {
             await interaction.reply({
                 content: lang.alliance.editPriority.errors.invalidPriority,
@@ -404,15 +411,10 @@ async function handlePriorityCustomModal(interaction) {
             return;
         }
 
-        // Get max allowed priority
-        const allAlliances = allianceQueries.getAllAlliances();
-        const maxPriority = allAlliances.length;
-
-        // Clamp priority to valid range
+        const maxPriority = getPriorityAlliances(gameType).length;
         const finalPriority = Math.min(priority, maxPriority);
 
-        await updateAlliancePriority(interaction, allianceId, finalPriority);
-
+        await updateAlliancePriority(interaction, allianceId, finalPriority, gameType);
     } catch (error) {
         await handleError(interaction, lang, error, 'handlePriorityCustomModal');
     }
@@ -420,15 +422,16 @@ async function handlePriorityCustomModal(interaction) {
 
 /**
  * Updates alliance priority and resolves conflicts
- * @param {import('discord.js').Interaction} interaction 
+ * @param {import('discord.js').Interaction} interaction
  * @param {number} allianceId - Alliance ID to update
  * @param {number} newPriority - New priority value
+ * @param {string} gameType - Active game type
  */
-async function updateAlliancePriority(interaction, allianceId, newPriority) {
+async function updateAlliancePriority(interaction, allianceId, newPriority, gameType = getDefaultGameType()) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const resolvedGameType = normalizeGameType(gameType);
+        const alliance = allianceQueries.getAllianceById(allianceId, resolvedGameType);
         if (!alliance) {
             await interaction.reply({
                 content: lang.common.error,
@@ -439,20 +442,15 @@ async function updateAlliancePriority(interaction, allianceId, newPriority) {
 
         const oldPriority = alliance.priority;
 
-        // If priority didn't change, just refresh the interface
         if (oldPriority === newPriority) {
-            await showPriorityEditInterface(interaction, alliance, lang);
+            await showPriorityEditInterface(interaction, alliance, lang, resolvedGameType);
             return;
         }
 
-        // Get all alliances ordered by priority
-        const allAlliances = allianceQueries.getAllAlliances();
-
-        // Create a new priority order
+        const allAlliances = getPriorityAlliances(resolvedGameType);
         const alliancesWithoutTarget = allAlliances.filter(a => a.id !== allianceId);
         const newOrder = [];
 
-        // Insert the target alliance at the desired position
         let inserted = false;
         for (let i = 0; i < alliancesWithoutTarget.length; i++) {
             if (!inserted && (i + 1) === newPriority) {
@@ -465,30 +463,24 @@ async function updateAlliancePriority(interaction, allianceId, newPriority) {
             });
         }
 
-        // If we want to insert at the end
         if (!inserted) {
             newOrder.push({ id: allianceId, priority: newPriority });
         }
 
-        // Atomically reorder priorities via transaction to prevent corruption on crash
         const reorderPriorities = db.transaction(() => {
-            // Step 1: Set all alliances to temporary negative priorities
             for (const a of allAlliances) {
-                allianceQueries.updateAlliancePriority(a.id, -(a.id));
+                allianceQueries.updateAlliancePriority(a.id, -(a.id), resolvedGameType);
             }
 
-            // Step 2: Update all alliances to their new priorities
             for (const item of newOrder) {
-                allianceQueries.updateAlliancePriority(item.id, item.priority);
+                allianceQueries.updateAlliancePriority(item.id, item.priority, resolvedGameType);
             }
         });
         reorderPriorities();
 
-        // Get updated alliance data and show interface
-        const updatedAlliance = allianceQueries.getAllianceById(allianceId);
-        await showPriorityEditInterface(interaction, updatedAlliance, lang);
+        const updatedAlliance = allianceQueries.getAllianceById(allianceId, resolvedGameType);
+        await showPriorityEditInterface(interaction, updatedAlliance, lang, resolvedGameType);
 
-        // Send success message
         await interaction.followUp({
             content: lang.alliance.editPriority.content.priorityUpdated
                 .replace('{allianceName}', alliance.name)
@@ -496,39 +488,29 @@ async function updateAlliancePriority(interaction, allianceId, newPriority) {
                 .replace('{newPriority}', newPriority),
             ephemeral: true
         });
-
     } catch (error) {
         await handleError(interaction, lang, error, 'updateAlliancePriority');
     }
 }
 
-/**
- * Handles back to priority select button interaction
- * @param {import('discord.js').ButtonInteraction} interaction 
- */
 async function handleBackToPrioritySelect(interaction) {
     const { lang } = getUserInfo(interaction.user.id);
     try {
-        // Extract user ID from custom ID
-        const expectedUserId = interaction.customId.split('_')[4]; // back_to_priority_select_userId
+        const expectedUserId = interaction.customId.split('_')[4];
+        const gameType = normalizeGameType(interaction.customId.split('_')[5] || getDefaultGameType());
 
-        // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        // Get all alliances ordered by priority
-        const alliances = allianceQueries.getAllAlliances();
-
+        const alliances = getPriorityAlliances(gameType);
         if (!alliances || alliances.length === 0) {
             await interaction.reply({
-                content: lang.alliance.editPriority.errors.noAlliances,
+                content: lang.alliance.editPriority.errors.noAlliancesForGame || lang.alliance.editPriority.errors.noAlliances,
                 ephemeral: true
             });
             return;
         }
 
-        // Show first page with update (false = update, not reply)
-        await showPrioritySelectPage(interaction, alliances, 0, lang);
-
+        await showPrioritySelectPage(interaction, alliances, 0, lang, gameType);
     } catch (error) {
         await handleError(interaction, lang, error, 'handleBackToPrioritySelect');
     }
@@ -537,6 +519,7 @@ async function handleBackToPrioritySelect(interaction) {
 module.exports = {
     createEditPriorityButton,
     handleEditPriorityButton,
+    handleEditPriorityGameSelection,
     handleEditPriorityPagination,
     handlePriorityAllianceSelection,
     handleBackToPrioritySelect,

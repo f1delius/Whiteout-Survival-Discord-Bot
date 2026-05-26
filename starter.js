@@ -3,6 +3,12 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn, execSync } = require('child_process');
+const {
+    getActiveGameTypes,
+    getDefaultGameProfile,
+    getRuntimeGameMode,
+    shouldUseOnnx
+} = require('./src/functions/utility/gameRuntime');
 
 // ============================================================
 // DOCKER DETECTION
@@ -12,6 +18,10 @@ const isDocker = !!(process.env.DOCKER_CONTAINER || (function () {
     try { return fs.existsSync('/.dockerenv'); } catch { return false; }
 })());
 global.isDocker = isDocker;
+global.runtimeGameMode = getRuntimeGameMode();
+global.activeGameTypes = getActiveGameTypes();
+global.defaultGameProfile = getDefaultGameProfile();
+global.shouldUseOnnx = shouldUseOnnx();
 
 function parseRamArg(argv = []) {
     for (const arg of argv) {
@@ -1524,6 +1534,9 @@ if (!validateFiles()) {
 }
 
 console.log(`[PREFLIGHT] Version: ${getLocalVersion()}`);
+console.log(`[PREFLIGHT] Game mode: ${global.runtimeGameMode} (${global.activeGameTypes.join(', ')})`);
+console.log(`[PREFLIGHT] Default game: ${global.defaultGameProfile.displayName}`);
+console.log(`[PREFLIGHT] ONNX required: ${global.shouldUseOnnx ? 'yes' : 'no'}`);
 console.log('[PREFLIGHT] All checks passed.\n');
 
 // Load environment variables from src/.env
@@ -2182,7 +2195,7 @@ function setupCommandInterface() {
     console.log('  update          - Check for and apply updates');
     console.log('  version         - Show current bot version');
     console.log('  exit            - Shutdown everything');
-    console.log(`Runtime args: --ram=<MB> (current: ${getConfiguredBotHeapMb()} MB), --proxy [URL]`);
+    console.log(`Runtime args: --type=wos|ks|both (current: ${global.runtimeGameMode}), --ram=<MB> (current: ${getConfiguredBotHeapMb()} MB), --proxy [URL]`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
     // Non-blocking update check on startup

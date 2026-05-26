@@ -9,8 +9,12 @@ const { handleError, assertUserMatches, updateComponentsV2AfterSeparator, getUse
 const { checkFeatureAccess } = require('../../utility/checkAccess');
 const { userQueries } = require('../../utility/database');
 const { getFurnaceReadable } = require('../../Players/furnaceReadable');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../../utility/gameRuntime');
+const { normalizeGameType } = require('../../utility/gameProfiles');
 const basicData = require('./basic.json');
 const fireCrystalData = require('./fire_crystal.json');
+const kingshotBasicData = require('./kingshot_basic.json');
+const kingshotTrueGoldData = require('./kingshot_true_gold.json');
 const { getComponentEmoji, getEmojiMapForUser } = require('../../utility/emojis');
 
 
@@ -25,8 +29,10 @@ function getAscii85() {
 
 const PAGE_SIZE = 24;
 
-function getBuildingNames(lang) {
-    const b = lang.calculators.buildings.content.buildings;
+function getBuildingNames(lang, gameType = 'wos') {
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    const buildingGroups = lang.calculators.buildings.content.buildings;
+    const b = buildingGroups[resolvedGameType] || buildingGroups;
     return {
         barricade: b.barricade,
         marksmanCamp: b.marksmanCamp,
@@ -38,7 +44,13 @@ function getBuildingNames(lang) {
         embassy: b.embassy,
         storehouse: b.storehouse,
         furnace: b.furnace,
-        warAcademy: b.warAcademy
+        warAcademy: b.warAcademy,
+        academy: b.academy,
+        barracks: b.barracks,
+        range: b.range,
+        stable: b.stable,
+        guardStation: b.guardStation,
+        townCenter: b.townCenter
     };
 }
 
@@ -54,22 +66,34 @@ const BUILDING_SHORT = {
     embassy:        'Eb',
     storehouse:     'Sh',
     furnace:        'Fu',
-    warAcademy:     'Wa'
+    warAcademy:     'Wa',
+    academy:        'Ac',
+    barracks:       'Br',
+    range:          'Rg',
+    stable:         'St',
+    guardStation:   'Gs',
+    townCenter:     'Tc'
 };
 // Reverse lookup: short code → building key.
 const SHORT_TO_BUILDING = Object.fromEntries(
     Object.entries(BUILDING_SHORT).map(([k, v]) => [v, k])
 );
 
-function getResourceLabels(lang) {
-    const r = lang.calculators.buildings.content.resources;
+function getResourceLabels(lang, gameType = 'wos') {
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    const resourceGroups = lang.calculators.buildings.content.resources;
+    const r = resourceGroups[resolvedGameType] || resourceGroups;
     return {
         meat:               r.meat,
+        food:               r.food,
         wood:               r.wood,
         coal:               r.coal,
+        stone:              r.stone,
         iron:               r.iron,
         fireCrystal:        r.fireCrystal,
-        refinedFireCrystal: r.refinedFireCrystal
+        refinedFireCrystal: r.refinedFireCrystal,
+        trueGold:           r.trueGold,
+        temperedTrueGold:   r.temperedTrueGold
     };
 }
 
@@ -81,10 +105,22 @@ const ZINMAN_REDUCE = [0, 3, 6, 9, 12, 15];
 const EXPERT_SECS   = [0, 7200, 10800, 14400, 21600, 28800];
 
 // Reusable set of basic (non-crystal) resource keys — defined once at module level
-const BASIC_RESOURCES = new Set(['meat', 'wood', 'coal', 'iron']);
+const BASIC_RESOURCES = new Set(['meat', 'food', 'wood', 'coal', 'stone', 'iron']);
 
 // Empty totals template — cloned wherever needed
-const EMPTY_TOTALS = { meat: 0, wood: 0, coal: 0, iron: 0, steel: 0, fireCrystal: 0, refinedFireCrystal: 0 };
+const EMPTY_TOTALS = {
+    meat: 0,
+    food: 0,
+    wood: 0,
+    coal: 0,
+    stone: 0,
+    iron: 0,
+    steel: 0,
+    fireCrystal: 0,
+    refinedFireCrystal: 0,
+    trueGold: 0,
+    temperedTrueGold: 0
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -100,13 +136,45 @@ function shouldShowNotBuilt(type, bldId, dataObj) {
 /** Clamp a value between 0 and 5. */
 function clamp5(v) { return Math.min(5, Math.max(0, v || 0)); }
 
-function getDataObj(type) {
+function getDataObj(type, gameType = getDefaultGameType()) {
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    if (resolvedGameType === 'ks') {
+        return type === 'f' ? kingshotTrueGoldData : kingshotBasicData;
+    }
     return type === 'f' ? fireCrystalData : basicData;
 }
 
-function getTypeLabel(type, lang) {
+function getTypeLabel(type, lang, gameType = getDefaultGameType()) {
     const t = lang.calculators.buildings.types;
-    return type === 'f' ? t.fireCrystal : t.basic;
+    if (type !== 'f') return t.basic;
+    return normalizeGameType(gameType, 'wos') === 'ks' ? t.trueGold : t.fireCrystal;
+}
+
+function getBuildingsModalLocale(lang, gameType = getDefaultGameType()) {
+    const baseModal = lang.calculators.buildings.modal;
+    if (normalizeGameType(gameType, 'wos') !== 'ks') {
+        return baseModal;
+    }
+
+    const ks = baseModal.ks || {};
+    return {
+        ...baseModal,
+        vpDoubleTime: { ...baseModal.vpDoubleTime, ...(ks.vpDoubleTime || {}) },
+        pet: { ...baseModal.pet, ...(ks.pet || {}) },
+        zinman: { ...baseModal.zinman, ...(ks.zinman || {}) }
+    };
+}
+
+function getBuildingsResultBuffLocale(lang, gameType = getDefaultGameType()) {
+    const resultBuffs = lang.calculators.buildings.results.buffs;
+    if (normalizeGameType(gameType, 'wos') !== 'ks') {
+        return resultBuffs;
+    }
+
+    return {
+        ...resultBuffs,
+        ...((lang.calculators.buildings.results.ks || {}).buffs || {})
+    };
 }
 
 function getBuildingLevelKeys(buildingData) {
@@ -116,9 +184,9 @@ function getBuildingLevelKeys(buildingData) {
 }
 
 /** Returns the human-readable display string for a level key. */
-function getLevelDisplay(key, type, lang) {
+function getLevelDisplay(key, type, lang, gameType = getDefaultGameType()) {
     if (key === '0') return lang.calculators.buildings.notBuilt;
-    if (type === 'f') return getFurnaceReadable(parseInt(key));
+    if (type === 'f') return getFurnaceReadable(parseInt(key), lang, gameType);
     return lang.calculators.buildings.levelDisplay.replace('{key}', key);
 }
 
@@ -174,8 +242,8 @@ function hasAnyBuff(buffs) {
 }
 
 /** Returns the display label for a combined VP / Double Time flat speed bonus value. */
-function getFlatSpeedLabel(flatSpeedBonus, lang) {
-    const m = lang.calculators.buildings.modal.vpDoubleTime;
+function getFlatSpeedLabel(flatSpeedBonus, lang, gameType = getDefaultGameType()) {
+    const m = getBuildingsModalLocale(lang, gameType).vpDoubleTime;
     switch (flatSpeedBonus) {
         case 10: return m.vp10;
         case 15: return m.vp15;
@@ -246,13 +314,13 @@ function aggregateEntries(entries) {
  * @param {string} levelTemplate  - Localised level template containing `{level}`
  * @param {object} lang           - Language object for localised furnace level display
  */
-function appendRequirementLines(lines, reqs, buildingNames, headerKey, levelTemplate, lang) {
+function appendRequirementLines(lines, reqs, buildingNames, headerKey, levelTemplate, lang, gameType = getDefaultGameType()) {
     const reqEntries = Object.entries(reqs);
     if (!reqEntries.length) return;
     lines.push(headerKey);
     for (const [bKey, bLevel] of reqEntries) {
         const bName      = buildingNames[bKey] || bKey;
-        const bLevelDisp = getFurnaceReadable(bLevel, lang);
+        const bLevelDisp = getFurnaceReadable(bLevel, lang, gameType);
         lines.push(`  - ${bName}: ${levelTemplate.replace('{level}', bLevelDisp)}`);
     }
 }
@@ -358,7 +426,7 @@ function calculateUpgrade(buildingData, fromKey, toKey, buffs) {
  * Decodes all upgrade entries from a copy-button customId.
  * @param {string} copyId  full customId string
  * @param {object} buffs
- * @returns {{type,bldId,fromKey,toKey,result}[]}
+ * @returns {{gameType,type,bldId,fromKey,toKey,result}[]}
  */
 function decodeResultsEntries(copyId, buffs) {
     if (!copyId.startsWith('calc_bld_copy_')) return [];
@@ -376,10 +444,15 @@ function decodeResultsEntries(copyId, buffs) {
         } catch { return []; }
     }
 
-    // Parse "{type}:{seg1}.{seg2}..."
+    // Parse "{gameType}|{type}:{seg1}.{seg2}..." with backward compatibility for "{type}:{...}"
     const colonIdx = encoded.indexOf(':');
     if (colonIdx === -1) return [];
-    const type = encoded.slice(0, colonIdx);
+    const header = encoded.slice(0, colonIdx);
+    const [maybeGameType, maybeType] = header.includes('|')
+        ? header.split('|')
+        : ['wos', header];
+    const gameType = normalizeGameType(maybeGameType, 'wos');
+    const type = maybeType;
     const segsStr = encoded.slice(colonIdx + 1);
 
     return segsStr.split('.').flatMap(seg => {
@@ -391,8 +464,8 @@ function decodeResultsEntries(copyId, buffs) {
         if (dashIdx === -1 || !bldId) return [];
         const fromKey = levelStr.slice(0, dashIdx);
         const toKey = levelStr.slice(dashIdx + 1);
-        const result = calculateUpgrade(getDataObj(type)[bldId], fromKey, toKey, buffs);
-        return result ? [{ type, bldId, fromKey, toKey, result }] : [];
+        const result = calculateUpgrade(getDataObj(type, gameType)[bldId], fromKey, toKey, buffs);
+        return result ? [{ gameType, type, bldId, fromKey, toKey, result }] : [];
     });
 }
 
@@ -400,15 +473,16 @@ function decodeResultsEntries(copyId, buffs) {
  * Encodes upgrade entries into the copy-button customId.
  * All entries must share the same type (guaranteed by single-type session flow).
  * Applies Base85 compression when it reduces the length.
- * @param {{ type, bldId, fromKey, toKey }[]} entries
+ * @param {{ gameType, type, bldId, fromKey, toKey }[]} entries
  * @param {string} userId
  * @returns {string | null} null if the final customId would exceed 100 characters
  */
 function encodeResultsCustomId(entries, userId) {
     if (!entries?.length) return null;
+    const gameType = normalizeGameType(entries[0].gameType, 'wos');
     const type = entries[0].type; // all entries share the same type
     const segs = entries.map(e => `${BUILDING_SHORT[e.bldId] ?? e.bldId}${e.fromKey}-${e.toKey}`);
-    const plain = `${type}:${segs.join('.')}`;
+    const plain = `${gameType}|${type}:${segs.join('.')}`;
 
     let payload = plain;
     try {
@@ -433,8 +507,9 @@ function encodeResultsCustomId(entries, userId) {
  */
 function buildCopySummary(entries, buffs, lang) {
     const lc             = lang.calculators.buildings;
-    const buildingNames  = getBuildingNames(lang);
-    const resourceLabels = getResourceLabels(lang);
+    const gameType       = normalizeGameType(entries[0]?.gameType, 'wos');
+    const buildingNames  = getBuildingNames(lang, gameType);
+    const resourceLabels = getResourceLabels(lang, gameType);
     const { totalRes, totalSeconds, reducedSeconds, totalNumLevels, maxBuildingReqs } = aggregateEntries(entries);
 
     const lines = [lc.results.upgradePlan];
@@ -443,9 +518,9 @@ function buildCopySummary(entries, buffs, lang) {
     lines.push(lc.results.buildingsList);
     for (const e of entries) {
         const bldName   = buildingNames[e.bldId] || e.bldId;
-        const dataObj   = getDataObj(e.type);
-        const fromDisp  = dataObj[e.bldId] ? getLevelDisplay(e.fromKey, e.type, lang) : e.fromKey;
-        const toDisp    = dataObj[e.bldId] ? getLevelDisplay(e.toKey,   e.type, lang) : e.toKey;
+        const dataObj   = getDataObj(e.type, gameType);
+        const fromDisp  = dataObj[e.bldId] ? getLevelDisplay(e.fromKey, e.type, lang, gameType) : e.fromKey;
+        const toDisp    = dataObj[e.bldId] ? getLevelDisplay(e.toKey,   e.type, lang, gameType) : e.toKey;
         lines.push(`  - ${bldName}: ${fromDisp} → ${toDisp}`);
     }
 
@@ -462,16 +537,17 @@ function buildCopySummary(entries, buffs, lang) {
     if (hasAnyBuff(buffs)) lines.push(lc.results.withBuffs.replace('{time}', formatSeconds(reducedSeconds)));
 
     // Building requirements
-    appendRequirementLines(lines, maxBuildingReqs, buildingNames, lc.results.requirements, lc.results.requirementLevel, lang);
+    appendRequirementLines(lines, maxBuildingReqs, buildingNames, lc.results.requirements, lc.results.requirementLevel, lang, gameType);
 
     // Applied buffs
     if (hasAnyBuff(buffs)) {
+        const resultBuffs = getBuildingsResultBuffLocale(lang, gameType);
         const buffParts = [];
-        if (buffs.flatSpeedBonus > 0)    buffParts.push(getFlatSpeedLabel(buffs.flatSpeedBonus, lang));
-        if (buffs.petLevel > 0)          buffParts.push(lc.results.buffs.pet.replace('{n}', buffs.petLevel).replace('{pct}', PET_SPEED[buffs.petLevel]));
-        if (buffs.zinmanLevel > 0)       buffParts.push(lc.results.buffs.zinman.replace('{n}', buffs.zinmanLevel).replace('{pct}', ZINMAN_REDUCE[buffs.zinmanLevel]));
-        if (buffs.expertLevel > 0)       buffParts.push(lc.results.buffs.expert.replace('{n}', buffs.expertLevel).replace('{time}', formatSeconds(EXPERT_SECS[buffs.expertLevel])).replace('{levels}', totalNumLevels));
-        if (buffs.constructionSpeed > 0) buffParts.push(lc.results.buffs.constructionSpeed.replace('{pct}', buffs.constructionSpeed));
+        if (buffs.flatSpeedBonus > 0)    buffParts.push(getFlatSpeedLabel(buffs.flatSpeedBonus, lang, gameType));
+        if (buffs.petLevel > 0)          buffParts.push(resultBuffs.pet.replace('{n}', buffs.petLevel).replace('{pct}', PET_SPEED[buffs.petLevel]));
+        if (buffs.zinmanLevel > 0)       buffParts.push(resultBuffs.zinman.replace('{n}', buffs.zinmanLevel).replace('{pct}', ZINMAN_REDUCE[buffs.zinmanLevel]));
+        if (buffs.expertLevel > 0)       buffParts.push(resultBuffs.expert.replace('{n}', buffs.expertLevel).replace('{time}', formatSeconds(EXPERT_SECS[buffs.expertLevel])).replace('{levels}', totalNumLevels));
+        if (buffs.constructionSpeed > 0) buffParts.push(resultBuffs.constructionSpeed.replace('{pct}', buffs.constructionSpeed));
         lines.push(lc.results.buffsLine.replace('{parts}', buffParts.join('\n  - ')));
     }
 
@@ -481,19 +557,60 @@ function buildCopySummary(entries, buffs, lang) {
 /**
  * Container shown after clicking "Buildings" — lets user pick Basic or Fire Crystal
  */
-function buildTypeSelectionContainer(userId, lang) {
+function buildGameSelectionContainer(userId, lang) {
     const lc = lang.calculators.buildings;
+    const emojiMap = getEmojiMapForUser(userId);
+    const options = lang.common?.gameSelection?.options || {};
+
+    const wosBtn = new ButtonBuilder()
+        .setCustomId(`calc_building_game_wos_${userId}`)
+        .setLabel(options.wos || 'Whiteout Survival')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji(getComponentEmoji(emojiMap, '1040'));
+
+    const ksBtn = new ButtonBuilder()
+        .setCustomId(`calc_building_game_ks_${userId}`)
+        .setLabel(options.ks || 'Kingshot')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji(getComponentEmoji(emojiMap, '1012'));
+
+    const backBtn = new ButtonBuilder()
+        .setCustomId(`calc_building_back_main_x_${userId}`)
+        .setLabel(lc.buttons.back)
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji(getComponentEmoji(emojiMap, '1002'));
+
+    return new ContainerBuilder()
+        .setAccentColor(0x3498db)
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(lc.header.gameSelection)
+        )
+        .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
+        .addActionRowComponents(new ActionRowBuilder().addComponents(wosBtn, ksBtn, backBtn));
+}
+
+function buildTypeSelectionContainer(userId, lang, gameType = getDefaultGameType()) {
+    const lc = lang.calculators.buildings;
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    const emojiMap = getEmojiMapForUser(userId);
     const basicBtn = new ButtonBuilder()
-        .setCustomId(`calc_building_basic_${userId}`)
+        .setCustomId(`calc_building_type_${resolvedGameType}_b_${userId}`)
         .setLabel(lc.buttons.basic)
         .setStyle(ButtonStyle.Secondary)
-        .setEmoji(getComponentEmoji(getEmojiMapForUser(userId), '1040'));
+        .setEmoji(getComponentEmoji(emojiMap, '1040'));
 
-    const fcBtn = new ButtonBuilder()
-        .setCustomId(`calc_building_fc_${userId}`)
-        .setLabel(lc.buttons.fireCrystal)
+    const advancedBtn = new ButtonBuilder()
+        .setCustomId(`calc_building_type_${resolvedGameType}_f_${userId}`)
+        .setLabel(resolvedGameType === 'ks' ? lc.buttons.trueGold : lc.buttons.fireCrystal)
         .setStyle(ButtonStyle.Secondary)
-        .setEmoji(getComponentEmoji(getEmojiMapForUser(userId), '1012'));
+        .setEmoji(getComponentEmoji(emojiMap, '1012'));
+
+    const backTarget = isMultiGameModeEnabled() ? 'game' : 'main';
+    const backBtn = new ButtonBuilder()
+        .setCustomId(`calc_building_back_${backTarget}_${resolvedGameType}_${userId}`)
+        .setLabel(lc.buttons.back)
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji(getComponentEmoji(emojiMap, '1002'));
 
     return new ContainerBuilder()
         .setAccentColor(0x3498db)
@@ -501,7 +618,7 @@ function buildTypeSelectionContainer(userId, lang) {
             new TextDisplayBuilder().setContent(lc.header.typeSelection)
         )
         .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
-        .addActionRowComponents(new ActionRowBuilder().addComponents(basicBtn, fcBtn));
+        .addActionRowComponents(new ActionRowBuilder().addComponents(basicBtn, advancedBtn, backBtn));
 }
 
 /**
@@ -514,14 +631,15 @@ function buildTypeSelectionContainer(userId, lang) {
  * @param {number} pageTo - Current page (0-based) for to-level select
  * @param {string} userId
  */
-function buildControlsContainer(type, bldId, fromKey, toKey, pageFrom, pageTo, userId, lang) {
-    const lc            = lang.calculators.buildings;
-    const buildingNames = getBuildingNames(lang);
-    const dataObj       = getDataObj(type);
-    const emojiMap      = getEmojiMapForUser(userId);
+function buildControlsContainer(type, bldId, fromKey, toKey, pageFrom, pageTo, userId, lang, gameType = getDefaultGameType()) {
+    const lc               = lang.calculators.buildings;
+    const resolvedGameType = normalizeGameType(gameType, 'wos');
+    const buildingNames    = getBuildingNames(lang, resolvedGameType);
+    const dataObj          = getDataObj(type, resolvedGameType);
+    const emojiMap         = getEmojiMapForUser(userId);
 
     // Header line — type title only
-    const headerText = lc.header.controls.replace('{type}', getTypeLabel(type, lang));
+    const headerText = lc.header.controls.replace('{type}', getTypeLabel(type, lang, resolvedGameType));
 
     // Building select (always shown, no default so the menu resets after selection)
     const bldOptions = Object.keys(dataObj).map(id => ({
@@ -531,7 +649,7 @@ function buildControlsContainer(type, bldId, fromKey, toKey, pageFrom, pageTo, u
     }));
 
     const bldSelect = new StringSelectMenuBuilder()
-        .setCustomId(`calc_bld_select_${type}_${userId}`)
+        .setCustomId(`calc_bld_select_${resolvedGameType}_${type}_${userId}`)
         .setPlaceholder(lc.placeholders.selectBuilding)
         .addOptions(bldOptions.slice(0, 25));
 
@@ -547,7 +665,7 @@ function buildControlsContainer(type, bldId, fromKey, toKey, pageFrom, pageTo, u
         );
         if (fromKey !== 'x') {
             container.addTextDisplayComponents(
-                new TextDisplayBuilder().setContent(lc.header.from.replace('{level}', getLevelDisplay(fromKey, type, lang)))
+                new TextDisplayBuilder().setContent(lc.header.from.replace('{level}', getLevelDisplay(fromKey, type, lang, resolvedGameType)))
             );
         }
     }
@@ -574,9 +692,9 @@ function buildControlsContainer(type, bldId, fromKey, toKey, pageFrom, pageTo, u
                 container.addActionRowComponents(
                     new ActionRowBuilder().addComponents(
                         new StringSelectMenuBuilder()
-                            .setCustomId(`calc_bld_from_${type}_${bldId}_${pf}_${userId}`)
+                            .setCustomId(`calc_bld_from_${resolvedGameType}_${type}_${bldId}_${pf}_${userId}`)
                             .setPlaceholder(lc.placeholders.selectStartingLevel)
-                            .addOptions(sliceFrom.map(key => ({ label: getLevelDisplay(key, type, lang), value: key, default: false })))
+                            .addOptions(sliceFrom.map(key => ({ label: getLevelDisplay(key, type, lang, resolvedGameType), value: key, default: false })))
                     )
                 );
 
@@ -598,9 +716,9 @@ function buildControlsContainer(type, bldId, fromKey, toKey, pageFrom, pageTo, u
                 container.addActionRowComponents(
                     new ActionRowBuilder().addComponents(
                         new StringSelectMenuBuilder()
-                            .setCustomId(`calc_bld_to_${type}_${bldId}_${fromKey}_${pt}_${userId}`)
+                            .setCustomId(`calc_bld_to_${resolvedGameType}_${type}_${bldId}_${fromKey}_${pt}_${userId}`)
                             .setPlaceholder(lc.placeholders.selectTargetLevel)
-                            .addOptions(sliceTo.map(key => ({ label: getLevelDisplay(key, type, lang), value: key, default: key === toKey })))
+                            .addOptions(sliceTo.map(key => ({ label: getLevelDisplay(key, type, lang, resolvedGameType), value: key, default: key === toKey })))
                     )
                 );
 
@@ -618,24 +736,24 @@ function buildControlsContainer(type, bldId, fromKey, toKey, pageFrom, pageTo, u
 
     if (needFromPagination) {
         const pf = Math.max(0, parseInt(pageFrom) || 0);
-        if (fromPrevPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_bld_fprev_${type}_${bldId}_${pf}_${userId}`).setLabel(lc.buttons.prev).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1019')));
-        if (fromNextPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_bld_fnext_${type}_${bldId}_${pf}_${userId}`).setLabel(lc.buttons.next).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1034')));
+        if (fromPrevPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_bld_fprev_${resolvedGameType}_${type}_${bldId}_${pf}_${userId}`).setLabel(lc.buttons.prev).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1019')));
+        if (fromNextPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_bld_fnext_${resolvedGameType}_${type}_${bldId}_${pf}_${userId}`).setLabel(lc.buttons.next).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1034')));
     }
 
     if (needToPagination) {
         const pt = Math.max(0, parseInt(pageTo) || 0);
-        if (toPrevPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_bld_tprev_${type}_${bldId}_${fromKey}_${pt}_${userId}`).setLabel(lc.buttons.prev).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1019')));
-        if (toNextPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_bld_tnext_${type}_${bldId}_${fromKey}_${pt}_${userId}`).setLabel(lc.buttons.next).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1034')));
+        if (toPrevPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_bld_tprev_${resolvedGameType}_${type}_${bldId}_${fromKey}_${pt}_${userId}`).setLabel(lc.buttons.prev).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1019')));
+        if (toNextPage >= 0) bottomButtons.push(new ButtonBuilder().setCustomId(`calc_bld_tnext_${resolvedGameType}_${type}_${bldId}_${fromKey}_${pt}_${userId}`).setLabel(lc.buttons.next).setStyle(ButtonStyle.Secondary).setEmoji(getComponentEmoji(emojiMap, '1034')));
     }
 
     bottomButtons.push(
         new ButtonBuilder()
-            .setCustomId(`calc_building_buffs_${type}_${bldId}_${fromKey}_${toKey}_${userId}`)
+            .setCustomId(`calc_building_buffs_${resolvedGameType}_${type}_${bldId}_${fromKey}_${toKey}_${userId}`)
             .setLabel(lc.buttons.buffs)
             .setStyle(ButtonStyle.Secondary)
             .setEmoji(getComponentEmoji(emojiMap, '1035')),
         new ButtonBuilder()
-            .setCustomId(`calc_building_back_${userId}`)
+            .setCustomId(`calc_building_back_type_${resolvedGameType}_${userId}`)
             .setLabel(lc.buttons.back)
             .setStyle(ButtonStyle.Secondary)
             .setEmoji(getComponentEmoji(emojiMap, '1002'))
@@ -655,8 +773,9 @@ function buildControlsContainer(type, bldId, fromKey, toKey, pageFrom, pageTo, u
  */
 function buildResultsContainer(entries, buffs, userId, lang, activeState) {
     const lc             = lang.calculators.buildings;
-    const buildingNames  = getBuildingNames(lang);
-    const resourceLabels = getResourceLabels(lang);
+    const gameType       = normalizeGameType(activeState?.gameType || entries[0]?.gameType, 'wos');
+    const buildingNames  = getBuildingNames(lang, gameType);
+    const resourceLabels = getResourceLabels(lang, gameType);
     const { totalRes, totalSeconds, reducedSeconds, totalNumLevels, maxBuildingReqs } = aggregateEntries(entries);
     const buffActive     = hasAnyBuff(buffs);
 
@@ -666,9 +785,9 @@ function buildResultsContainer(entries, buffs, userId, lang, activeState) {
     lines.push(lc.results.buildingsList);
     for (const e of entries) {
         const bldName  = buildingNames[e.bldId] || e.bldId;
-        const dataObj  = getDataObj(e.type);
-        const fromDisp = dataObj[e.bldId] ? getLevelDisplay(e.fromKey, e.type, lang) : e.fromKey;
-        const toDisp   = dataObj[e.bldId] ? getLevelDisplay(e.toKey,   e.type, lang) : e.toKey;
+        const dataObj  = getDataObj(e.type, gameType);
+        const fromDisp = dataObj[e.bldId] ? getLevelDisplay(e.fromKey, e.type, lang, gameType) : e.fromKey;
+        const toDisp   = dataObj[e.bldId] ? getLevelDisplay(e.toKey,   e.type, lang, gameType) : e.toKey;
         lines.push(`  - ${bldName}: ${fromDisp} → ${toDisp}`);
     }
 
@@ -685,16 +804,17 @@ function buildResultsContainer(entries, buffs, userId, lang, activeState) {
     if (buffActive) lines.push(lc.results.withBuffs.replace('{time}', formatSeconds(reducedSeconds)));
 
     // Building requirements
-    appendRequirementLines(lines, maxBuildingReqs, buildingNames, lc.results.requirements, lc.results.requirementLevel, lang);
+    appendRequirementLines(lines, maxBuildingReqs, buildingNames, lc.results.requirements, lc.results.requirementLevel, lang, gameType);
 
     // Applied buffs summary
     if (buffActive) {
+        const resultBuffs = getBuildingsResultBuffLocale(lang, gameType);
         const buffParts = [];
-        if (buffs.constructionSpeed > 0) buffParts.push(lc.results.buffs.constructionSpeed.replace('{pct}', buffs.constructionSpeed));
-        if (buffs.flatSpeedBonus > 0)    buffParts.push(getFlatSpeedLabel(buffs.flatSpeedBonus, lang));
-        if (buffs.petLevel > 0)          buffParts.push(lc.results.buffs.pet.replace('{n}', buffs.petLevel).replace('{pct}', PET_SPEED[buffs.petLevel]));
-        if (buffs.zinmanLevel > 0)       buffParts.push(lc.results.buffs.zinman.replace('{n}', buffs.zinmanLevel).replace('{pct}', ZINMAN_REDUCE[buffs.zinmanLevel]));
-        if (buffs.expertLevel > 0)       buffParts.push(lc.results.buffs.expert.replace('{n}', buffs.expertLevel).replace('{time}', formatSeconds(EXPERT_SECS[buffs.expertLevel])).replace('{levels}', totalNumLevels));
+        if (buffs.constructionSpeed > 0) buffParts.push(resultBuffs.constructionSpeed.replace('{pct}', buffs.constructionSpeed));
+        if (buffs.flatSpeedBonus > 0)    buffParts.push(getFlatSpeedLabel(buffs.flatSpeedBonus, lang, gameType));
+        if (buffs.petLevel > 0)          buffParts.push(resultBuffs.pet.replace('{n}', buffs.petLevel).replace('{pct}', PET_SPEED[buffs.petLevel]));
+        if (buffs.zinmanLevel > 0)       buffParts.push(resultBuffs.zinman.replace('{n}', buffs.zinmanLevel).replace('{pct}', ZINMAN_REDUCE[buffs.zinmanLevel]));
+        if (buffs.expertLevel > 0)       buffParts.push(resultBuffs.expert.replace('{n}', buffs.expertLevel).replace('{time}', formatSeconds(EXPERT_SECS[buffs.expertLevel])).replace('{levels}', totalNumLevels));
         lines.push(lc.results.buffsLine.replace('{parts}', buffParts.join('\n  - ')));
     }
 
@@ -709,9 +829,9 @@ function buildResultsContainer(entries, buffs, userId, lang, activeState) {
         .setEmoji(getComponentEmoji(emojiMap, '1021'));
 
     // Remove button — opens a modal to select entries to remove
-    const { type: ct, bldId: cb, fromKey: cf, toKey: ck } = activeState || {};
+    const { gameType: cg, type: ct, bldId: cb, fromKey: cf, toKey: ck } = activeState || {};
     const removeBtn = new ButtonBuilder()
-        .setCustomId(`calc_bld_remove_${ct || 'x'}_${cb || 'x'}_${cf || 'x'}_${ck || 'x'}_${userId}`)
+        .setCustomId(`calc_bld_remove_${cg || 'x'}_${ct || 'x'}_${cb || 'x'}_${cf || 'x'}_${ck || 'x'}_${userId}`)
         .setLabel(lc.buttons.remove)
         .setStyle(ButtonStyle.Danger);
 
@@ -752,18 +872,38 @@ async function handleBuildingsButton(interaction) {
             return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
         }
 
-        const typeContainer = buildTypeSelectionContainer(userId, lang);
-        const updatedComponents = updateComponentsV2AfterSeparator(interaction, [typeContainer]);
+        const firstContainer = isMultiGameModeEnabled()
+            ? buildGameSelectionContainer(userId, lang)
+            : buildTypeSelectionContainer(userId, lang, getDefaultGameType());
+        const updatedComponents = updateComponentsV2AfterSeparator(interaction, [firstContainer]);
         await interaction.update({ components: updatedComponents, flags: MessageFlags.IsComponentsV2 });
     } catch (err) {
         await handleError(interaction, null, err, 'handleBuildingsButton');
     }
 }
 
+async function handleBuildingGameSelection(interaction) {
+    try {
+        const ctx = await initHandler(interaction);
+        if (!ctx) return;
+        const { parts, userId, lang } = ctx;
+
+        if (!checkFeatureAccess('calculators', interaction)) {
+            return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
+        }
+
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const typeContainer = buildTypeSelectionContainer(userId, lang, gameType);
+        await interaction.update({ components: [typeContainer], flags: MessageFlags.IsComponentsV2 });
+    } catch (err) {
+        await handleError(interaction, null, err, 'handleBuildingGameSelection');
+    }
+}
+
 /**
  * Handles "Basic Buildings" or "Fire Crystal Buildings" type selection button.
  * Drops the original /calculators panel — from here the message has only 2 containers.
- * CustomId: calc_building_basic_{userId}  |  calc_building_fc_{userId}
+ * CustomId: calc_building_type_{gameType}_{type}_{userId}
  */
 async function handleBuildingTypeSelection(interaction) {
     try {
@@ -775,8 +915,9 @@ async function handleBuildingTypeSelection(interaction) {
             return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });
         }
 
-        const type = interaction.customId.includes('_basic_') ? 'b' : 'f';
-        const controlsContainer = buildControlsContainer(type, 'x', 'x', 'x', 0, 0, userId, lang);
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const type = parts[4];
+        const controlsContainer = buildControlsContainer(type, 'x', 'x', 'x', 0, 0, userId, lang, gameType);
 
         // Drop the original /calculators panel — start fresh with just the controls
         await interaction.update({ components: [controlsContainer], flags: MessageFlags.IsComponentsV2 });
@@ -794,14 +935,15 @@ async function handleBuildingSelect(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'bld', 'select', type, userId]
-        const type = parts[3];
+        // parts: ['calc', 'bld', 'select', gameType, type, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const type = parts[4];
         const bldId = interaction.values[0];
         const existingResults = interaction.message.components.length > 1
             ? interaction.message.components.slice(1) : [];
 
         await interaction.update({
-            components: [buildControlsContainer(type, bldId, 'x', 'x', 0, 0, userId, lang), ...existingResults],
+            components: [buildControlsContainer(type, bldId, 'x', 'x', 0, 0, userId, lang, gameType), ...existingResults],
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {
@@ -818,16 +960,17 @@ async function handleBuildingFromLevelSelect(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'bld', 'from', type, bldId, page, userId]
-        const type    = parts[3];
-        const bldId   = parts[4];
+        // parts: ['calc', 'bld', 'from', gameType, type, bldId, page, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const type    = parts[4];
+        const bldId   = parts[5];
         const fromKey = interaction.values[0];
         const existingResults = interaction.message.components.length > 1
             ? interaction.message.components.slice(1) : [];
 
         // fromKey shown as text in the header; preserve any accumulated results above
         await interaction.update({
-            components: [buildControlsContainer(type, bldId, fromKey, 'x', 0, 0, userId, lang), ...existingResults],
+            components: [buildControlsContainer(type, bldId, fromKey, 'x', 0, 0, userId, lang, gameType), ...existingResults],
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {
@@ -844,14 +987,15 @@ async function handleBuildingToLevelSelect(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'bld', 'to', type, bldId, fromKey, page, userId]
-        const type    = parts[3];
-        const bldId   = parts[4];
-        const fromKey = parts[5];
+        // parts: ['calc', 'bld', 'to', gameType, type, bldId, fromKey, page, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const type    = parts[4];
+        const bldId   = parts[5];
+        const fromKey = parts[6];
         const toKey   = interaction.values[0];
 
         const buffs  = getUserBuffs(userId);
-        const result = calculateUpgrade(getDataObj(type)[bldId], fromKey, toKey, buffs);
+        const result = calculateUpgrade(getDataObj(type, gameType)[bldId], fromKey, toKey, buffs);
 
         if (!result) {
             return await interaction.reply({
@@ -863,12 +1007,12 @@ async function handleBuildingToLevelSelect(interaction) {
         // Decode existing entries from the single results container (if present),
         // then overwrite any existing entry for the same building, and append the new one.
         const existingEntries = getExistingEntries(interaction.message, buffs);
-        const allEntries      = [...existingEntries.filter(e => e.bldId !== bldId), { type, bldId, fromKey, toKey, result }];
+        const allEntries      = [...existingEntries.filter(e => !(e.gameType === gameType && e.type === type && e.bldId === bldId)), { gameType, type, bldId, fromKey, toKey, result }];
 
         await interaction.update({
             components: [
-                buildControlsContainer(type, bldId, fromKey, toKey, 0, 0, userId, lang),
-                buildResultsContainer(allEntries, buffs, userId, lang, { type, bldId, fromKey, toKey })
+                buildControlsContainer(type, bldId, fromKey, toKey, 0, 0, userId, lang, gameType),
+                buildResultsContainer(allEntries, buffs, userId, lang, { gameType, type, bldId, fromKey, toKey })
             ],
             flags: MessageFlags.IsComponentsV2
         });
@@ -887,17 +1031,18 @@ async function handleBuildingFromLevelPage(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'bld', 'fprev'|'fnext', type, bldId, curPage, userId]
+        // parts: ['calc', 'bld', 'fprev'|'fnext', gameType, type, bldId, curPage, userId]
         const direction = parts[2]; // 'fprev' or 'fnext'
-        const type      = parts[3];
-        const bldId     = parts[4];
-        const curPage   = parseInt(parts[5]) || 0;
+        const gameType  = normalizeGameType(parts[3], getDefaultGameType());
+        const type      = parts[4];
+        const bldId     = parts[5];
+        const curPage   = parseInt(parts[6]) || 0;
         const newPage   = direction === 'fnext' ? curPage + 1 : Math.max(0, curPage - 1);
         const existingResults = interaction.message.components.length > 1
             ? interaction.message.components.slice(1) : [];
 
         await interaction.update({
-            components: [buildControlsContainer(type, bldId, 'x', 'x', newPage, 0, userId, lang), ...existingResults],
+            components: [buildControlsContainer(type, bldId, 'x', 'x', newPage, 0, userId, lang, gameType), ...existingResults],
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {
@@ -915,18 +1060,19 @@ async function handleBuildingToLevelPage(interaction) {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'bld', 'tprev'|'tnext', type, bldId, fromKey, curPage, userId]
+        // parts: ['calc', 'bld', 'tprev'|'tnext', gameType, type, bldId, fromKey, curPage, userId]
         const direction = parts[2]; // 'tprev' or 'tnext'
-        const type      = parts[3];
-        const bldId     = parts[4];
-        const fromKey   = parts[5];
-        const curPage   = parseInt(parts[6]) || 0;
+        const gameType  = normalizeGameType(parts[3], getDefaultGameType());
+        const type      = parts[4];
+        const bldId     = parts[5];
+        const fromKey   = parts[6];
+        const curPage   = parseInt(parts[7]) || 0;
         const newPage   = direction === 'tnext' ? curPage + 1 : Math.max(0, curPage - 1);
         const existingResults = interaction.message.components.length > 1
             ? interaction.message.components.slice(1) : [];
 
         await interaction.update({
-            components: [buildControlsContainer(type, bldId, fromKey, 'x', 0, newPage, userId, lang), ...existingResults],
+            components: [buildControlsContainer(type, bldId, fromKey, 'x', 0, newPage, userId, lang, gameType), ...existingResults],
             flags: MessageFlags.IsComponentsV2
         });
     } catch (err) {
@@ -943,103 +1089,102 @@ async function handleBuildingToLevelPage(interaction) {
  *   3. Zinman (select Lv.1-5, resource reduction)
  *   4. Expert (select Lv.1-5, fixed time per upgrade)
  *   5. Construction Speed % (text input)
- * CustomId: calc_building_buffs_{type}_{bldId}_{fromKey}_{toKey}_{userId}
+ * CustomId: calc_building_buffs_{gameType}_{type}_{bldId}_{fromKey}_{toKey}_{userId}
  */
 async function handleBuildingBuffsButton(interaction) {
     try {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
-        const { parts, userId } = ctx;
-        // parts: ['calc', 'building', 'buffs', type, bldId, fromKey, toKey, userId]
-        const type    = parts[3];
-        const bldId   = parts[4];
-        const fromKey = parts[5];
-        const toKey   = parts[6];
+        const { parts, userId, lang } = ctx;
+        // parts: ['calc', 'building', 'buffs', gameType, type, bldId, fromKey, toKey, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const type     = parts[4];
+        const bldId    = parts[5];
+        const fromKey  = parts[6];
+        const toKey    = parts[7];
 
         const cur = getUserBuffs(userId);
+        const modalLang = getBuildingsModalLocale(lang, gameType);
 
         const modal = new ModalBuilder()
-            .setCustomId(`calc_buffs_modal_${type}_${bldId}_${fromKey}_${toKey}_${userId}`)
-            .setTitle('Calculator Buffs');
+            .setCustomId(`calc_buffs_modal_${gameType}_${type}_${bldId}_${fromKey}_${toKey}_${userId}`)
+            .setTitle(modalLang.title);
 
         // ── 1. VP / Double Time ───────────────────────────────────────────────
         const flatSpeedSelect = new StringSelectMenuBuilder()
             .setCustomId('flat_speed_bonus')
-            .setPlaceholder('Select VP / Double Time')
+            .setPlaceholder(modalLang.vpDoubleTime.placeholder)
             .setRequired(false)
             .addOptions(
-                new StringSelectMenuOptionBuilder().setLabel('Off').setValue('0').setDefault(cur.flatSpeedBonus === 0),
-                new StringSelectMenuOptionBuilder().setLabel('VP 10%').setValue('10').setDefault(cur.flatSpeedBonus === 10),
-                new StringSelectMenuOptionBuilder().setLabel('VP 15%').setValue('15').setDefault(cur.flatSpeedBonus === 15),
-                new StringSelectMenuOptionBuilder().setLabel('Double Time (+20%)').setValue('20').setDefault(cur.flatSpeedBonus === 20),
-                new StringSelectMenuOptionBuilder().setLabel('VP 10% + Double Time (+30%)').setValue('30').setDefault(cur.flatSpeedBonus === 30),
-                new StringSelectMenuOptionBuilder().setLabel('VP 15% + Double Time (+35%)').setValue('35').setDefault(cur.flatSpeedBonus === 35)
+                new StringSelectMenuOptionBuilder().setLabel(modalLang.vpDoubleTime.off).setValue('0').setDefault(cur.flatSpeedBonus === 0),
+                new StringSelectMenuOptionBuilder().setLabel(modalLang.vpDoubleTime.vp10).setValue('10').setDefault(cur.flatSpeedBonus === 10),
+                new StringSelectMenuOptionBuilder().setLabel(modalLang.vpDoubleTime.vp15).setValue('15').setDefault(cur.flatSpeedBonus === 15),
+                new StringSelectMenuOptionBuilder().setLabel(modalLang.vpDoubleTime.doubleTime).setValue('20').setDefault(cur.flatSpeedBonus === 20),
+                new StringSelectMenuOptionBuilder().setLabel(modalLang.vpDoubleTime.vp10dt).setValue('30').setDefault(cur.flatSpeedBonus === 30),
+                new StringSelectMenuOptionBuilder().setLabel(modalLang.vpDoubleTime.vp15dt).setValue('35').setDefault(cur.flatSpeedBonus === 35)
             );
         const flatSpeedLabel = new LabelBuilder()
-            .setLabel('VP / Double Time Bonus')
+            .setLabel(modalLang.vpDoubleTime.label)
             .setStringSelectMenuComponent(flatSpeedSelect);
 
         // ── 2. Pet ────────────────────────────────────────────────────────────
         const petSelect = new StringSelectMenuBuilder()
             .setCustomId('pet_level')
-            .setPlaceholder('Select pet level')
+            .setPlaceholder(modalLang.pet.placeholder)
             .setRequired(false)
             .addOptions(
-                new StringSelectMenuOptionBuilder().setLabel('Off').setValue('0').setDefault(cur.petLevel === 0),
-                new StringSelectMenuOptionBuilder().setLabel('Level 1 (+5% speed)').setValue('1').setDefault(cur.petLevel === 1),
-                new StringSelectMenuOptionBuilder().setLabel('Level 2 (+7% speed)').setValue('2').setDefault(cur.petLevel === 2),
-                new StringSelectMenuOptionBuilder().setLabel('Level 3 (+9% speed)').setValue('3').setDefault(cur.petLevel === 3),
-                new StringSelectMenuOptionBuilder().setLabel('Level 4 (+12% speed)').setValue('4').setDefault(cur.petLevel === 4),
-                new StringSelectMenuOptionBuilder().setLabel('Level 5 (+15% speed)').setValue('5').setDefault(cur.petLevel === 5)
+                new StringSelectMenuOptionBuilder().setLabel(modalLang.pet.off).setValue('0').setDefault(cur.petLevel === 0),
+                ...[1, 2, 3, 4, 5].map(level => new StringSelectMenuOptionBuilder()
+                    .setLabel(modalLang.pet.level.replace('{n}', level).replace('{pct}', PET_SPEED[level]))
+                    .setValue(String(level))
+                    .setDefault(cur.petLevel === level))
             );
         const petLabel = new LabelBuilder()
-            .setLabel('Frost Wing Pet (Build Speed)')
+            .setLabel(modalLang.pet.label)
             .setStringSelectMenuComponent(petSelect);
 
         // ── 3. Zinman ─────────────────────────────────────────────────────────
         const zinmanSelect = new StringSelectMenuBuilder()
             .setCustomId('zinman_level')
-            .setPlaceholder('Select Zinman level')
+            .setPlaceholder(modalLang.zinman.placeholder)
             .setRequired(false)
             .addOptions(
-                new StringSelectMenuOptionBuilder().setLabel('Off').setValue('0').setDefault(cur.zinmanLevel === 0),
-                new StringSelectMenuOptionBuilder().setLabel('Level 1 (3% resource reduction)').setValue('1').setDefault(cur.zinmanLevel === 1),
-                new StringSelectMenuOptionBuilder().setLabel('Level 2 (6% resource reduction)').setValue('2').setDefault(cur.zinmanLevel === 2),
-                new StringSelectMenuOptionBuilder().setLabel('Level 3 (9% resource reduction)').setValue('3').setDefault(cur.zinmanLevel === 3),
-                new StringSelectMenuOptionBuilder().setLabel('Level 4 (12% resource reduction)').setValue('4').setDefault(cur.zinmanLevel === 4),
-                new StringSelectMenuOptionBuilder().setLabel('Level 5 (15% resource reduction)').setValue('5').setDefault(cur.zinmanLevel === 5)
+                new StringSelectMenuOptionBuilder().setLabel(modalLang.zinman.off).setValue('0').setDefault(cur.zinmanLevel === 0),
+                ...[1, 2, 3, 4, 5].map(level => new StringSelectMenuOptionBuilder()
+                    .setLabel(modalLang.zinman.level.replace('{n}', level).replace('{pct}', ZINMAN_REDUCE[level]))
+                    .setValue(String(level))
+                    .setDefault(cur.zinmanLevel === level))
             );
         const zinmanLabel = new LabelBuilder()
-            .setLabel('Zinman (Resource Reduction)')
+            .setLabel(modalLang.zinman.label)
             .setStringSelectMenuComponent(zinmanSelect);
 
         // ── 4. Expert ─────────────────────────────────────────────────────────
         const expertSelect = new StringSelectMenuBuilder()
             .setCustomId('expert_level')
-            .setPlaceholder('Select Expert level')
+            .setPlaceholder(modalLang.expert.placeholder)
             .setRequired(false)
             .addOptions(
-                new StringSelectMenuOptionBuilder().setLabel('Off').setValue('0').setDefault(cur.expertLevel === 0),
-                new StringSelectMenuOptionBuilder().setLabel('Level 1 (−2h per upgrade)').setValue('1').setDefault(cur.expertLevel === 1),
-                new StringSelectMenuOptionBuilder().setLabel('Level 2 (−3h per upgrade)').setValue('2').setDefault(cur.expertLevel === 2),
-                new StringSelectMenuOptionBuilder().setLabel('Level 3 (−4h per upgrade)').setValue('3').setDefault(cur.expertLevel === 3),
-                new StringSelectMenuOptionBuilder().setLabel('Level 4 (−6h per upgrade)').setValue('4').setDefault(cur.expertLevel === 4),
-                new StringSelectMenuOptionBuilder().setLabel('Level 5 (−8h per upgrade)').setValue('5').setDefault(cur.expertLevel === 5)
+                new StringSelectMenuOptionBuilder().setLabel(modalLang.expert.off).setValue('0').setDefault(cur.expertLevel === 0),
+                ...[1, 2, 3, 4, 5].map(level => new StringSelectMenuOptionBuilder()
+                    .setLabel(modalLang.expert.level.replace('{n}', level).replace('{time}', formatSeconds(EXPERT_SECS[level])))
+                    .setValue(String(level))
+                    .setDefault(cur.expertLevel === level))
             );
         const expertLabel = new LabelBuilder()
-            .setLabel('Expert (Fixed Time Reduction)')
+            .setLabel(modalLang.expert.label)
             .setStringSelectMenuComponent(expertSelect);
 
         // ── 5. Construction Speed % ────────────────────────────────────────────
         const speedInput = new TextInputBuilder()
             .setCustomId('construction_speed')
             .setStyle(TextInputStyle.Short)
-            .setPlaceholder('e.g. 150')
+            .setPlaceholder(modalLang.speed.placeholder)
             .setValue(cur.constructionSpeed > 0 ? String(cur.constructionSpeed) : '')
             .setRequired(false);
         const speedLabel = new LabelBuilder()
-            .setLabel('Construction Speed %')
-            .setDescription('Manual construction speed buff (e.g. 150 for 150%)')
+            .setLabel(modalLang.speed.label)
+            .setDescription(modalLang.speed.description)
             .setTextInputComponent(speedInput);
 
         modal.addLabelComponents(flatSpeedLabel, petLabel, zinmanLabel, expertLabel, speedLabel);
@@ -1052,18 +1197,19 @@ async function handleBuildingBuffsButton(interaction) {
 
 /**
  * Saves buffs from the modal and recalculates if a full selection exists.
- * CustomId: calc_buffs_modal_{type}_{bldId}_{fromKey}_{toKey}_{userId}
+ * CustomId: calc_buffs_modal_{gameType}_{type}_{bldId}_{fromKey}_{toKey}_{userId}
  */
 async function handleBuildingBuffsModal(interaction) {
     try {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'buffs', 'modal', type, bldId, fromKey, toKey, userId]
-        const type    = parts[3];
-        const bldId   = parts[4];
-        const fromKey = parts[5];
-        const toKey   = parts[6];
+        // parts: ['calc', 'buffs', 'modal', gameType, type, bldId, fromKey, toKey, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const type     = parts[4];
+        const bldId    = parts[5];
+        const fromKey  = parts[6];
+        const toKey    = parts[7];
 
         // Read select values (returns array; take first element or default to '0')
         const flatSpeedValues = interaction.fields.getStringSelectValues('flat_speed_bonus');
@@ -1083,10 +1229,10 @@ async function handleBuildingBuffsModal(interaction) {
         // Persist buffs
         userQueries.upsertBuffs(userId, JSON.stringify(buffs));
 
-        const controlsContainer = buildControlsContainer(type, bldId, fromKey, toKey, 0, 0, userId, lang);
+        const controlsContainer = buildControlsContainer(type, bldId, fromKey, toKey, 0, 0, userId, lang, gameType);
         const entries           = getExistingEntries(interaction.message, buffs);
         const components        = entries.length > 0
-            ? [controlsContainer, buildResultsContainer(entries, buffs, userId, lang, { type, bldId, fromKey, toKey })]
+            ? [controlsContainer, buildResultsContainer(entries, buffs, userId, lang, { gameType, type, bldId, fromKey, toKey })]
             : [controlsContainer];
 
         await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
@@ -1097,7 +1243,7 @@ async function handleBuildingBuffsModal(interaction) {
 
 /**
  * Sends the upgrade summary as a DM (falls back to channel if DMs are closed).
- * CustomId: calc_bld_copy_{type}_{bldId}_{fromKey}_{toKey}_{userId}
+ * CustomId: calc_bld_copy_{encodedEntries}_{userId}
  */
 async function handleBuildingCopyButton(interaction) {
     try {
@@ -1130,18 +1276,19 @@ async function handleBuildingCopyButton(interaction) {
 
 /**
  * Shows a modal with a multi-select to remove entries from the plan.
- * CustomId: calc_bld_remove_{type}_{bldId}_{fromKey}_{toKey}_{userId}
+ * CustomId: calc_bld_remove_{gameType}_{type}_{bldId}_{fromKey}_{toKey}_{userId}
  */
 async function handleRemoveButton(interaction) {
     try {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'bld', 'remove', type, bldId, fromKey, toKey, userId]
-        const type    = parts[3];
-        const bldId   = parts[4];
-        const fromKey = parts[5];
-        const toKey   = parts[6];
+        // parts: ['calc', 'bld', 'remove', gameType, type, bldId, fromKey, toKey, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const type     = parts[4];
+        const bldId    = parts[5];
+        const fromKey  = parts[6];
+        const toKey    = parts[7];
 
         const buffs   = getUserBuffs(userId);
         const entries = getExistingEntries(interaction.message, buffs);
@@ -1152,7 +1299,7 @@ async function handleRemoveButton(interaction) {
 
         const lc = lang.calculators.buildings;
         const rm = lc.removeModal;
-        const buildingNames = getBuildingNames(lang);
+        const buildingNames = getBuildingNames(lang, gameType);
 
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('remove_entries')
@@ -1171,7 +1318,7 @@ async function handleRemoveButton(interaction) {
             .setStringSelectMenuComponent(selectMenu);
 
         const modal = new ModalBuilder()
-            .setCustomId(`calc_bld_rmmodal_${type}_${bldId}_${fromKey}_${toKey}_${userId}`)
+            .setCustomId(`calc_bld_rmmodal_${gameType}_${type}_${bldId}_${fromKey}_${toKey}_${userId}`)
             .setTitle(rm.title)
             .addLabelComponents(label);
 
@@ -1183,27 +1330,28 @@ async function handleRemoveButton(interaction) {
 
 /**
  * Processes removal of selected entries from the plan.
- * CustomId: calc_bld_rmmodal_{type}_{bldId}_{fromKey}_{toKey}_{userId}
+ * CustomId: calc_bld_rmmodal_{gameType}_{type}_{bldId}_{fromKey}_{toKey}_{userId}
  */
 async function handleRemoveModal(interaction) {
     try {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
         const { parts, userId, lang } = ctx;
-        // parts: ['calc', 'bld', 'rmmodal', type, bldId, fromKey, toKey, userId]
-        const type    = parts[3];
-        const bldId   = parts[4];
-        const fromKey = parts[5];
-        const toKey   = parts[6];
+        // parts: ['calc', 'bld', 'rmmodal', gameType, type, bldId, fromKey, toKey, userId]
+        const gameType = normalizeGameType(parts[3], getDefaultGameType());
+        const type     = parts[4];
+        const bldId    = parts[5];
+        const fromKey  = parts[6];
+        const toKey    = parts[7];
 
         const buffs     = getUserBuffs(userId);
         const entries   = getExistingEntries(interaction.message, buffs);
         const toRemove  = new Set(interaction.fields.getStringSelectValues('remove_entries'));
         const remaining = entries.filter((_, i) => !toRemove.has(String(i)));
 
-        const controlsContainer = buildControlsContainer(type, bldId, fromKey, toKey, 0, 0, userId, lang);
+        const controlsContainer = buildControlsContainer(type, bldId, fromKey, toKey, 0, 0, userId, lang, gameType);
         const components = remaining.length > 0
-            ? [controlsContainer, buildResultsContainer(remaining, buffs, userId, lang, { type, bldId, fromKey, toKey })]
+            ? [controlsContainer, buildResultsContainer(remaining, buffs, userId, lang, { gameType, type, bldId, fromKey, toKey })]
             : [controlsContainer];
 
         await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
@@ -1213,7 +1361,10 @@ async function handleRemoveModal(interaction) {
 }
 
 module.exports = {
+    buildGameSelectionContainer,
+    buildTypeSelectionContainer,
     handleBuildingsButton,
+    handleBuildingGameSelection,
     handleBuildingTypeSelection,
     handleBuildingSelect,
     handleBuildingFromLevelSelect,

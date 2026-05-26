@@ -2,8 +2,10 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, C
 const { giftCodeQueries } = require('../utility/database');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator, createGameSelectionComponents } = require('../utility/commonFunctions');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 
 
 /**
@@ -48,18 +50,74 @@ async function handleRemoveGiftButton(interaction) {
             });
         }
 
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_remove_gift_game',
+                title: lang.giftCode.removeGiftCode.content.title.base,
+                description: lang.giftCode.removeGiftCode.content.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
+        const gameType = getDefaultGameType();
+
         // Get all gift codes from database
-        const allGiftCodes = giftCodeQueries.getAllGiftCodes();
+        const allGiftCodes = giftCodeQueries.getAllGiftCodes(gameType);
 
         if (!allGiftCodes || allGiftCodes.length === 0) {
             return await interaction.reply({ content: lang.giftCode.removeGiftCode.errors.noGiftCodes, ephemeral: true });
         }
 
         // Display first page
-        await displayRemoveGiftPage(interaction, allGiftCodes, 0, lang);
+        await displayRemoveGiftPage(interaction, allGiftCodes, 0, lang, gameType);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleRemoveGiftButton');
+    }
+}
+
+async function handleRemoveGiftGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_remove_gift_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.GIFT_CODE_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const gameType = normalizeGameType(interaction.values[0], null);
+        if (!gameType) {
+            return await interaction.reply({
+                content: lang.giftCode.removeGiftCode.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const allGiftCodes = giftCodeQueries.getAllGiftCodes(gameType);
+
+        if (!allGiftCodes || allGiftCodes.length === 0) {
+            return await interaction.reply({
+                content: lang.giftCode.removeGiftCode.errors.noGiftCodesForGame,
+                ephemeral: true
+            });
+        }
+
+        await displayRemoveGiftPage(interaction, allGiftCodes, 0, lang, gameType);
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleRemoveGiftGameSelection');
     }
 }
 
@@ -72,9 +130,9 @@ async function handleRemoveGiftButton(interaction) {
 
  * @returns {Promise<void>}
  */
-async function displayRemoveGiftPage(interaction, allGiftCodes, page, lang) {
+async function displayRemoveGiftPage(interaction, allGiftCodes, page, lang, gameType = null) {
     const CODES_PER_PAGE = 24; // Max 25 options per select menu, using 24 to be safe
-    const totalPages = Math.ceil(allGiftCodes.length / CODES_PER_PAGE);
+    const totalPages = Math.max(1, Math.ceil(allGiftCodes.length / CODES_PER_PAGE));
     const startIndex = page * CODES_PER_PAGE;
     const endIndex = Math.min(startIndex + CODES_PER_PAGE, allGiftCodes.length);
     const pageCodes = allGiftCodes.slice(startIndex, endIndex);
@@ -89,7 +147,7 @@ async function displayRemoveGiftPage(interaction, allGiftCodes, page, lang) {
     }));
 
     const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId(`remove_gift_select_${interaction.user.id}_${page}`)
+        .setCustomId(`remove_gift_select_${interaction.user.id}_${page}${gameType ? `_${gameType}` : ''}`)
         .setPlaceholder(lang.giftCode.removeGiftCode.selectMenu.selectGiftCodes.placeholder)
         .setMinValues(1)
         .setMaxValues(options.length)
@@ -103,7 +161,8 @@ async function displayRemoveGiftPage(interaction, allGiftCodes, page, lang) {
         userId: interaction.user.id,
         currentPage: page,
         totalPages: totalPages,
-        lang: lang
+        lang: lang,
+        contextData: gameType ? [gameType] : []
     });
 
     if (paginationRow) {
@@ -145,7 +204,7 @@ async function handleRemoveGiftPagination(interaction) {
     try {
 
         // Parse pagination data from custom ID
-        const { userId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId, newPage, contextData } = parsePaginationCustomId(interaction.customId, isMultiGameModeEnabled() ? 1 : 0);
 
         if (interaction.user.id !== userId) {
             return await interaction.reply({
@@ -165,7 +224,8 @@ async function handleRemoveGiftPagination(interaction) {
         }
 
         // Get all gift codes again
-        const allGiftCodes = giftCodeQueries.getAllGiftCodes();
+        const gameType = normalizeGameType(contextData[0] || getDefaultGameType());
+        const allGiftCodes = giftCodeQueries.getAllGiftCodes(gameType);
 
         if (!allGiftCodes || allGiftCodes.length === 0) {
             return await interaction.reply({
@@ -175,7 +235,7 @@ async function handleRemoveGiftPagination(interaction) {
         }
 
         // Display the new page
-        await displayRemoveGiftPage(interaction, allGiftCodes, newPage, lang);
+        await displayRemoveGiftPage(interaction, allGiftCodes, newPage, lang, gameType);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleRemoveGiftPagination');
@@ -195,6 +255,7 @@ async function handleRemoveGiftSelect(interaction) {
         // Extract user ID from custom ID for security check
         const customIdParts = interaction.customId.split('_');
         const expectedUserId = customIdParts[3]; // remove_gift_select_userId_page
+        const gameType = normalizeGameType(customIdParts[5] || getDefaultGameType());
 
         // Security check
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
@@ -221,7 +282,7 @@ async function handleRemoveGiftSelect(interaction) {
 
         // Build confirm/cancel buttons
         const confirmButton = new ButtonBuilder()
-            .setCustomId(`remove_gift_confirm_${interaction.user.id}_${encodedCodes}`)
+            .setCustomId(`remove_gift_confirm_${interaction.user.id}_${encodedCodes}_${gameType}`)
             .setLabel(lang.giftCode.removeGiftCode.buttons.confirm)
             .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1004'))
             .setStyle(ButtonStyle.Danger);
@@ -290,6 +351,7 @@ async function handleRemoveGiftConfirm(interaction) {
 
         // Decode codes from custom ID
         const encodedCodes = customIdParts[4];
+        const gameType = normalizeGameType(customIdParts[5] || getDefaultGameType());
         const padded = encodedCodes + '='.repeat((4 - (encodedCodes.length % 4)) % 4);
         const decoded = Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
         const selectedCodes = decoded.split(',').filter(Boolean);
@@ -301,7 +363,7 @@ async function handleRemoveGiftConfirm(interaction) {
 
         for (const code of selectedCodes) {
             try {
-                giftCodeQueries.removeGiftCode(code);
+                giftCodeQueries.removeGiftCode(code, gameType);
                 successCount++;
                 successCodes.push(code);
             } catch (error) {
@@ -398,6 +460,7 @@ async function handleRemoveGiftCancel(interaction) {
 module.exports = {
     createRemoveGiftButton,
     handleRemoveGiftButton,
+    handleRemoveGiftGameSelection,
     handleRemoveGiftSelect,
     handleRemoveGiftConfirm,
     handleRemoveGiftCancel,

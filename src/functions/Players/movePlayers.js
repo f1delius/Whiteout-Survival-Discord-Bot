@@ -17,9 +17,36 @@ const {
 const { allianceQueries, playerQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
-const { getFurnaceReadable } = require('./furnaceReadable');
-const { hasPermission, handleError, getUserInfo, assertUserMatches, getAlliancesForUser, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
+const {
+    hasPermission,
+    handleError,
+    getUserInfo,
+    assertUserMatches,
+    getAlliancesForUser,
+    getAlliancesForUserByGame,
+    createGameSelectionComponents,
+    updateComponentsV2AfterSeparator
+} = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getComponentEmoji, getEmojiMapForUser } = require('../utility/emojis');
+
+function buildPlayerCountMap(alliances) {
+    const playerCountMap = {};
+    for (const alliance of alliances) {
+        playerCountMap[alliance.id] = playerQueries.getPlayersByAllianceId(alliance.id, alliance.game_type).length;
+    }
+    return playerCountMap;
+}
+
+function getMovePlayerAlliances(adminData, gameType = null) {
+    if (gameType) {
+        return getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.PLAYER_MANAGEMENT);
+    }
+
+    return getAlliancesForUser(adminData);
+}
 
 /**
  * Creates the move players button for the player management panel
@@ -59,8 +86,24 @@ async function handleMovePlayersButton(interaction) {
             });
         }
 
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_move_players_game',
+                title: lang.players.movePlayer.content.title.selectDestination,
+                description: lang.players.movePlayer.content.selectGameDescription,
+                accentColor: 0xe67e22
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
         // Get alliances based on user permissions
-        const allAlliances = getAlliancesForUser(adminData);
+        const allAlliances = getMovePlayerAlliances(adminData, getDefaultGameType());
 
         if (allAlliances.length === 0) {
             return await interaction.reply({
@@ -77,12 +120,16 @@ async function handleMovePlayersButton(interaction) {
         }
 
         // Show target alliance selection as the first step
-        const allianceIds = allAlliances.map(a => a.id);
-        const playerCounts = playerQueries.getPlayerCountsByAllianceIds(allianceIds);
-        const playerCountMap = {};
-        playerCounts.forEach(row => { playerCountMap[row.alliance_id] = row.player_count; });
+        const playerCountMap = buildPlayerCountMap(allAlliances);
 
-        const { components } = createTargetAllianceSelectionContainer(allAlliances, interaction, lang, playerCountMap);
+        const { components } = createTargetAllianceSelectionContainer(
+            allAlliances,
+            interaction,
+            lang,
+            playerCountMap,
+            0,
+            getDefaultGameType()
+        );
 
         await interaction.update({
             components: components,
@@ -102,8 +149,16 @@ async function handleMovePlayersButton(interaction) {
 async function handleMovePlayersPagination(interaction, type) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
     try {
-        // Parse with 0 context initially to get subtype, then extract correct amount
-        const parsed = parsePaginationCustomId(interaction.customId, 0);
+        // Parse with 0 context initially to get subtype, then reparse with the
+        // correct game-aware context size for this step.
+        const initialParsed = parsePaginationCustomId(interaction.customId, 0);
+        const isMultiGame = isMultiGameModeEnabled();
+        const contextCount = initialParsed.subtype === 'target'
+            ? (isMultiGame ? 1 : 0)
+            : initialParsed.subtype === 'source'
+                ? (isMultiGame ? 2 : 1)
+                : (isMultiGame ? 4 : 3);
+        const parsed = parsePaginationCustomId(interaction.customId, contextCount);
 
         const { userId: expectedUserId, newPage, subtype, contextData } = parsed;
 
@@ -111,44 +166,62 @@ async function handleMovePlayersPagination(interaction, type) {
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         if (subtype === 'target') {
-            // move_players_target_prev/next_userId_currentPage
-            const allAlliances = getAlliancesForUser(adminData);
-            const allianceIds = allAlliances.map(a => a.id);
-            const playerCounts = playerQueries.getPlayerCountsByAllianceIds(allianceIds);
-            const playerCountMap = {};
-            playerCounts.forEach(row => { playerCountMap[row.alliance_id] = row.player_count; });
+            // move_players_target_prev/next_userId_currentPage_[gameType]
+            const gameType = normalizeGameType(contextData[0] || getDefaultGameType());
+            const allAlliances = getMovePlayerAlliances(adminData, gameType);
+            const playerCountMap = buildPlayerCountMap(allAlliances);
 
-            const { components } = createTargetAllianceSelectionContainer(allAlliances, interaction, lang, playerCountMap, newPage);
+            const { components } = createTargetAllianceSelectionContainer(
+                allAlliances,
+                interaction,
+                lang,
+                playerCountMap,
+                newPage,
+                gameType
+            );
             await interaction.update({ components: components, flags: MessageFlags.IsComponentsV2 });
 
         } else if (subtype === 'source') {
-            // move_players_source_prev/next_userId_destId_currentPage
+            // move_players_source_prev/next_userId_currentPage_destId_[gameType]
             const destAllianceId = parseInt(contextData[0]);
-            const destAlliance = allianceQueries.getAllianceById(destAllianceId);
-            const allAlliances = getAlliancesForUser(adminData);
+            const gameType = normalizeGameType(contextData[1] || getDefaultGameType());
+            const destAlliance = allianceQueries.getAllianceByIdAny(destAllianceId);
+            const allAlliances = getMovePlayerAlliances(adminData, gameType);
 
-            const allianceIds = allAlliances.map(a => a.id);
-            const playerCounts = playerQueries.getPlayerCountsByAllianceIds(allianceIds);
-            const playerCountMap = {};
-            playerCounts.forEach(row => { playerCountMap[row.alliance_id] = row.player_count; });
+            const playerCountMap = buildPlayerCountMap(allAlliances);
 
             const sourceAlliances = allAlliances.filter(alliance => {
                 if (alliance.id === destAllianceId) return false;
                 return (playerCountMap[alliance.id] || 0) > 0;
             });
 
-            const { components } = createSourceAllianceSelectionEmbed(sourceAlliances, interaction, lang, destAlliance, playerCountMap, newPage);
+            const { components } = createSourceAllianceSelectionEmbed(
+                sourceAlliances,
+                interaction,
+                lang,
+                destAlliance,
+                playerCountMap,
+                newPage,
+                gameType
+            );
             await interaction.update({ components: components, flags: MessageFlags.IsComponentsV2 });
 
         } else if (subtype === 'player') {
-            // move_players_player_(prev/next)_userId_sourceId_destId_currentPage_totalMoved
+            // move_players_player_(prev/next)_userId_currentPage_sourceId_destId_totalMoved_[gameType]
             const sourceAllianceId = parseInt(contextData[0]);
             const destAllianceId = parseInt(contextData[1]);
             const totalMovedCount = parseInt(contextData[2]) || 0;
+            const gameType = normalizeGameType(contextData[3] || getDefaultGameType());
 
-            const sourceAlliance = allianceQueries.getAllianceById(sourceAllianceId);
-            const destAlliance = allianceQueries.getAllianceById(destAllianceId);
-            const players = playerQueries.getPlayersByAllianceId(sourceAllianceId);
+            const sourceAlliance = allianceQueries.getAllianceByIdAny(sourceAllianceId);
+            const destAlliance = allianceQueries.getAllianceByIdAny(destAllianceId);
+            if (!sourceAlliance || !destAlliance || sourceAlliance.game_type !== gameType || destAlliance.game_type !== gameType) {
+                return await interaction.reply({
+                    content: lang.players.movePlayer.errors.invalidGameType,
+                    ephemeral: true
+                });
+            }
+            const players = playerQueries.getPlayersByAllianceId(sourceAllianceId, sourceAlliance.game_type);
 
             // Reconstruct success content from cumulative count if exists
             let additionalContent = '';
@@ -169,7 +242,8 @@ async function handleMovePlayersPagination(interaction, type) {
                 destAllianceId,
                 newPage,
                 additionalContent, // Reconstructed success content
-                totalMovedCount // Pass cumulative count through pagination
+                totalMovedCount, // Pass cumulative count through pagination
+                gameType
             );
             await interaction.update({ components: components, flags: MessageFlags.IsComponentsV2 });
         }
@@ -197,7 +271,8 @@ async function handleMovePlayersPagination(interaction, type) {
  * @param {number} [page=0] - Current page number (default 0)
  * @returns {Object} Components
  */
-function createSourceAllianceSelectionEmbed(alliances, interaction, lang, destAlliance, playerCountMap, page = 0) {
+function createSourceAllianceSelectionEmbed(alliances, interaction, lang, destAlliance, playerCountMap, page = 0, gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, null);
     const itemsPerPage = 24;
     const totalPages = Math.max(1, Math.ceil(alliances.length / itemsPerPage));
     const startIndex = page * itemsPerPage;
@@ -208,7 +283,7 @@ function createSourceAllianceSelectionEmbed(alliances, interaction, lang, destAl
 
     // Move by ID button - moves any player to the target alliance without selecting a source
     const moveByIdButton = new ButtonBuilder()
-        .setCustomId(`move_players_add_ids_${interaction.user.id}_0_${destAlliance.id}`)
+        .setCustomId(`move_players_add_ids_${interaction.user.id}_0_${destAlliance.id}${resolvedGameType ? `_${resolvedGameType}` : ''}`)
         .setLabel(lang.players.movePlayer.buttons.inputPlayerId)
         .setStyle(ButtonStyle.Secondary)
         .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1021'));
@@ -220,7 +295,7 @@ function createSourceAllianceSelectionEmbed(alliances, interaction, lang, destAl
         currentPage: page,
         totalPages: totalPages,
         lang: lang,
-        contextData: [destAlliance.id]
+        contextData: resolvedGameType ? [destAlliance.id, resolvedGameType] : [destAlliance.id]
     });
 
 
@@ -236,7 +311,7 @@ function createSourceAllianceSelectionEmbed(alliances, interaction, lang, destAl
         }));
 
         const allianceSelect = new StringSelectMenuBuilder()
-            .setCustomId(`move_players_source_select_${destAlliance.id}_${interaction.user.id}_${page}`)
+            .setCustomId(`move_players_source_select_${destAlliance.id}_${interaction.user.id}_${page}${resolvedGameType ? `_${resolvedGameType}` : ''}`)
             .setPlaceholder(lang.players.movePlayer.selectMenu.sourceAlliance.placeholder)
             .addOptions(options);
 
@@ -281,9 +356,10 @@ function createSourceAllianceSelectionEmbed(alliances, interaction, lang, destAl
  * @param {number} [page=0] - Current page number (default 0)
  * @returns {Object} Components
  */
-function createTargetAllianceSelectionContainer(alliances, interaction, lang, playerCountMap, page = 0) {
+function createTargetAllianceSelectionContainer(alliances, interaction, lang, playerCountMap, page = 0, gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, null);
     const itemsPerPage = 24;
-    const totalPages = Math.ceil(alliances.length / itemsPerPage);
+    const totalPages = Math.max(1, Math.ceil(alliances.length / itemsPerPage));
     const startIndex = page * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     const currentPageAlliances = alliances.slice(startIndex, endIndex);
@@ -298,7 +374,7 @@ function createTargetAllianceSelectionContainer(alliances, interaction, lang, pl
     }));
 
     const allianceSelect = new StringSelectMenuBuilder()
-        .setCustomId(`move_players_target_select_${interaction.user.id}_${page}`)
+        .setCustomId(`move_players_target_select_${interaction.user.id}_${page}${resolvedGameType ? `_${resolvedGameType}` : ''}`)
         .setPlaceholder(lang.players.movePlayer.selectMenu.destinationAlliance.placeholder)
         .addOptions(options);
 
@@ -310,7 +386,8 @@ function createTargetAllianceSelectionContainer(alliances, interaction, lang, pl
         userId: interaction.user.id,
         currentPage: page,
         totalPages: totalPages,
-        lang: lang
+        lang: lang,
+        contextData: resolvedGameType ? [resolvedGameType] : []
     });
     if (paginationRow) {
         actionRows.push(paginationRow);
@@ -351,18 +428,20 @@ function createTargetAllianceSelectionContainer(alliances, interaction, lang, pl
  * @param {number} [totalMovedCount=0] - Cumulative count of moved players in this session
  * @returns {Object} Components
  */
-function createPlayerSelectionEmbed(players, lang, sourceAlliance, destAlliance, interaction, sourceId, destId, page = 0, additionalContent = '', totalMovedCount = 0) {
+function createPlayerSelectionEmbed(players, lang, sourceAlliance, destAlliance, interaction, sourceId, destId, page = 0, additionalContent = '', totalMovedCount = 0, gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, sourceAlliance?.game_type || destAlliance?.game_type || null);
     const itemsPerPage = 24;
-    const totalPages = Math.ceil(players.length / itemsPerPage);
+    const totalPages = Math.max(1, Math.ceil(players.length / itemsPerPage));
     const startIndex = page * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     const currentPagePlayers = players.slice(startIndex, endIndex);
+    const settlementName = getSettlementName(resolvedGameType, lang);
 
     const actionRows = [];
 
     // Move by ID button (always present)
     const moveByIdButton = new ButtonBuilder()
-        .setCustomId(`move_players_add_ids_${interaction.user.id}_${sourceId}_${destId}`)
+        .setCustomId(`move_players_add_ids_${interaction.user.id}_${sourceId}_${destId}${resolvedGameType ? `_${resolvedGameType}` : ''}`)
         .setLabel(lang.players.movePlayer.buttons.inputPlayerId)
         .setStyle(ButtonStyle.Secondary)
         .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1021'))
@@ -376,7 +455,7 @@ function createPlayerSelectionEmbed(players, lang, sourceAlliance, destAlliance,
         currentPage: page,
         totalPages: totalPages,
         lang: lang,
-        contextData: [sourceId, destId, totalMovedCount]
+        contextData: resolvedGameType ? [sourceId, destId, totalMovedCount, resolvedGameType] : [sourceId, destId, totalMovedCount]
     });
 
     if (paginationRow) {
@@ -388,6 +467,8 @@ function createPlayerSelectionEmbed(players, lang, sourceAlliance, destAlliance,
         actionRows.push(new ActionRowBuilder().addComponents(moveByIdButton));
     }
 
+    const defaultSettlementName = getSettlementName('wos', lang);
+
     // Second row: Select menu (if there are players)
     if (currentPagePlayers.length > 0) {
         const options = currentPagePlayers.map(player => ({
@@ -395,13 +476,15 @@ function createPlayerSelectionEmbed(players, lang, sourceAlliance, destAlliance,
             value: player.fid.toString(),
             description: lang.players.movePlayer.selectMenu.playerSelection.description
                 .replace('{id}', player.fid)
-                .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang))
+                .replace('Furnace', settlementName)
+                .replace(defaultSettlementName, settlementName)
+                .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang, resolvedGameType))
                 .replace('{state}', player.state || 'Unknown'),
             emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1026')
         }));
 
         const playerSelect = new StringSelectMenuBuilder()
-            .setCustomId(`move_players_player_select_${interaction.user.id}_${sourceId}_${destId}_${page}_${totalMovedCount}`)
+            .setCustomId(`move_players_player_select_${interaction.user.id}_${sourceId}_${destId}_${page}_${totalMovedCount}${resolvedGameType ? `_${resolvedGameType}` : ''}`)
             .setPlaceholder(lang.players.movePlayer.selectMenu.playerSelection.placeholder)
             .setMinValues(1)
             .setMaxValues(Math.min(options.length, 25))
@@ -457,6 +540,63 @@ async function handleMovePlayersPlayerPagination(interaction) {
     await handleMovePlayersPagination(interaction, 'player');
 }
 
+async function handleMovePlayersGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_move_players_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const selectedGameType = normalizeGameType(interaction.values[0], null);
+        if (!selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.movePlayer.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const allAlliances = getMovePlayerAlliances(adminData, selectedGameType);
+        if (allAlliances.length === 0) {
+            return await interaction.reply({
+                content: lang.players.movePlayer.errors.noAssignedAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        if (allAlliances.length < 2) {
+            return await interaction.reply({
+                content: lang.players.movePlayer.errors.insufficientAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        const playerCountMap = buildPlayerCountMap(allAlliances);
+        const { components } = createTargetAllianceSelectionContainer(
+            allAlliances,
+            interaction,
+            lang,
+            playerCountMap,
+            0,
+            selectedGameType
+        );
+
+        await interaction.update({
+            components,
+            flags: MessageFlags.IsComponentsV2
+        });
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleMovePlayersGameSelection');
+    }
+}
+
 /**
  * Handles source alliance selection (Step 2 → Step 3)
  * @param {import('discord.js').StringSelectMenuInteraction} interaction 
@@ -467,22 +607,23 @@ async function handleMovePlayersSourceSelection(interaction) {
         const customIdParts = interaction.customId.split('_');
         const destAllianceId = parseInt(customIdParts[4]); // move_players_source_select_destId_userId_page
         const expectedUserId = customIdParts[5];
+        const selectedGameType = normalizeGameType(customIdParts[7] || getDefaultGameType());
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const sourceAllianceId = parseInt(interaction.values[0]);
-        const sourceAlliance = allianceQueries.getAllianceById(sourceAllianceId);
-        const destAlliance = allianceQueries.getAllianceById(destAllianceId);
+        const sourceAlliance = allianceQueries.getAllianceByIdAny(sourceAllianceId);
+        const destAlliance = allianceQueries.getAllianceByIdAny(destAllianceId);
 
-        if (!sourceAlliance || !destAlliance) {
+        if (!sourceAlliance || !destAlliance || sourceAlliance.game_type !== selectedGameType || destAlliance.game_type !== selectedGameType) {
             return await interaction.update({
-                content: lang.common.error,
+                content: lang.players.movePlayer.errors.invalidGameType,
                 embeds: [],
                 components: []
             });
         }
 
-        const players = playerQueries.getPlayersByAllianceId(sourceAllianceId);
+        const players = playerQueries.getPlayersByAllianceId(sourceAllianceId, sourceAlliance.game_type);
 
         if (players.length === 0) {
             return await interaction.update({
@@ -501,7 +642,9 @@ async function handleMovePlayersSourceSelection(interaction) {
             sourceAllianceId,
             destAllianceId,
             0, // page
-            '' // additionalContent
+            '', // additionalContent
+            0,
+            selectedGameType
         );
 
         await interaction.update({
@@ -523,32 +666,38 @@ async function handleMovePlayersTargetSelection(interaction) {
     try {
         const customIdParts = interaction.customId.split('_');
         const expectedUserId = customIdParts[4]; // move_players_target_select_userId_page
+        const selectedGameType = normalizeGameType(customIdParts[6] || getDefaultGameType());
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const destAllianceId = parseInt(interaction.values[0]);
-        const destAlliance = allianceQueries.getAllianceById(destAllianceId);
+        const destAlliance = allianceQueries.getAllianceByIdAny(destAllianceId);
 
-        if (!destAlliance) {
+        if (!destAlliance || destAlliance.game_type !== selectedGameType) {
             return await interaction.reply({
-                content: lang.common.error,
+                content: lang.players.movePlayer.errors.invalidGameType,
                 ephemeral: true
             });
         }
 
         // Source alliances: all accessible alliances with members, excluding the target
-        const allAlliances = getAlliancesForUser(adminData);
-        const allianceIds = allAlliances.map(a => a.id);
-        const playerCounts = playerQueries.getPlayerCountsByAllianceIds(allianceIds);
-        const playerCountMap = {};
-        playerCounts.forEach(row => { playerCountMap[row.alliance_id] = row.player_count; });
+        const allAlliances = getMovePlayerAlliances(adminData, selectedGameType);
+        const playerCountMap = buildPlayerCountMap(allAlliances);
 
         const sourceAlliances = allAlliances.filter(alliance => {
             if (alliance.id === destAllianceId) return false;
             return (playerCountMap[alliance.id] || 0) > 0;
         });
 
-        const { components } = createSourceAllianceSelectionEmbed(sourceAlliances, interaction, lang, destAlliance, playerCountMap);
+        const { components } = createSourceAllianceSelectionEmbed(
+            sourceAlliances,
+            interaction,
+            lang,
+            destAlliance,
+            playerCountMap,
+            0,
+            selectedGameType
+        );
 
         await interaction.update({
             components: components,
@@ -573,18 +722,25 @@ async function handleMovePlayersPlayerSelection(interaction) {
         const sourceAllianceId = parseInt(customIdParts[5]);
         const destAllianceId = parseInt(customIdParts[6]);
         const currentTotalMoved = parseInt(customIdParts[8]) || 0; // Get cumulative count
+        const selectedGameType = normalizeGameType(customIdParts[9] || getDefaultGameType());
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const sourceAlliance = allianceQueries.getAllianceById(sourceAllianceId);
-        const destAlliance = allianceQueries.getAllianceById(destAllianceId);
+        const sourceAlliance = allianceQueries.getAllianceByIdAny(sourceAllianceId);
+        const destAlliance = allianceQueries.getAllianceByIdAny(destAllianceId);
+        if (!sourceAlliance || !destAlliance || sourceAlliance.game_type !== selectedGameType || destAlliance.game_type !== selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.movePlayer.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
         const selectedPlayerIds = interaction.values.map(id => parseInt(id));
 
         // Move the selected players
         let movedCount = 0;
         for (const playerId of selectedPlayerIds) {
             try {
-                playerQueries.updatePlayerAlliance(playerId, destAllianceId);
+                playerQueries.updatePlayerAlliance(playerId, destAllianceId, sourceAlliance.game_type);
                 movedCount++;
             } catch (error) {
                 await handleError(interaction, null, error, 'handleMovePlayersPlayerSelection_movePlayer', false);
@@ -595,7 +751,7 @@ async function handleMovePlayersPlayerSelection(interaction) {
         const newTotalMoved = currentTotalMoved + movedCount;
 
         // Update the embed to show success and refresh player list
-        const updatedPlayers = playerQueries.getPlayersByAllianceId(sourceAllianceId);
+        const updatedPlayers = playerQueries.getPlayersByAllianceId(sourceAllianceId, sourceAlliance.game_type);
 
         if (updatedPlayers.length === 0) {
             // All players moved - show success message using Components v2
@@ -634,7 +790,8 @@ async function handleMovePlayersPlayerSelection(interaction) {
                 destAllianceId,
                 0, // Reset to first page
                 successContent,
-                newTotalMoved // Pass cumulative count
+                newTotalMoved, // Pass cumulative count
+                selectedGameType
             );
 
             await interaction.update({
@@ -660,15 +817,22 @@ async function handleMovePlayersAddIds(interaction) {
         const expectedUserId = customIdParts[4]; // move_players_add_ids_userId_sourceId_destId
         const sourceAllianceId = parseInt(customIdParts[5]);
         const destAllianceId = parseInt(customIdParts[6]);
+        const selectedGameType = normalizeGameType(customIdParts[7] || getDefaultGameType());
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const sourceAlliance = allianceQueries.getAllianceById(sourceAllianceId);
-        const destAlliance = allianceQueries.getAllianceById(destAllianceId);
+        const sourceAlliance = allianceQueries.getAllianceByIdAny(sourceAllianceId);
+        const destAlliance = allianceQueries.getAllianceByIdAny(destAllianceId);
+        if (!destAlliance || destAlliance.game_type !== selectedGameType || (sourceAlliance && sourceAlliance.game_type !== selectedGameType)) {
+            return await interaction.reply({
+                content: lang.players.movePlayer.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
 
         // Create modal form
         const modal = new ModalBuilder()
-            .setCustomId(`move_players_ids_modal_${sourceAllianceId}_${destAllianceId}_${interaction.user.id}`)
+            .setCustomId(`move_players_ids_modal_${sourceAllianceId}_${destAllianceId}_${interaction.user.id}_${selectedGameType}`)
             .setTitle(lang.players.movePlayer.modals.title);
 
         const playerIdInput = new TextInputBuilder()
@@ -704,12 +868,19 @@ async function handleMovePlayersIdsModal(interaction) {
         const sourceAllianceId = parseInt(customIdParts[4]); // move_players_ids_modal_sourceId_destId_userId
         const destAllianceId = parseInt(customIdParts[5]);
         const expectedUserId = customIdParts[6];
+        const selectedGameType = normalizeGameType(customIdParts[7] || getDefaultGameType());
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
         const isAnySource = sourceAllianceId === 0;
-        const sourceAlliance = isAnySource ? null : allianceQueries.getAllianceById(sourceAllianceId);
-        const destAlliance = allianceQueries.getAllianceById(destAllianceId);
+        const sourceAlliance = isAnySource ? null : allianceQueries.getAllianceByIdAny(sourceAllianceId);
+        const destAlliance = allianceQueries.getAllianceByIdAny(destAllianceId);
+        if (!destAlliance || destAlliance.game_type !== selectedGameType || (sourceAlliance && sourceAlliance.game_type !== selectedGameType)) {
+            return await interaction.reply({
+                content: lang.players.movePlayer.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
 
         // Get and sanitize player IDs
         const rawPlayerIds = interaction.fields.getTextInputValue('player_ids');
@@ -729,7 +900,10 @@ async function handleMovePlayersIdsModal(interaction) {
 
         // Check each player
         for (const playerId of playerIds) {
-            const player = playerQueries.getPlayerByFid(playerId);
+            const matchingPlayers = playerQueries.getPlayersByFidAny(playerId);
+            const player = isAnySource
+                ? matchingPlayers.find(p => p.game_type === destAlliance.game_type) || matchingPlayers[0]
+                : matchingPlayers.find(p => p.game_type === sourceAlliance?.game_type);
 
             if (!player) {
                 notFoundPlayers.push(playerId);
@@ -739,7 +913,7 @@ async function handleMovePlayersIdsModal(interaction) {
             if (isAnySource || player.alliance_id === sourceAllianceId) {
                 foundPlayers.push(player);
             } else {
-                const playerAlliance = allianceQueries.getAllianceById(player.alliance_id);
+                const playerAlliance = allianceQueries.getAllianceById(player.alliance_id, player.game_type);
                 wrongAlliancePlayers.push({
                     player: player,
                     alliance: playerAlliance
@@ -751,7 +925,7 @@ async function handleMovePlayersIdsModal(interaction) {
         let movedCount = 0;
         for (const player of foundPlayers) {
             try {
-                playerQueries.updatePlayerAlliance(player.fid, destAllianceId);
+                playerQueries.updatePlayerAlliance(player.fid, destAllianceId, player.game_type);
                 movedCount++;
             } catch (error) {
                 await handleError(interaction, lang, error, 'handleMovePlayersIdsModal_movePlayer', false);
@@ -822,7 +996,7 @@ async function handleMovePlayersIdsModal(interaction) {
             const actionRow = new ActionRowBuilder()
                 .addComponents(
                     new ButtonBuilder()
-                        .setCustomId(`move_players_confirm_wrong_${sourceAllianceId}_${destAllianceId}_${interaction.user.id}`)
+                        .setCustomId(`move_players_confirm_wrong_${sourceAllianceId}_${destAllianceId}_${interaction.user.id}_${selectedGameType}`)
                         .setLabel(lang.players.movePlayer.buttons.confirm)
                         .setStyle(ButtonStyle.Danger)
                         .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1004')),
@@ -886,16 +1060,23 @@ async function handleMovePlayersConfirmWrong(interaction) {
         const sourceAllianceId = parseInt(customIdParts[4]); // move_players_confirm_wrong_sourceId_destId_userId
         const destAllianceId = parseInt(customIdParts[5]);
         const expectedUserId = customIdParts[6];
+        const selectedGameType = normalizeGameType(customIdParts[7] || getDefaultGameType());
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        const destAlliance = allianceQueries.getAllianceById(destAllianceId);
+        const destAlliance = allianceQueries.getAllianceByIdAny(destAllianceId);
+        if (!destAlliance || destAlliance.game_type !== selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.movePlayer.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
         const wrongAlliancePlayers = tempMoveData.get(interaction.user.id) || [];
 
         let movedCount = 0;
         for (const item of wrongAlliancePlayers) {
             try {
-                playerQueries.updatePlayerAlliance(item.player.fid, destAllianceId);
+                playerQueries.updatePlayerAlliance(item.player.fid, destAllianceId, item.player.game_type);
                 movedCount++;
             } catch (error) {
                 await handleError(interaction, lang, error, 'handleMovePlayersConfirmWrong_movePlayer', false);
@@ -1053,6 +1234,7 @@ const tempMoveData = new Map();
 module.exports = {
     createMovePlayersButton,
     handleMovePlayersButton,
+    handleMovePlayersGameSelection,
     handleMovePlayersTargetPagination,
     handleMovePlayersSourcePagination,
     handleMovePlayersPlayerPagination,

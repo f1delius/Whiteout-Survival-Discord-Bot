@@ -1,9 +1,12 @@
 const { EmbedBuilder } = require('discord.js');
 const { playerQueries, allianceQueries } = require('../utility/database');
 const { fetchPlayerData } = require('../utility/apiClient');
-const { getFurnaceReadable } = require('./furnaceReadable');
+const { getFurnaceReadable, getSettlementLevelLabel } = require('./furnaceReadable');
 const { getGlobalEmojiMap, replaceEmojiPlaceholders } = require('../utility/emojis');
 const { checkFeatureAccess } = require('../utility/checkAccess');
+const { getGameProfile, normalizeGameType } = require('../utility/gameProfiles');
+const { getDefaultGameType, isGameEnabled, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { getUserInfo, getAlliancesForUser } = require('../utility/commonFunctions');
 
 /**
  * Computes Levenshtein distance between two strings (case-insensitive)
@@ -44,7 +47,19 @@ async function handleInspectAutocomplete(interaction) {
         return interaction.respond([]);
     }
 
-    const allPlayers = playerQueries.getAllPlayers();
+    const selectedGameType = normalizeGameType(interaction.options.getString('game'), null);
+    const defaultGameType = getDefaultGameType();
+    const allPlayers = playerQueries.getAllPlayers().filter((player) => {
+        if (selectedGameType) {
+            return player.game_type === selectedGameType;
+        }
+
+        if (!isMultiGameModeEnabled()) {
+            return player.game_type === defaultGameType;
+        }
+
+        return true;
+    });
     const query = focusedValue.toLowerCase();
 
     // Score each player: exact/prefix matches get priority, then fuzzy
@@ -88,8 +103,10 @@ async function handleInspectAutocomplete(interaction) {
     scored.sort((a, b) => a.score - b.score || (a.player.nickname || '').localeCompare(b.player.nickname || ''));
 
     // Discord allows max 25 autocomplete results
+    const includeGameLabel = isMultiGameModeEnabled() && !selectedGameType;
     const results = scored.slice(0, 25).map(({ player }) => {
-        const name = `${player.nickname || 'Unknown'} (${player.fid}) - ${getFurnaceReadable(player.furnace_level)}`;
+        const gameLabel = includeGameLabel ? ` [${getGameProfile(player.game_type).shortLabel}]` : '';
+        const name = `${player.nickname || 'Unknown'}${gameLabel} (${player.fid}) - ${getFurnaceReadable(player.furnace_level, null, player.game_type)}`;
         return {
             name: name.substring(0, 100),
             value: String(player.fid)
@@ -106,15 +123,18 @@ async function handleInspectAutocomplete(interaction) {
  * @param {string|null} allianceName - Alliance name if player exists in DB
  * @returns {EmbedBuilder}
  */
-function buildPlayerInfoEmbed(apiData, fid, allianceName = null) {
+function buildPlayerInfoEmbed(apiData, fid, allianceName = null, gameType = 'wos') {
     const emojiMap = getGlobalEmojiMap();
+    const profile = getGameProfile(gameType);
     const title = replaceEmojiPlaceholders('{emoji.1026} Player Info', emojiMap);
     const furnaceLevel = apiData.stove_lv ?? apiData.furnace_lv ?? 0;
+    const levelLabel = getSettlementLevelLabel(gameType);
 
     const lines = [
         `- ${apiData.nickname || 'Unknown'}`,
         `  - ID: ${fid}`,
-        `  - Furnace Level: ${getFurnaceReadable(furnaceLevel)}`
+        `  - Game: ${profile.displayName}`,
+        `  - ${levelLabel}: ${getFurnaceReadable(furnaceLevel, null, gameType)}`
     ];
 
     if (allianceName) {
@@ -146,6 +166,7 @@ async function handleInspectCommand(interaction) {
     }
 
     const playerInput = interaction.options.getString('player');
+    const requestedGameType = normalizeGameType(interaction.options.getString('game'), null);
 
     const playerId = parseInt(playerInput);
     if (isNaN(playerId)) {
@@ -155,12 +176,48 @@ async function handleInspectCommand(interaction) {
         });
     }
 
+    if (requestedGameType && !isGameEnabled(requestedGameType)) {
+        return interaction.reply({
+            content: `The ${getGameProfile(requestedGameType).displayName} profile is not enabled in this bot run.`,
+            ephemeral: true
+        });
+    }
+
+    const matchingPlayers = playerQueries.getPlayersByFidAny(playerId);
+    let resolvedGameType = requestedGameType;
+    if (!resolvedGameType) {
+        if (matchingPlayers.length === 1) {
+            resolvedGameType = matchingPlayers[0].game_type;
+        } else if (!isMultiGameModeEnabled()) {
+            resolvedGameType = getDefaultGameType();
+        } else if (matchingPlayers.length > 1) {
+            return interaction.reply({
+                content: 'This player ID exists in more than one game. Please run `/inspect` again and choose the `game` option.',
+                ephemeral: true
+            });
+        } else {
+            return interaction.reply({
+                content: 'Please choose a game with `/inspect` when running in both mode.',
+                ephemeral: true
+            });
+        }
+    }
+
     // Check DB for alliance info
-    const dbPlayer = playerQueries.getPlayer(playerId);
+    const dbPlayer = matchingPlayers.find((player) => player.game_type === resolvedGameType) || null;
+    const { adminData } = getUserInfo(interaction.user.id);
     let allianceName = null;
     if (dbPlayer?.alliance_id) {
-        const alliance = allianceQueries.getAllianceById(dbPlayer.alliance_id);
-        if (alliance) allianceName = alliance.name;
+        const alliance = allianceQueries.getAllianceById(dbPlayer.alliance_id, dbPlayer.game_type);
+        if (alliance) {
+            const accessibleAllianceIds = new Set(
+                getAlliancesForUser(adminData).map((entry) => entry.id)
+            );
+
+            if (accessibleAllianceIds.has(alliance.id)) {
+                allianceName = alliance.name;
+            }
+        }
     }
 
     // Reply with "fetching" embed first to prevent interaction timeout
@@ -174,7 +231,10 @@ async function handleInspectCommand(interaction) {
     await interaction.reply({ embeds: [fetchingEmbed], ephemeral: true });
 
     try {
-        const apiData = await fetchPlayerData(playerId, { returnErrorObject: true });
+        const apiData = await fetchPlayerData(playerId, {
+            returnErrorObject: true,
+            gameType: resolvedGameType
+        });
 
         if (!apiData || apiData.error || apiData.playerNotExist) {
             const errorEmbed = new EmbedBuilder()
@@ -186,7 +246,7 @@ async function handleInspectCommand(interaction) {
             return interaction.editReply({ embeds: [errorEmbed] });
         }
 
-        const embed = buildPlayerInfoEmbed(apiData, playerId, allianceName);
+        const embed = buildPlayerInfoEmbed(apiData, playerId, allianceName, resolvedGameType);
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {
         const errorEmbed = new EmbedBuilder()

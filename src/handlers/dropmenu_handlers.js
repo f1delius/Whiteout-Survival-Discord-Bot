@@ -16,6 +16,7 @@ const redeemGift = require('../functions/GiftCode/redeemGift');
 const removeGift = require('../functions/GiftCode/removeGift');
 const autoRedeem = require('../functions/GiftCode/autoRedeem');
 const giftCodeChannel = require('../functions/GiftCode/giftCodeChannel');
+const viewGift = require('../functions/GiftCode/viewGift');
 const triggerRefresh = require('../functions/Alliance/triggerRefresh');
 const assignAlliance = require('../functions/Alliance/assignAlliance');
 const deleteNotification = require('../functions/Notification/deleteNotification');
@@ -45,6 +46,7 @@ const dropdownHandlers = [
 
     // Database migration selection
     { type: 'string', pattern: /^db_migration_select_/, fn: dbMigration.handleDBMigrationSelect },
+    { type: 'string', pattern: /^db_migration_game_/, fn: dbMigration.handleDBMigrationGameSelect },
 
     // Admin selections
     { type: 'string', pattern: /^select_admin_remove_/, fn: admin.handleRemoveAdminSelection },
@@ -53,9 +55,13 @@ const dropdownHandlers = [
     { type: 'string', pattern: /^select_permissions_/, fn: admin.handlePermissionSelection },
 
     // Alliance selections
+    { type: 'string', pattern: /^select_edit_alliance_game_/, fn: editAlliance.handleEditAllianceGameSelection },
     { type: 'string', pattern: /^select_alliance_edit_/, fn: editAlliance.handleEditAllianceSelection },
+    { type: 'string', pattern: /^select_delete_alliance_game_/, fn: deleteAlliance.handleDeleteAllianceGameSelection },
     { type: 'string', pattern: /^select_alliance_delete_/, fn: deleteAlliance.handleDeleteAllianceSelection },
+    { type: 'string', pattern: /^select_edit_priority_game_/, fn: editPriority.handleEditPriorityGameSelection },
     { type: 'string', pattern: /^select_alliance_priority_/, fn: editPriority.handlePriorityAllianceSelection },
+    { type: 'string', pattern: /^select_view_alliance_game_/, fn: viewAlliances.handleViewAllianceGameSelection },
     { type: 'string', pattern: /^select_view_alliance_/, fn: viewAlliances.handleViewAllianceSelection },
 
     // Emoji theme selections
@@ -64,46 +70,61 @@ const dropdownHandlers = [
     { type: 'string', pattern: /^emoji_view_select_/, fn: emojisView.handleEmojiViewSelection },
     { type: 'string', pattern: /^emoji_export_select_/, fn: emojisExport.handleEmojiExportSelection },
     { type: 'string', pattern: /^emoji_delete_select_/, fn: emojisDelete.handleEmojiDeleteSelection },
+    { type: 'string', pattern: /^select_add_player_game_/, fn: addPlayer.handleAddPlayerGameSelection },
     { type: 'string', pattern: /^alliance_select_add_player_/, fn: addPlayer.handleAllianceSelection },
+    { type: 'string', pattern: /^select_id_channel_game_/, fn: idChannel.handleIdChannelGameSelection },
     { type: 'string', pattern: /^id_channel_msg_select_/, fn: idChannel.handleIdChannelMessageAllianceSelect },
     { type: 'string', pattern: /^id_channel_alliance_select_/, fn: idChannel.handleIdChannelAllianceSelection },
     { type: 'string', pattern: /^id_channel_remove_select_/, fn: idChannel.handleIdChannelRemoveSelect },
     { type: 'string', pattern: /^id_channel_autoclean_select_/, fn: idChannel.handleAutoCleanSelect },
 
     // Move players selections
+    { type: 'string', pattern: /^select_move_players_game_/, fn: movePlayers.handleMovePlayersGameSelection },
     { type: 'string', pattern: /^move_players_target_select_/, fn: movePlayers.handleMovePlayersTargetSelection },
     { type: 'string', pattern: /^move_players_source_select_/, fn: movePlayers.handleMovePlayersSourceSelection },
     { type: 'string', pattern: /^move_players_player_select_/, fn: movePlayers.handleMovePlayersPlayerSelection },
 
     // Remove players selections
+    { type: 'string', pattern: /^select_remove_players_game_/, fn: removePlayers.handleRemovePlayersGameSelection },
     { type: 'string', pattern: /^remove_players_alliance_select_/, fn: removePlayers.handleRemovePlayersAllianceSelection },
     { type: 'string', pattern: /^remove_players_player_select_/, fn: removePlayers.handleRemovePlayersPlayerSelection },
 
     // View players selections
+    { type: 'string', pattern: /^select_view_players_game_/, fn: viewPlayers.handleViewPlayersGameSelection },
     { type: 'string', pattern: /^view_players_alliance_select_/, fn: viewPlayers.handleViewPlayersAllianceSelection },
 
     // Export players selections
+    { type: 'string', pattern: /^select_export_game_/, fn: exportPlayers.handleExportGameSelection },
     { type: 'string', pattern: /^export_state_select_/, fn: exportPlayers.handleStateSelection },
     { type: 'string', pattern: /^export_alliance_select_/, fn: exportPlayers.handleAllianceSelection },
     { type: 'string', pattern: /^export_furnace_select_/, fn: exportPlayers.handleFurnaceSelection },
 
     // Player history selections
+    { type: 'string', pattern: /^select_history_game_/, fn: history.handleHistoryGameSelection },
     { type: 'string', pattern: /^history_alliance_/, fn: history.handleHistoryAllianceSelection },
 
     // Manual redeem selections
+    { type: 'string', pattern: /^select_manual_redeem_game_/, fn: redeemGift.handleManualRedeemGameSelection },
     { type: 'string', pattern: /^manual_redeem_alliance_select_/, fn: redeemGift.handleAllianceSelection },
     { type: 'string', pattern: /^manual_redeem_code_select_/, fn: redeemGift.handleGiftCodeSelection },
 
+    // View gift code selections
+    { type: 'string', pattern: /^select_view_gift_game_/, fn: viewGift.handleViewGiftGameSelection },
+
     // Remove gift selections
+    { type: 'string', pattern: /^select_remove_gift_game_/, fn: removeGift.handleRemoveGiftGameSelection },
     { type: 'string', pattern: /^remove_gift_select_/, fn: removeGift.handleRemoveGiftSelect },
 
     // Toggle auto-redeem selections
+    { type: 'string', pattern: /^select_toggle_auto_redeem_game_/, fn: autoRedeem.handleToggleAutoRedeemGameSelection },
     { type: 'string', pattern: /^toggle_auto_redeem_select_/, fn: autoRedeem.handleToggleAutoRedeemSelect },
 
     // Gift code channel selections
+    { type: 'string', pattern: /^select_gift_code_channel_game_/, fn: giftCodeChannel.handleGiftCodeChannelGameSelection },
     { type: 'string', pattern: /^gift_code_channel_remove_select_/, fn: giftCodeChannel.handleGiftCodeChannelRemoveSelect },
 
     // Trigger refresh selections
+    { type: 'string', pattern: /^select_trigger_refresh_game_/, fn: triggerRefresh.handleTriggerRefreshGameSelection },
     { type: 'string', pattern: /^select_trigger_refresh_/, fn: triggerRefresh.handleTriggerRefreshSelection },
 
     // Assign alliance selections

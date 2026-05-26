@@ -5,7 +5,7 @@ const languages = require('../../i18n');
 const { handleError, getUserInfo } = require('../utility/commonFunctions');
 const { getComponentEmoji, getGlobalEmojiMap } = require('../utility/emojis');
 const { API_CONFIG } = require('../utility/apiConfig');
-const { fetchPlayerData: fetchPlayerFromAPIShared, playerApiManager } = require('../utility/apiClient');
+const { fetchPlayerData: fetchPlayerFromAPIShared, getPlayerApiManager } = require('../utility/apiClient');
 
 /**
  * Player data fetching and processing
@@ -13,6 +13,10 @@ const { fetchPlayerData: fetchPlayerFromAPIShared, playerApiManager } = require(
 class PlayerDataProcessor {
     constructor() {
         this.processing = new Map(); // Track processing states
+    }
+
+    resolveProcessGameType(processData, alliance = null) {
+        return processData?.details?.game_type || alliance?.game_type || 'wos';
     }
 
     /**
@@ -28,7 +32,7 @@ class PlayerDataProcessor {
         }
 
         // Get alliance data
-        const alliance = allianceQueries.getAllianceById(processData.target);
+        const alliance = allianceQueries.getAllianceByIdAny(processData.target);
         if (!alliance) {
             throw new Error(`Alliance ${processData.target} not found`);
         }
@@ -157,12 +161,13 @@ class PlayerDataProcessor {
     async filterExistingPlayers(processId, processData) {
         try {
             const playerIds = processData.progress.pending;
+            const gameType = this.resolveProcessGameType(processData);
             const existingPlayers = [];
             const newPlayers = [];
 
             // Check each player ID against database
             for (const playerId of playerIds) {
-                const existingPlayer = playerQueries.getPlayer(playerId);
+                const existingPlayer = playerQueries.getPlayer(playerId, gameType);
                 if (existingPlayer) {
                     existingPlayers.push(playerId);
                 } else {
@@ -206,6 +211,8 @@ class PlayerDataProcessor {
         try {
             let currentProgress = await getProcessById(processId);
             const processingState = this.processing.get(processId);
+            const gameType = this.resolveProcessGameType(processData, alliance);
+            const playerApiManager = getPlayerApiManager(gameType);
 
             // First, check for players that are already in the database
             const pendingPlayers = [...currentProgress.progress.pending];
@@ -213,7 +220,7 @@ class PlayerDataProcessor {
 
 
             for (const playerId of pendingPlayers) {
-                const existingPlayer = playerQueries.getPlayer(playerId);
+                const existingPlayer = playerQueries.getPlayer(playerId, gameType);
                 if (existingPlayer) {
                     // Player already exists, move to existing
                     await this.movePlayerToStatus(processId, playerId, 'pending', 'existing');
@@ -266,7 +273,7 @@ class PlayerDataProcessor {
                     while (!success) {
                         try {
                             // Double check if player was added by another process
-                            const existingPlayer = playerQueries.getPlayer(playerId);
+                            const existingPlayer = playerQueries.getPlayer(playerId, gameType);
                             if (existingPlayer) {
                                 // Player was added while we were processing
                                 await this.movePlayerToStatus(processId, playerId, 'pending', 'existing');
@@ -277,11 +284,11 @@ class PlayerDataProcessor {
                             }
 
                             // Fetch player data from API
-                            const playerData = await this.fetchPlayerFromAPI(playerId);
+                            const playerData = await this.fetchPlayerFromAPI(playerId, gameType);
 
                             if (playerData) {
                                 // Add player to database
-                                await this.addPlayerToDatabase(playerId, playerData, alliance.id, processData.created_by);
+                                await this.addPlayerToDatabase(playerId, playerData, alliance.id, processData.created_by, gameType);
 
                                 // Move to done
                                 await this.movePlayerToStatus(processId, playerId, 'pending', 'done');
@@ -346,11 +353,12 @@ class PlayerDataProcessor {
      * @param {string} playerId - Player ID to fetch
      * @returns {Promise<Object|null>} Player data or null if failed
      */
-    async fetchPlayerFromAPI(playerId) {
+    async fetchPlayerFromAPI(playerId, gameType) {
         return fetchPlayerFromAPIShared(playerId, {
             onError: (error, context) => handleError(null, null, error, context, false),
             delay: (ms) => this.delay(ms),
-            returnErrorObject: false
+            returnErrorObject: false,
+            gameType
         });
     }
 
@@ -362,7 +370,7 @@ class PlayerDataProcessor {
      * @param {string} addedBy - Admin ID who added the player
      * @returns {Promise<void>}
      */
-    async addPlayerToDatabase(playerId, playerData, allianceId, addedBy) {
+    async addPlayerToDatabase(playerId, playerData, allianceId, addedBy, gameType) {
         try {
             playerQueries.addPlayer(
                 playerId,                                   // fid
@@ -372,7 +380,8 @@ class PlayerDataProcessor {
                 playerData.kid || 0,                        // state - should be kid from API response
                 playerData.avatar_image || '',              // image_url
                 allianceId,                                 // alliance_id
-                String(addedBy)                             // added_by - convert to string
+                String(addedBy),                            // added_by - convert to string
+                gameType
             );
 
         } catch (error) {
@@ -533,7 +542,7 @@ class PlayerDataProcessor {
     async sendIdChannelResultEmbed(processId, processData, finalProgress, alliance, lang) {
         try {
             const { client } = require('../../index');
-            const { getFurnaceReadable } = require('./furnaceReadable');
+const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
 
             // Fetch the ID channel and original message
             const channel = await client.channels.fetch(processData.details.id_channel_channel_id);
@@ -549,26 +558,28 @@ class PlayerDataProcessor {
 
             // Get player details for added and existing players
             for (const playerId of (finalProgress.progress.done || [])) {
-                const player = playerQueries.getPlayer(playerId);
+                const player = playerQueries.getPlayer(playerId, alliance.game_type);
                 if (player) {
                     added.push({
                         fid: playerId,
                         nickname: player.nickname,
                         furnace_level: player.furnace_level,
                         state: player.state,
-                        image_url: player.image_url
+                        image_url: player.image_url,
+                        game_type: player.game_type || alliance.game_type
                     });
                 }
             }
 
             for (const playerId of (finalProgress.progress.existing || [])) {
-                const player = playerQueries.getPlayer(playerId);
+                const player = playerQueries.getPlayer(playerId, alliance.game_type);
                 if (player) {
                     existing.push({
                         fid: playerId,
                         nickname: player.nickname,
                         furnace_level: player.furnace_level,
-                        image_url: player.image_url
+                        image_url: player.image_url,
+                        game_type: player.game_type || alliance.game_type
                     });
                 }
             }
@@ -604,7 +615,17 @@ class PlayerDataProcessor {
             if (added.length > 0) {
                 const displayedAdded = added.slice(0, 10);
                 const addedList = displayedAdded
-                    .map(p => lang.players.addPlayer.content.addedField.value.replace('{nickname}', p.nickname).replace('{id}', p.fid).replace('{furnace}', getFurnaceReadable(p.furnace_level, lang)).replace('{state}', p.state))
+                    .map(p => {
+                        const settlementName = getSettlementName(p.game_type, lang);
+                        const defaultSettlementName = getSettlementName('wos', lang);
+                        return lang.players.addPlayer.content.addedField.value
+                            .replace('furnace', settlementName)
+                            .replace(defaultSettlementName.toLowerCase(), settlementName)
+                            .replace('{nickname}', p.nickname)
+                            .replace('{id}', p.fid)
+                            .replace('{furnace}', getFurnaceReadable(p.furnace_level, lang, p.game_type))
+                            .replace('{state}', p.state);
+                    })
                     .join('\n');
 
                 let addedValue = addedList;
@@ -624,7 +645,17 @@ class PlayerDataProcessor {
             if (existing.length > 0) {
                 const displayedExisting = existing.slice(0, 10);
                 const existingList = displayedExisting
-                    .map(p => lang.players.addPlayer.content.alreadyExistField.value.replace('{nickname}', p.nickname).replace('{id}', p.fid).replace('{furnace}', getFurnaceReadable(p.furnace_level, lang)).replace('{state}', p.state))
+                    .map(p => {
+                        const settlementName = getSettlementName(p.game_type, lang);
+                        const defaultSettlementName = getSettlementName('wos', lang);
+                        return lang.players.addPlayer.content.alreadyExistField.value
+                            .replace('furnace', settlementName)
+                            .replace(defaultSettlementName.toLowerCase(), settlementName)
+                            .replace('{nickname}', p.nickname)
+                            .replace('{id}', p.fid)
+                            .replace('{furnace}', getFurnaceReadable(p.furnace_level, lang, p.game_type))
+                            .replace('{state}', p.state);
+                    })
                     .join('\n');
 
                 let existingValue = existingList;
@@ -840,7 +871,7 @@ async function handleViewFailedPlayersButton(interaction) {
         }
 
         // Get alliance data
-        const alliance = allianceQueries.getAllianceById(processData.target);
+        const alliance = allianceQueries.getAllianceByIdAny(processData.target);
         const allianceName = alliance ? alliance.name : 'Unknown Alliance';
 
         // Build embed

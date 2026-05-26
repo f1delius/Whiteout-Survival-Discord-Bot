@@ -1,6 +1,8 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const { getDefaultGameType } = require('./gameRuntime');
+const { normalizeGameType } = require('./gameProfiles');
 
 // Database path
 const dbDir = path.join(__dirname, '../../database');
@@ -19,6 +21,36 @@ db.pragma('foreign_keys = ON');
 
 // Enable WAL mode for better performance and concurrency
 db.pragma('journal_mode = WAL');
+
+function resolveGameType(gameType = getDefaultGameType()) {
+    return normalizeGameType(gameType || getDefaultGameType());
+}
+
+function tableExists(tableName) {
+    const result = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`).get(tableName);
+    return Boolean(result);
+}
+
+function restoreLegacyTable(baseName) {
+    const legacyName = `${baseName}_legacy`;
+    if (!tableExists(legacyName)) {
+        return;
+    }
+
+    if (tableExists(baseName)) {
+        db.exec(`DROP TABLE ${legacyName}`);
+        return;
+    }
+
+    db.pragma('foreign_keys = OFF');
+    db.exec(`ALTER TABLE ${legacyName} RENAME TO ${baseName}`);
+    db.pragma('foreign_keys = ON');
+}
+
+function getTableSql(tableName) {
+    const result = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`).get(tableName);
+    return result?.sql || '';
+}
 
 // Database schema definitions
 const schemas = {
@@ -44,27 +76,32 @@ const schemas = {
     alliance: `
         CREATE TABLE IF NOT EXISTS alliance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            priority INTEGER UNIQUE NOT NULL,
+            game_type TEXT NOT NULL DEFAULT 'wos',
+            priority INTEGER NOT NULL,
             name TEXT NOT NULL,
             guide_id TEXT,
             channel_id TEXT,
             interval TEXT,
             auto_redeem BOOLEAN,
-            created_by TEXT
+            created_by TEXT,
+            UNIQUE (game_type, priority)
         )
     `,
     id_channels: `
         CREATE TABLE IF NOT EXISTS id_channels (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_type TEXT NOT NULL DEFAULT 'wos',
             guide_id TEXT,
             alliance_id INTEGER NOT NULL REFERENCES alliance(id),
             channel_id TEXT NOT NULL,
-            linked_by TEXT
+            linked_by TEXT,
+            auto_clean INTEGER DEFAULT 0
         )
     `,
     gift_code_channels: `
         CREATE TABLE IF NOT EXISTS gift_code_channels (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_type TEXT NOT NULL DEFAULT 'wos',
             channel_id TEXT NOT NULL UNIQUE,
             linked_by TEXT,
             created_at TEXT NOT NULL
@@ -72,7 +109,8 @@ const schemas = {
     `,
     players: `
         CREATE TABLE IF NOT EXISTS players (
-            fid INTEGER PRIMARY KEY,
+            game_type TEXT NOT NULL DEFAULT 'wos',
+            fid INTEGER NOT NULL,
             user_id TEXT,
             nickname TEXT,
             furnace_level INTEGER,
@@ -82,42 +120,50 @@ const schemas = {
             added_by TEXT NOT NULL,
             is_rich BOOLEAN DEFAULT 0,
             vip_count INTEGER DEFAULT 0,
-            exist INTEGER DEFAULT 0
+            exist INTEGER DEFAULT 0,
+            PRIMARY KEY (game_type, fid)
         )
     `,
     furnace_changes: `
         CREATE TABLE IF NOT EXISTS furnace_changes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fid INTEGER NOT NULL REFERENCES players(fid),
+            game_type TEXT NOT NULL DEFAULT 'wos',
+            fid INTEGER NOT NULL,
             old_furnace_lv INTEGER,
             new_furnace_lv INTEGER,
-            change_date TEXT
+            change_date TEXT,
+            FOREIGN KEY (game_type, fid) REFERENCES players(game_type, fid)
         )
     `,
     nickname_changes: `
         CREATE TABLE IF NOT EXISTS nickname_changes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fid INTEGER NOT NULL REFERENCES players(fid),
+            game_type TEXT NOT NULL DEFAULT 'wos',
+            fid INTEGER NOT NULL,
             old_nickname TEXT,
             new_nickname TEXT,
-            change_date TEXT
+            change_date TEXT,
+            FOREIGN KEY (game_type, fid) REFERENCES players(game_type, fid)
         )
     `,
     gift_codes: `
         CREATE TABLE IF NOT EXISTS gift_codes (
-            gift_code TEXT PRIMARY KEY,
+            game_type TEXT NOT NULL DEFAULT 'wos',
+            gift_code TEXT NOT NULL,
             date TEXT,
             status TEXT,
             added_by TEXT,
             source TEXT,
             api_pushed BOOLEAN DEFAULT 0,
             last_validated TEXT,
-            is_vip BOOLEAN DEFAULT 0
+            is_vip BOOLEAN DEFAULT 0,
+            PRIMARY KEY (game_type, gift_code)
         )
     `,
     giftcode_usage: `
         CREATE TABLE IF NOT EXISTS giftcode_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_type TEXT NOT NULL DEFAULT 'wos',
             fid INTEGER NOT NULL,
             gift_code TEXT NOT NULL,
             status TEXT
@@ -201,11 +247,13 @@ const schemas = {
     `,
     test_ids: `
         CREATE TABLE IF NOT EXISTS test_ids (
-            id INTEGER PRIMARY KEY CHECK (id <= 2),
+            game_type TEXT NOT NULL DEFAULT 'wos',
+            id INTEGER NOT NULL CHECK (id <= 2),
             fid INTEGER NOT NULL,
             is_default BOOLEAN DEFAULT 0,
             set_by TEXT,
-            set_at TEXT
+            set_at TEXT,
+            PRIMARY KEY (game_type, id)
         )
     `,
     settings: `
@@ -260,6 +308,345 @@ try {
         db.exec(schema);
     });
 
+    restoreLegacyTable('alliance');
+    restoreLegacyTable('id_channels');
+    restoreLegacyTable('players');
+    restoreLegacyTable('furnace_changes');
+    restoreLegacyTable('nickname_changes');
+
+    db.pragma('foreign_keys = OFF');
+
+    try {
+        const allianceCols = db.prepare('PRAGMA table_info(alliance)').all();
+        const hasAllianceGameType = allianceCols.some(c => c.name === 'game_type');
+        if (!hasAllianceGameType) {
+            db.exec(`
+                ALTER TABLE alliance RENAME TO alliance_legacy;
+                CREATE TABLE alliance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    priority INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    guide_id TEXT,
+                    channel_id TEXT,
+                    interval TEXT,
+                    auto_redeem BOOLEAN,
+                    created_by TEXT,
+                    UNIQUE (game_type, priority)
+                );
+                INSERT INTO alliance (id, game_type, priority, name, guide_id, channel_id, interval, auto_redeem, created_by)
+                SELECT id, 'wos', priority, name, guide_id, channel_id, interval, auto_redeem, created_by
+                FROM alliance_legacy;
+                DROP TABLE alliance_legacy;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to migrate alliance to game-scoped schema', e);
+    }
+
+    try {
+        const idChannelCols = db.prepare('PRAGMA table_info(id_channels)').all();
+        const hasIdChannelGameType = idChannelCols.some(c => c.name === 'game_type');
+        const hasIdChannelAutoClean = idChannelCols.some(c => c.name === 'auto_clean');
+        if (!hasIdChannelGameType || !hasIdChannelAutoClean) {
+            const autoCleanSelect = hasIdChannelAutoClean ? 'auto_clean' : '0';
+            db.exec(`
+                ALTER TABLE id_channels RENAME TO id_channels_legacy;
+                CREATE TABLE id_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    guide_id TEXT,
+                    alliance_id INTEGER NOT NULL REFERENCES alliance(id),
+                    channel_id TEXT NOT NULL,
+                    linked_by TEXT,
+                    auto_clean INTEGER DEFAULT 0
+                );
+                INSERT INTO id_channels (id, game_type, guide_id, alliance_id, channel_id, linked_by, auto_clean)
+                SELECT id, 'wos', guide_id, alliance_id, channel_id, linked_by, ${autoCleanSelect}
+                FROM id_channels_legacy;
+                DROP TABLE id_channels_legacy;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to migrate id_channels to game-scoped schema', e);
+    }
+
+    try {
+        const playerCols = db.prepare('PRAGMA table_info(players)').all();
+        const hasPlayerGameType = playerCols.some(c => c.name === 'game_type');
+        const hasPlayerCompositePk = playerCols.filter(c => c.pk > 0).length > 1;
+        if (!hasPlayerGameType || !hasPlayerCompositePk) {
+            db.exec(`
+                ALTER TABLE players RENAME TO players_legacy;
+                CREATE TABLE players (
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    fid INTEGER NOT NULL,
+                    user_id TEXT,
+                    nickname TEXT,
+                    furnace_level INTEGER,
+                    state INTEGER,
+                    image_url TEXT,
+                    alliance_id INTEGER,
+                    added_by TEXT NOT NULL,
+                    is_rich BOOLEAN DEFAULT 0,
+                    vip_count INTEGER DEFAULT 0,
+                    exist INTEGER DEFAULT 0,
+                    PRIMARY KEY (game_type, fid)
+                );
+                INSERT INTO players (game_type, fid, user_id, nickname, furnace_level, state, image_url, alliance_id, added_by, is_rich, vip_count, exist)
+                SELECT 'wos', fid, user_id, nickname, furnace_level, state, image_url, alliance_id, added_by, is_rich, vip_count, exist
+                FROM players_legacy;
+                DROP TABLE players_legacy;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to migrate players to game-scoped schema', e);
+    }
+
+    try {
+        const furnaceCols = db.prepare('PRAGMA table_info(furnace_changes)').all();
+        const hasFurnaceGameType = furnaceCols.some(c => c.name === 'game_type');
+        if (!hasFurnaceGameType) {
+            db.exec(`
+                ALTER TABLE furnace_changes RENAME TO furnace_changes_legacy;
+                CREATE TABLE furnace_changes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    fid INTEGER NOT NULL,
+                    old_furnace_lv INTEGER,
+                    new_furnace_lv INTEGER,
+                    change_date TEXT,
+                    FOREIGN KEY (game_type, fid) REFERENCES players(game_type, fid)
+                );
+                INSERT INTO furnace_changes (id, game_type, fid, old_furnace_lv, new_furnace_lv, change_date)
+                SELECT id, 'wos', fid, old_furnace_lv, new_furnace_lv, change_date
+                FROM furnace_changes_legacy;
+                DROP TABLE furnace_changes_legacy;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to migrate furnace_changes to game-scoped schema', e);
+    }
+
+    try {
+        const nicknameCols = db.prepare('PRAGMA table_info(nickname_changes)').all();
+        const hasNicknameGameType = nicknameCols.some(c => c.name === 'game_type');
+        if (!hasNicknameGameType) {
+            db.exec(`
+                ALTER TABLE nickname_changes RENAME TO nickname_changes_legacy;
+                CREATE TABLE nickname_changes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    fid INTEGER NOT NULL,
+                    old_nickname TEXT,
+                    new_nickname TEXT,
+                    change_date TEXT,
+                    FOREIGN KEY (game_type, fid) REFERENCES players(game_type, fid)
+                );
+                INSERT INTO nickname_changes (id, game_type, fid, old_nickname, new_nickname, change_date)
+                SELECT id, 'wos', fid, old_nickname, new_nickname, change_date
+                FROM nickname_changes_legacy;
+                DROP TABLE nickname_changes_legacy;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to migrate nickname_changes to game-scoped schema', e);
+    }
+
+    try {
+        const giftCodeCols = db.prepare('PRAGMA table_info(gift_codes)').all();
+        const hasGiftCodeGameType = giftCodeCols.some(c => c.name === 'game_type');
+        const hasGiftCodeCompositePk = giftCodeCols.filter(c => c.pk > 0).length > 1;
+        if (!hasGiftCodeGameType || !hasGiftCodeCompositePk) {
+            db.exec(`
+                ALTER TABLE gift_codes RENAME TO gift_codes_legacy;
+                CREATE TABLE gift_codes (
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    gift_code TEXT NOT NULL,
+                    date TEXT,
+                    status TEXT,
+                    added_by TEXT,
+                    source TEXT,
+                    api_pushed BOOLEAN DEFAULT 0,
+                    last_validated TEXT,
+                    is_vip BOOLEAN DEFAULT 0,
+                    PRIMARY KEY (game_type, gift_code)
+                );
+                INSERT INTO gift_codes (game_type, gift_code, date, status, added_by, source, api_pushed, last_validated, is_vip)
+                SELECT 'wos', gift_code, date, status, added_by, source, api_pushed, last_validated, is_vip
+                FROM gift_codes_legacy;
+                DROP TABLE gift_codes_legacy;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to migrate gift_codes to game-scoped schema', e);
+    }
+
+    try {
+        const giftCodeChannelCols = db.prepare('PRAGMA table_info(gift_code_channels)').all();
+        const hasGiftCodeChannelGameType = giftCodeChannelCols.some(c => c.name === 'game_type');
+        if (!hasGiftCodeChannelGameType) {
+            db.exec(`
+                ALTER TABLE gift_code_channels RENAME TO gift_code_channels_legacy;
+                CREATE TABLE gift_code_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    channel_id TEXT NOT NULL UNIQUE,
+                    linked_by TEXT,
+                    created_at TEXT NOT NULL
+                );
+                INSERT INTO gift_code_channels (id, game_type, channel_id, linked_by, created_at)
+                SELECT id, 'wos', channel_id, linked_by, created_at
+                FROM gift_code_channels_legacy;
+                DROP TABLE gift_code_channels_legacy;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to migrate gift_code_channels to game-scoped schema', e);
+    }
+
+    try {
+        const usageCols = db.prepare('PRAGMA table_info(giftcode_usage)').all();
+        const hasUsageGameType = usageCols.some(c => c.name === 'game_type');
+        if (!hasUsageGameType) {
+            db.exec(`
+                ALTER TABLE giftcode_usage RENAME TO giftcode_usage_legacy;
+                CREATE TABLE giftcode_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    fid INTEGER NOT NULL,
+                    gift_code TEXT NOT NULL,
+                    status TEXT
+                );
+                INSERT INTO giftcode_usage (game_type, fid, gift_code, status)
+                SELECT 'wos', fid, gift_code, status
+                FROM giftcode_usage_legacy;
+                DROP TABLE giftcode_usage_legacy;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to migrate giftcode_usage to game-scoped schema', e);
+    }
+
+    try {
+        const testIdCols = db.prepare('PRAGMA table_info(test_ids)').all();
+        const hasTestIdGameType = testIdCols.some(c => c.name === 'game_type');
+        const hasTestIdCompositePk = testIdCols.filter(c => c.pk > 0).length > 1;
+        if (!hasTestIdGameType || !hasTestIdCompositePk) {
+            db.exec(`
+                ALTER TABLE test_ids RENAME TO test_ids_legacy;
+                CREATE TABLE test_ids (
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    id INTEGER NOT NULL CHECK (id <= 2),
+                    fid INTEGER NOT NULL,
+                    is_default BOOLEAN DEFAULT 0,
+                    set_by TEXT,
+                    set_at TEXT,
+                    PRIMARY KEY (game_type, id)
+                );
+                INSERT INTO test_ids (game_type, id, fid, is_default, set_by, set_at)
+                SELECT 'wos', id, fid, is_default, set_by, set_at
+                FROM test_ids_legacy;
+                DROP TABLE test_ids_legacy;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to migrate test_ids to game-scoped schema', e);
+    }
+
+    try {
+        const idChannelsSql = getTableSql('id_channels');
+        if (idChannelsSql.includes('alliance_legacy')) {
+            db.exec(`
+                ALTER TABLE id_channels RENAME TO id_channels_stale_fk;
+                CREATE TABLE id_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    guide_id TEXT,
+                    alliance_id INTEGER NOT NULL REFERENCES alliance(id),
+                    channel_id TEXT NOT NULL,
+                    linked_by TEXT,
+                    auto_clean INTEGER DEFAULT 0
+                );
+                INSERT INTO id_channels (id, game_type, guide_id, alliance_id, channel_id, linked_by, auto_clean)
+                SELECT id, game_type, guide_id, alliance_id, channel_id, linked_by, auto_clean
+                FROM id_channels_stale_fk;
+                DROP TABLE id_channels_stale_fk;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to repair id_channels foreign key reference', e);
+    }
+
+    try {
+        const allianceLogsSql = getTableSql('alliance_logs');
+        if (allianceLogsSql.includes('alliance_legacy')) {
+            db.exec(`
+                ALTER TABLE alliance_logs RENAME TO alliance_logs_stale_fk;
+                CREATE TABLE alliance_logs (
+                    alliance_id INTEGER PRIMARY KEY REFERENCES alliance(id),
+                    channel_id TEXT
+                );
+                INSERT INTO alliance_logs (alliance_id, channel_id)
+                SELECT alliance_id, channel_id
+                FROM alliance_logs_stale_fk;
+                DROP TABLE alliance_logs_stale_fk;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to repair alliance_logs foreign key reference', e);
+    }
+
+    try {
+        const furnaceSql = getTableSql('furnace_changes');
+        if (furnaceSql.includes('players_legacy')) {
+            db.exec(`
+                ALTER TABLE furnace_changes RENAME TO furnace_changes_stale_fk;
+                CREATE TABLE furnace_changes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    fid INTEGER NOT NULL,
+                    old_furnace_lv INTEGER,
+                    new_furnace_lv INTEGER,
+                    change_date TEXT,
+                    FOREIGN KEY (game_type, fid) REFERENCES players(game_type, fid)
+                );
+                INSERT INTO furnace_changes (id, game_type, fid, old_furnace_lv, new_furnace_lv, change_date)
+                SELECT id, game_type, fid, old_furnace_lv, new_furnace_lv, change_date
+                FROM furnace_changes_stale_fk;
+                DROP TABLE furnace_changes_stale_fk;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to repair furnace_changes foreign key reference', e);
+    }
+
+    try {
+        const nicknameSql = getTableSql('nickname_changes');
+        if (nicknameSql.includes('players_legacy')) {
+            db.exec(`
+                ALTER TABLE nickname_changes RENAME TO nickname_changes_stale_fk;
+                CREATE TABLE nickname_changes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_type TEXT NOT NULL DEFAULT 'wos',
+                    fid INTEGER NOT NULL,
+                    old_nickname TEXT,
+                    new_nickname TEXT,
+                    change_date TEXT,
+                    FOREIGN KEY (game_type, fid) REFERENCES players(game_type, fid)
+                );
+                INSERT INTO nickname_changes (id, game_type, fid, old_nickname, new_nickname, change_date)
+                SELECT id, game_type, fid, old_nickname, new_nickname, change_date
+                FROM nickname_changes_stale_fk;
+                DROP TABLE nickname_changes_stale_fk;
+            `);
+        }
+    } catch (e) {
+        console.error('Database migration: failed to repair nickname_changes foreign key reference', e);
+    }
+
+    db.pragma('foreign_keys = ON');
+
     // Create indexes for processes table
     db.exec(`CREATE INDEX IF NOT EXISTS idx_processes_status_priority ON processes (status, priority)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_processes_resume_after ON processes (resume_after)`);
@@ -267,26 +654,41 @@ try {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_processes_preempted_by ON processes (preempted_by)`);
 
     // Create indexes for giftcode_usage table (for fast lookups)
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_giftcode_usage_fid ON giftcode_usage (fid)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_giftcode_usage_gift_code ON giftcode_usage (gift_code)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_giftcode_usage_fid_gift_code ON giftcode_usage (fid, gift_code)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_giftcode_usage_fid ON giftcode_usage (game_type, fid)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_giftcode_usage_gift_code ON giftcode_usage (game_type, gift_code)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_giftcode_usage_fid_gift_code ON giftcode_usage (game_type, fid, gift_code)`);
+    db.exec(`
+        DELETE FROM giftcode_usage
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM giftcode_usage
+            GROUP BY game_type, fid, gift_code
+        )
+    `);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_giftcode_usage_unique_triplet ON giftcode_usage (game_type, fid, gift_code)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_gift_codes_game_date ON gift_codes (game_type, date DESC)`);
 
     // Create index for log_code for faster filtering
     db.exec(`CREATE INDEX IF NOT EXISTS idx_admin_logs_log_code ON admin_logs (log_code)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_admin_logs_user_id_time ON admin_logs (user_id, time)`);
 
     // Create indexes for players table
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_players_alliance_exist ON players (alliance_id, exist)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_players_nickname ON players (nickname)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_alliance_game_priority ON alliance (game_type, priority)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_alliance_game_auto_redeem ON alliance (game_type, auto_redeem, priority)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_id_channels_game_alliance ON id_channels (game_type, alliance_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_id_channels_game_channel ON id_channels (game_type, channel_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_players_game_alliance_exist ON players (game_type, alliance_id, exist)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_players_game_nickname ON players (game_type, nickname)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_furnace_changes_game_fid ON furnace_changes (game_type, fid)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_nickname_changes_game_fid ON nickname_changes (game_type, fid)`);
 
     // Initialize default test IDs
-    const existingTestIds = db.prepare('SELECT COUNT(*) as count FROM test_ids').get();
-    if (existingTestIds.count === 0) {
-        // Insert default test ID (40393986)
-        db.prepare(`INSERT INTO test_ids (id, fid, is_default, set_by, set_at) VALUES (1, 40393986, 1, 'system', ?)`).run(getCurrentTimestamp());
-        // Insert placeholder for user-set test ID
-        db.prepare(`INSERT INTO test_ids (id, fid, is_default, set_by, set_at) VALUES (2, 40393986, 0, NULL, NULL)`).run();
-    }
+    ['wos', 'ks'].forEach((gameType) => {
+        db.prepare(`INSERT OR IGNORE INTO test_ids (game_type, id, fid, is_default, set_by, set_at) VALUES (?, 1, 40393986, 1, 'system', ?)`)
+            .run(gameType, getCurrentTimestamp());
+        db.prepare(`INSERT OR IGNORE INTO test_ids (game_type, id, fid, is_default, set_by, set_at) VALUES (?, 2, 40393986, 0, NULL, NULL)`)
+            .run(gameType);
+    });
 
     // Ensure `feature_access` column exists in settings (safe migration)
     try {
@@ -329,14 +731,14 @@ try {
     // Clean up pre-existing invalid gift codes and their usage history
     // Invalid codes are no longer kept — they are deleted so they can be re-added if they become active again
     try {
-        const invalidCodes = db.prepare(`SELECT gift_code FROM gift_codes WHERE status = 'invalid'`).all();
+        const invalidCodes = db.prepare(`SELECT game_type, gift_code FROM gift_codes WHERE status = 'invalid'`).all();
         if (invalidCodes.length > 0) {
-            const deleteUsage = db.prepare('DELETE FROM giftcode_usage WHERE gift_code = ?');
-            const deleteCode = db.prepare(`DELETE FROM gift_codes WHERE gift_code = ?`);
+            const deleteUsage = db.prepare('DELETE FROM giftcode_usage WHERE game_type = ? AND gift_code = ?');
+            const deleteCode = db.prepare(`DELETE FROM gift_codes WHERE game_type = ? AND gift_code = ?`);
             const deleteInvalid = db.transaction((codes) => {
-                for (const { gift_code } of codes) {
-                    deleteUsage.run(gift_code);
-                    deleteCode.run(gift_code);
+                for (const { game_type, gift_code } of codes) {
+                    deleteUsage.run(game_type, gift_code);
+                    deleteCode.run(game_type, gift_code);
                 }
             });
             deleteInvalid(invalidCodes);
@@ -488,179 +890,187 @@ const customEmojiQueries = {
 const allianceQueries = {
     // Create alliance
     addAlliance: db.prepare(`
-        INSERT INTO alliance (priority, name, guide_id, channel_id, interval, auto_redeem, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO alliance (game_type, priority, name, guide_id, channel_id, interval, auto_redeem, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `),
 
     // Get alliance by id
-    getAllianceById: db.prepare('SELECT * FROM alliance WHERE id = ?'),
+    getAllianceById: db.prepare('SELECT * FROM alliance WHERE game_type = ? AND id = ?'),
+    getAllianceByIdAny: db.prepare('SELECT * FROM alliance WHERE id = ?'),
 
     // Get all alliances
-    getAllAlliances: db.prepare('SELECT * FROM alliance ORDER BY priority'),
+    getAllAlliances: db.prepare('SELECT * FROM alliance WHERE game_type = ? ORDER BY priority'),
+    getAllAlliancesAny: db.prepare('SELECT * FROM alliance ORDER BY game_type, priority'),
 
     // Count all alliances
-    countAlliances: db.prepare('SELECT COUNT(*) AS count FROM alliance'),
+    countAlliances: db.prepare('SELECT COUNT(*) AS count FROM alliance WHERE game_type = ?'),
 
     // Update alliance
     updateAlliance: db.prepare(`
         UPDATE alliance SET priority = ?, name = ?, guide_id = ?, channel_id = ?, 
-        interval = ?, auto_redeem = ? WHERE id = ?
+        interval = ?, auto_redeem = ? WHERE game_type = ? AND id = ?
     `),
 
     // Update alliance priority only
-    updateAlliancePriority: db.prepare('UPDATE alliance SET priority = ? WHERE id = ?'),
+    updateAlliancePriority: db.prepare('UPDATE alliance SET priority = ? WHERE game_type = ? AND id = ?'),
 
     // Delete alliance
-    deleteAlliance: db.prepare('DELETE FROM alliance WHERE id = ?'),
+    deleteAlliance: db.prepare('DELETE FROM alliance WHERE game_type = ? AND id = ?'),
 
     // Get alliance by priority
-    getAllianceByPriority: db.prepare('SELECT * FROM alliance WHERE priority = ?'),
+    getAllianceByPriority: db.prepare('SELECT * FROM alliance WHERE game_type = ? AND priority = ?'),
 
     // Get alliances by a list of IDs
-    getAlliancesByIds: db.prepare('SELECT * FROM alliance WHERE id IN (SELECT value FROM json_each(?))'),
+    getAlliancesByIds: db.prepare('SELECT * FROM alliance WHERE game_type = ? AND id IN (SELECT value FROM json_each(?))'),
 
     // Get alliances with auto-redeem enabled, ordered by priority
-    getAlliancesWithAutoRedeem: db.prepare('SELECT * FROM alliance WHERE auto_redeem = 1 ORDER BY priority')
+    getAlliancesWithAutoRedeem: db.prepare('SELECT * FROM alliance WHERE game_type = ? AND auto_redeem = 1 ORDER BY priority')
 };
 
 // ID Channels queries
 const idChannelQueries = {
     // Add channel
     addIdChannel: db.prepare(`
-        INSERT INTO id_channels (guide_id, alliance_id, channel_id, linked_by)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO id_channels (game_type, guide_id, alliance_id, channel_id, linked_by)
+        VALUES (?, ?, ?, ?, ?)
     `),
 
     // Get channels by alliance
-    getChannelsByAlliance: db.prepare('SELECT * FROM id_channels WHERE alliance_id = ?'),
+    getChannelsByAlliance: db.prepare('SELECT * FROM id_channels WHERE game_type = ? AND alliance_id = ?'),
 
     // Get channels by multiple alliance IDs
-    getChannelsByAllianceIds: db.prepare('SELECT * FROM id_channels WHERE alliance_id IN (SELECT value FROM json_each(?))'),
+    getChannelsByAllianceIds: db.prepare('SELECT * FROM id_channels WHERE game_type = ? AND alliance_id IN (SELECT value FROM json_each(?))'),
 
     // Get channel by id
-    getChannelById: db.prepare('SELECT * FROM id_channels WHERE id = ?'),
+    getChannelById: db.prepare('SELECT * FROM id_channels WHERE game_type = ? AND id = ?'),
 
     // Get channel by channel_id (Discord channel ID) - single row
-    getChannelByChannelId: db.prepare('SELECT * FROM id_channels WHERE channel_id = ?'),
+    getChannelByChannelId: db.prepare('SELECT * FROM id_channels WHERE game_type = ? AND channel_id = ?'),
 
     // Get all channels by channel_id (for multi-alliance support)
-    getChannelsByChannelId: db.prepare('SELECT * FROM id_channels WHERE channel_id = ?'),
+    getChannelsByChannelId: db.prepare('SELECT * FROM id_channels WHERE game_type = ? AND channel_id = ?'),
+
+    // Get all channels by channel_id across all games
+    getChannelsByChannelIdAny: db.prepare('SELECT * FROM id_channels WHERE channel_id = ?'),
 
     // Delete channel
-    deleteChannel: db.prepare('DELETE FROM id_channels WHERE id = ?'),
+    deleteChannel: db.prepare('DELETE FROM id_channels WHERE game_type = ? AND id = ?'),
 
     // Get all channels
-    getAllChannels: db.prepare('SELECT * FROM id_channels'),
+    getAllChannels: db.prepare('SELECT * FROM id_channels WHERE game_type = ?'),
 
     // Update auto_clean interval
-    updateAutoClean: db.prepare('UPDATE id_channels SET auto_clean = ? WHERE id = ?'),
+    updateAutoClean: db.prepare('UPDATE id_channels SET auto_clean = ? WHERE game_type = ? AND id = ?'),
 
     // Get channels with auto_clean enabled
-    getAutoCleanChannels: db.prepare('SELECT * FROM id_channels WHERE auto_clean > 0')
+    getAutoCleanChannels: db.prepare('SELECT * FROM id_channels WHERE game_type = ? AND auto_clean > 0')
 };
 
 // Gift code channel queries
 const giftCodeChannelQueries = {
     // Add gift code channel
     addChannel: db.prepare(`
-        INSERT INTO gift_code_channels (channel_id, linked_by, created_at)
-        VALUES (?, ?, ?)
+        INSERT INTO gift_code_channels (game_type, channel_id, linked_by, created_at)
+        VALUES (?, ?, ?, ?)
     `),
 
     // Get channel by channel_id (Discord channel ID)
-    getChannelByChannelId: db.prepare('SELECT * FROM gift_code_channels WHERE channel_id = ?'),
+    getChannelByChannelId: db.prepare('SELECT * FROM gift_code_channels WHERE game_type = ? AND channel_id = ?'),
+    getChannelByChannelIdAny: db.prepare('SELECT * FROM gift_code_channels WHERE channel_id = ?'),
 
     // Get channel by id
     getChannelById: db.prepare('SELECT * FROM gift_code_channels WHERE id = ?'),
 
     // Get all gift code channels
-    getAllChannels: db.prepare('SELECT * FROM gift_code_channels'),
+    getAllChannels: db.prepare('SELECT * FROM gift_code_channels WHERE game_type = ? ORDER BY id'),
+    getAllChannelsAny: db.prepare('SELECT * FROM gift_code_channels ORDER BY game_type, id'),
 
     // Delete channel
     deleteChannel: db.prepare('DELETE FROM gift_code_channels WHERE id = ?'),
 
     // Check if channel exists
-    channelExists: db.prepare('SELECT 1 FROM gift_code_channels WHERE channel_id = ? LIMIT 1')
+    channelExists: db.prepare('SELECT 1 FROM gift_code_channels WHERE game_type = ? AND channel_id = ? LIMIT 1')
 };
 
 // Player queries
 const playerQueries = {
     // Add player
     addPlayer: db.prepare(`
-        INSERT INTO players (fid, user_id, nickname, furnace_level, state, image_url, alliance_id, added_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO players (game_type, fid, user_id, nickname, furnace_level, state, image_url, alliance_id, added_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
 
     // Get player by fid
-    getPlayer: db.prepare('SELECT * FROM players WHERE fid = ?'),
+    getPlayer: db.prepare('SELECT * FROM players WHERE game_type = ? AND fid = ?'),
+    getPlayersByFidAny: db.prepare('SELECT * FROM players WHERE fid = ? ORDER BY game_type'),
 
     // Get players by alliance
-    getPlayersByAlliance: db.prepare('SELECT * FROM players WHERE alliance_id = ? AND exist < 3'),
+    getPlayersByAlliance: db.prepare('SELECT * FROM players WHERE game_type = ? AND alliance_id = ? AND exist < 3'),
 
     // Get player counts for multiple alliances (used for pagination efficiency)
     getPlayerCountsByAllianceIds: db.prepare(`
         SELECT alliance_id, COUNT(*) as player_count 
         FROM players 
-        WHERE alliance_id IN (SELECT value FROM json_each(?)) AND exist < 3
+        WHERE game_type = ? AND alliance_id IN (SELECT value FROM json_each(?)) AND exist < 3
         GROUP BY alliance_id
     `),
 
     getDistinctFurnaceLevels: db.prepare(`
         SELECT DISTINCT furnace_level FROM players
-        WHERE exist < 3 AND alliance_id IN (SELECT value FROM json_each(?))
+        WHERE game_type = ? AND exist < 3 AND alliance_id IN (SELECT value FROM json_each(?))
         ORDER BY furnace_level ASC
     `),
 
     getDistinctStates: db.prepare(`
         SELECT DISTINCT state FROM players
-        WHERE exist < 3 AND state IS NOT NULL AND alliance_id IN (SELECT value FROM json_each(?))
+        WHERE game_type = ? AND exist < 3 AND state IS NOT NULL AND alliance_id IN (SELECT value FROM json_each(?))
         ORDER BY state ASC
     `),
 
     // Update player
     updatePlayer: db.prepare(`
         UPDATE players SET user_id = ?, nickname = ?, furnace_level = ?, state = ?, 
-        image_url = ?, alliance_id = ? WHERE fid = ?
+        image_url = ?, alliance_id = ? WHERE game_type = ? AND fid = ?
     `),
 
     // Update furnace level
-    updateFurnaceLevel: db.prepare('UPDATE players SET furnace_level = ? WHERE fid = ?'),
+    updateFurnaceLevel: db.prepare('UPDATE players SET furnace_level = ? WHERE game_type = ? AND fid = ?'),
 
     // Update nickname
-    updateNickname: db.prepare('UPDATE players SET nickname = ? WHERE fid = ?'),
+    updateNickname: db.prepare('UPDATE players SET nickname = ? WHERE game_type = ? AND fid = ?'),
 
     // Update player alliance
-    updatePlayerAlliance: db.prepare('UPDATE players SET alliance_id = ? WHERE fid = ?'),
+    updatePlayerAlliance: db.prepare('UPDATE players SET alliance_id = ? WHERE game_type = ? AND fid = ?'),
 
     // Delete player
-    deletePlayer: db.prepare('DELETE FROM players WHERE fid = ?'),
+    deletePlayer: db.prepare('DELETE FROM players WHERE game_type = ? AND fid = ?'),
 
     // Delete furnace changes for player
-    deleteFurnaceChanges: db.prepare('DELETE FROM furnace_changes WHERE fid = ?'),
+    deleteFurnaceChanges: db.prepare('DELETE FROM furnace_changes WHERE game_type = ? AND fid = ?'),
 
     // Delete nickname changes for player
-    deleteNicknameChanges: db.prepare('DELETE FROM nickname_changes WHERE fid = ?'),
+    deleteNicknameChanges: db.prepare('DELETE FROM nickname_changes WHERE game_type = ? AND fid = ?'),
 
     // Delete giftcode usage for player
-    deleteGiftcodeUsage: db.prepare('DELETE FROM giftcode_usage WHERE fid = ?'),
+    deleteGiftcodeUsage: db.prepare('DELETE FROM giftcode_usage WHERE game_type = ? AND fid = ?'),
 
     // Get all players
-    getAllPlayers: db.prepare('SELECT * FROM players'),
+    getAllPlayers: db.prepare('SELECT * FROM players WHERE game_type = ?'),
 
     // Count all players
-    countPlayers: db.prepare('SELECT COUNT(*) AS count FROM players'),
+    countPlayers: db.prepare('SELECT COUNT(*) AS count FROM players WHERE game_type = ?'),
 
     // Update player rich status
-    updatePlayerRichStatus: db.prepare('UPDATE players SET is_rich = ? WHERE fid = ?'),
+    updatePlayerRichStatus: db.prepare('UPDATE players SET is_rich = ? WHERE game_type = ? AND fid = ?'),
 
     // Update player VIP count
-    updatePlayerVipCount: db.prepare('UPDATE players SET vip_count = ? WHERE fid = ?'),
+    updatePlayerVipCount: db.prepare('UPDATE players SET vip_count = ? WHERE game_type = ? AND fid = ?'),
 
     // Increment VIP count for all non-rich players
-    incrementVipCountForNonRich: db.prepare('UPDATE players SET vip_count = vip_count + 1 WHERE is_rich = 0'),
+    incrementVipCountForNonRich: db.prepare('UPDATE players SET vip_count = vip_count + 1 WHERE game_type = ? AND is_rich = 0'),
 
     // Reset VIP count for a player
-    resetPlayerVipCount: db.prepare('UPDATE players SET vip_count = 1 WHERE fid = ?'),
+    resetPlayerVipCount: db.prepare('UPDATE players SET vip_count = 1 WHERE game_type = ? AND fid = ?'),
 
     // Get players eligible for VIP codes (is_rich = 1 OR vip_count = 0 OR vip_count >= 5)
     // vip_count = 0: Untested players (first time, give them a chance)
@@ -668,41 +1078,41 @@ const playerQueries = {
     // is_rich = 1: Confirmed VIP/rich players
     getVipEligiblePlayers: db.prepare(`
         SELECT * FROM players 
-        WHERE alliance_id = ? AND (is_rich = 1 OR vip_count = 0 OR vip_count >= 5) AND exist < 3
+        WHERE game_type = ? AND alliance_id = ? AND (is_rich = 1 OR vip_count = 0 OR vip_count >= 5) AND exist < 3
     `),
     // Increment exist counter for non-existent players
-    incrementPlayerExist: db.prepare('UPDATE players SET exist = exist + 1 WHERE fid = ?'),
+    incrementPlayerExist: db.prepare('UPDATE players SET exist = exist + 1 WHERE game_type = ? AND fid = ?'),
     // Reset exist counter when player returns valid data (false positive)
-    resetPlayerExist: db.prepare('UPDATE players SET exist = 0 WHERE fid = ?'),
+    resetPlayerExist: db.prepare('UPDATE players SET exist = 0 WHERE game_type = ? AND fid = ?'),
     // Get players with exist >= 3 (for future features)
-    getNonExistentPlayers: db.prepare('SELECT * FROM players WHERE exist >= 3'),
+    getNonExistentPlayers: db.prepare('SELECT * FROM players WHERE game_type = ? AND exist >= 3'),
     // Get players by alliance excluding non-existent
-    getPlayersByAllianceId: db.prepare('SELECT * FROM players WHERE alliance_id = ? AND exist < 3'),
+    getPlayersByAllianceId: db.prepare('SELECT * FROM players WHERE game_type = ? AND alliance_id = ? AND exist < 3'),
 
     // Get multiple players by FIDs in a single query
-    getPlayersByFids: (fids) => {
+    getPlayersByFids: (gameType, fids) => {
         if (!fids || fids.length === 0) return [];
         const placeholders = fids.map(() => '?').join(',');
-        const query = `SELECT * FROM players WHERE fid IN (${placeholders})`;
-        return db.prepare(query).all(...fids);
+        const query = `SELECT * FROM players WHERE game_type = ? AND fid IN (${placeholders})`;
+        return db.prepare(query).all(gameType, ...fids);
     },
 
     // Delete multiple players in a single atomic transaction
-    deletePlayers: (fids) => {
+    deletePlayers: (gameType, fids) => {
         if (!fids || fids.length === 0) return;
         const placeholders = fids.map(() => '?').join(',');
 
         // Delete related records
-        const deleteFurnaceChangesQuery = `DELETE FROM furnace_changes WHERE fid IN (${placeholders})`;
-        const deleteNicknameChangesQuery = `DELETE FROM nickname_changes WHERE fid IN (${placeholders})`;
-        const deleteGiftcodeUsageQuery = `DELETE FROM giftcode_usage WHERE fid IN (${placeholders})`;
-        const deletePlayersQuery = `DELETE FROM players WHERE fid IN (${placeholders})`;
+        const deleteFurnaceChangesQuery = `DELETE FROM furnace_changes WHERE game_type = ? AND fid IN (${placeholders})`;
+        const deleteNicknameChangesQuery = `DELETE FROM nickname_changes WHERE game_type = ? AND fid IN (${placeholders})`;
+        const deleteGiftcodeUsageQuery = `DELETE FROM giftcode_usage WHERE game_type = ? AND fid IN (${placeholders})`;
+        const deletePlayersQuery = `DELETE FROM players WHERE game_type = ? AND fid IN (${placeholders})`;
 
         db.transaction(() => {
-            db.prepare(deleteFurnaceChangesQuery).run(...fids);
-            db.prepare(deleteNicknameChangesQuery).run(...fids);
-            db.prepare(deleteGiftcodeUsageQuery).run(...fids);
-            db.prepare(deletePlayersQuery).run(...fids);
+            db.prepare(deleteFurnaceChangesQuery).run(gameType, ...fids);
+            db.prepare(deleteNicknameChangesQuery).run(gameType, ...fids);
+            db.prepare(deleteGiftcodeUsageQuery).run(gameType, ...fids);
+            db.prepare(deletePlayersQuery).run(gameType, ...fids);
         })();
     }
 };
@@ -711,116 +1121,117 @@ const playerQueries = {
 const furnaceChangeQueries = {
     // Add furnace change
     addFurnaceChange: db.prepare(`
-        INSERT INTO furnace_changes (fid, old_furnace_lv, new_furnace_lv, change_date)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO furnace_changes (game_type, fid, old_furnace_lv, new_furnace_lv, change_date)
+        VALUES (?, ?, ?, ?, ?)
     `),
 
     // Get changes by player
-    getChangesByPlayer: db.prepare('SELECT * FROM furnace_changes WHERE fid = ? ORDER BY change_date DESC'),
+    getChangesByPlayer: db.prepare('SELECT * FROM furnace_changes WHERE game_type = ? AND fid = ? ORDER BY change_date DESC'),
 
     // Get all changes
-    getAllChanges: db.prepare('SELECT * FROM furnace_changes ORDER BY change_date DESC')
+    getAllChanges: db.prepare('SELECT * FROM furnace_changes WHERE game_type = ? ORDER BY change_date DESC')
 };
 
 // Nickname changes queries
 const nicknameChangeQueries = {
     // Add nickname change
     addNicknameChange: db.prepare(`
-        INSERT INTO nickname_changes (fid, old_nickname, new_nickname, change_date)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO nickname_changes (game_type, fid, old_nickname, new_nickname, change_date)
+        VALUES (?, ?, ?, ?, ?)
     `),
 
     // Get changes by player
-    getChangesByPlayer: db.prepare('SELECT * FROM nickname_changes WHERE fid = ? ORDER BY change_date DESC'),
+    getChangesByPlayer: db.prepare('SELECT * FROM nickname_changes WHERE game_type = ? AND fid = ? ORDER BY change_date DESC'),
 
     // Get all changes
-    getAllChanges: db.prepare('SELECT * FROM nickname_changes ORDER BY change_date DESC')
+    getAllChanges: db.prepare('SELECT * FROM nickname_changes WHERE game_type = ? ORDER BY change_date DESC')
 };
 
 // Gift code queries
 const giftCodeQueries = {
     // Add gift code
     addGiftCode: db.prepare(`
-        INSERT INTO gift_codes (gift_code, date, status, added_by, source, api_pushed, last_validated, is_vip)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO gift_codes (game_type, gift_code, date, status, added_by, source, api_pushed, last_validated, is_vip)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
 
     // Get gift code
-    getGiftCode: db.prepare('SELECT * FROM gift_codes WHERE gift_code = ?'),
+    getGiftCode: db.prepare('SELECT * FROM gift_codes WHERE game_type = ? AND gift_code = ?'),
 
     // Get all gift codes
-    getAllGiftCodes: db.prepare('SELECT * FROM gift_codes ORDER BY date DESC'),
+    getAllGiftCodes: db.prepare('SELECT * FROM gift_codes WHERE game_type = ? ORDER BY date DESC'),
 
     // Count all gift codes
-    countGiftCodes: db.prepare('SELECT COUNT(*) AS count FROM gift_codes'),
+    countGiftCodes: db.prepare('SELECT COUNT(*) AS count FROM gift_codes WHERE game_type = ?'),
 
     // Update gift code status
-    updateGiftCodeStatus: db.prepare('UPDATE gift_codes SET status = ? WHERE gift_code = ?'),
+    updateGiftCodeStatus: db.prepare('UPDATE gift_codes SET status = ? WHERE game_type = ? AND gift_code = ?'),
 
     // Update last validated timestamp
-    updateLastValidated: db.prepare('UPDATE gift_codes SET last_validated = ? WHERE gift_code = ?'),
+    updateLastValidated: db.prepare('UPDATE gift_codes SET last_validated = ? WHERE game_type = ? AND gift_code = ?'),
 
     // Get codes that need revalidation (not validated in last 24 hours and added more than 1 hour ago)
     getCodesNeedingValidation: db.prepare(`
         SELECT * FROM gift_codes 
-        WHERE status != 'invalid' 
+        WHERE game_type = ?
+        AND status != 'invalid' 
         AND datetime(date) < datetime('now', '-1 hours')
         AND (last_validated IS NULL OR datetime(last_validated) < datetime('now', '-24 hours'))
     `),
 
     // Delete gift code
-    removeGiftCode: db.prepare('DELETE FROM gift_codes WHERE gift_code = ?'),
+    removeGiftCode: db.prepare('DELETE FROM gift_codes WHERE game_type = ? AND gift_code = ?'),
 
     // Update gift code VIP status
-    updateGiftCodeVipStatus: db.prepare('UPDATE gift_codes SET is_vip = ? WHERE gift_code = ?'),
+    updateGiftCodeVipStatus: db.prepare('UPDATE gift_codes SET is_vip = ? WHERE game_type = ? AND gift_code = ?'),
 
     // Update gift code API push status
-    updateApiPushed: db.prepare('UPDATE gift_codes SET api_pushed = ? WHERE gift_code = ?'),
+    updateApiPushed: db.prepare('UPDATE gift_codes SET api_pushed = ? WHERE game_type = ? AND gift_code = ?'),
 
     // Get VIP gift codes
-    getVipGiftCodes: db.prepare('SELECT * FROM gift_codes WHERE is_vip = 1 AND status = \'active\' ORDER BY date DESC')
+    getVipGiftCodes: db.prepare('SELECT * FROM gift_codes WHERE game_type = ? AND is_vip = 1 AND status = \'active\' ORDER BY date DESC')
 };
 
 // Gift code usage queries
 const giftCodeUsageQueries = {
     // Add usage
     addUsage: db.prepare(`
-        INSERT INTO giftcode_usage (fid, gift_code, status)
-        VALUES (?, ?, ?)
+        INSERT INTO giftcode_usage (game_type, fid, gift_code, status)
+        VALUES (?, ?, ?, ?)
     `),
 
     // Get usage by player
-    getUsageByPlayer: db.prepare('SELECT * FROM giftcode_usage WHERE fid = ?'),
+    getUsageByPlayer: db.prepare('SELECT * FROM giftcode_usage WHERE game_type = ? AND fid = ?'),
 
     // Get usage by gift code
-    getUsageByGiftCode: db.prepare('SELECT * FROM giftcode_usage WHERE gift_code = ?'),
+    getUsageByGiftCode: db.prepare('SELECT * FROM giftcode_usage WHERE game_type = ? AND gift_code = ?'),
 
     // Check if player used code
-    checkUsage: db.prepare('SELECT * FROM giftcode_usage WHERE fid = ? AND gift_code = ?'),
+    checkUsage: db.prepare('SELECT * FROM giftcode_usage WHERE game_type = ? AND fid = ? AND gift_code = ?'),
 
     // Update usage status
     updateUsageStatus: db.prepare('UPDATE giftcode_usage SET status = ? WHERE id = ?'),
 
     // Get all FIDs who already redeemed a specific gift code (FAST - for filtering)
-    getFidsWhoRedeemedCode: db.prepare('SELECT fid FROM giftcode_usage WHERE gift_code = ?'),
+    getFidsWhoRedeemedCode: db.prepare('SELECT fid FROM giftcode_usage WHERE game_type = ? AND gift_code = ?'),
 
     // Check if multiple players already redeemed a code (bulk check)
     // Returns FIDs that HAVE redeemed the code
     checkBulkUsage: db.prepare(`
         SELECT DISTINCT fid 
         FROM giftcode_usage 
-        WHERE gift_code = ? AND fid IN (SELECT value FROM json_each(?))
+        WHERE game_type = ? AND gift_code = ? AND fid IN (SELECT value FROM json_each(?))
     `),
 
     // Get count of how many times a gift code was redeemed
-    getUsageCount: db.prepare('SELECT COUNT(*) as count FROM giftcode_usage WHERE gift_code = ?'),
+    getUsageCount: db.prepare('SELECT COUNT(*) as count FROM giftcode_usage WHERE game_type = ? AND gift_code = ?'),
 
     // Get usage counts for multiple gift codes (batch)
-    getUsageCountsBatch: (giftCodes) => {
+    getUsageCountsBatch: (gameType, giftCodes) => {
         if (!giftCodes || giftCodes.length === 0) return {};
         const placeholders = giftCodes.map(() => '?').join(',');
-        const query = `SELECT gift_code, COUNT(*) as count FROM giftcode_usage WHERE gift_code IN (${placeholders}) GROUP BY gift_code`;
-        const rows = db.prepare(query).all(giftCodes);
+        const query = `SELECT gift_code, COUNT(*) as count FROM giftcode_usage WHERE game_type = ? AND gift_code IN (${placeholders}) GROUP BY gift_code`;
+        const rows = db.prepare(query).all(resolveGameType(gameType), ...giftCodes);
         const result = {};
         rows.forEach(row => {
             result[row.gift_code] = row.count;
@@ -829,7 +1240,7 @@ const giftCodeUsageQueries = {
     },
 
     // Delete all usage records for a gift code
-    deleteUsageByGiftCode: db.prepare('DELETE FROM giftcode_usage WHERE gift_code = ?')
+    deleteUsageByGiftCode: db.prepare('DELETE FROM giftcode_usage WHERE game_type = ? AND gift_code = ?')
 };
 
 // Notification queries
@@ -1180,16 +1591,16 @@ const processQueries = {
 // Test ID queries
 const testIdQueries = {
     // Get default test ID (id = 1)
-    getDefaultTestId: db.prepare('SELECT * FROM test_ids WHERE id = 1'),
+    getDefaultTestId: db.prepare('SELECT * FROM test_ids WHERE game_type = ? AND id = 1'),
 
     // Get user-set test ID (id = 2)
-    getUserTestId: db.prepare('SELECT * FROM test_ids WHERE id = 2'),
+    getUserTestId: db.prepare('SELECT * FROM test_ids WHERE game_type = ? AND id = 2'),
 
     // Get all test IDs
-    getAllTestIds: db.prepare('SELECT * FROM test_ids ORDER BY id'),
+    getAllTestIds: db.prepare('SELECT * FROM test_ids WHERE game_type = ? ORDER BY id'),
 
     // Update user test ID (id = 2)
-    updateUserTestId: db.prepare('UPDATE test_ids SET fid = ?, set_by = ?, set_at = ? WHERE id = 2')
+    updateUserTestId: db.prepare('UPDATE test_ids SET fid = ?, set_by = ?, set_at = ? WHERE game_type = ? AND id = 2')
 };
 
 // Settings queries
@@ -1252,11 +1663,11 @@ const createAdmin = (userId, addedBy, permissions = 0, alliances = '[]', isOwner
     return adminQueries.addAdmin.run(userId, addedBy, getCurrentTimestamp(), permissions, alliances, isOwnerInt);
 };
 
-const createGiftCode = (giftCode, status = 'active', addedBy, source = 'manual', apiPushed = false, isVip = false) => {
+const createGiftCode = (giftCode, status = 'active', addedBy, source = 'manual', apiPushed = false, isVip = false, gameType = getDefaultGameType()) => {
     const now = getCurrentTimestamp();
     const isVipInt = isVip ? 1 : 0;
     const apiPushedInt = apiPushed ? 1 : 0;
-    return giftCodeQueries.addGiftCode.run(giftCode, now, status, addedBy, source, apiPushedInt, now, isVipInt);
+    return giftCodeQueries.addGiftCode.run(resolveGameType(gameType), giftCode, now, status, addedBy, source, apiPushedInt, now, isVipInt);
 };
 
 // Migration utilities
@@ -1314,80 +1725,87 @@ module.exports = {
     },
     allianceQueries: {
         ...allianceQueries,
-        addAlliance: (priority, name, guideId, channelId, interval, autoRedeem, createdBy) =>
-            allianceQueries.addAlliance.run(priority, name, guideId, channelId, interval, autoRedeem, createdBy),
-        getAllianceById: (id) => allianceQueries.getAllianceById.get(id),
-        getAllAlliances: () => allianceQueries.getAllAlliances.all(),
-        countAlliances: () => allianceQueries.countAlliances.get()?.count || 0,
-        getAlliancesByIds: (ids) => allianceQueries.getAlliancesByIds.all(JSON.stringify(ids)),
-        updateAlliance: (priority, name, guideId, channelId, interval, autoRedeem, id) =>
-            allianceQueries.updateAlliance.run(priority, name, guideId, channelId, interval, autoRedeem, id),
-        updateAlliancePriority: (id, priority) => allianceQueries.updateAlliancePriority.run(priority, id),
-        deleteAlliance: (id) => allianceQueries.deleteAlliance.run(id),
-        getAllianceByPriority: (priority) => allianceQueries.getAllianceByPriority.get(priority),
-        getAlliancesWithAutoRedeem: () => allianceQueries.getAlliancesWithAutoRedeem.all()
+        addAlliance: (priority, name, guideId, channelId, interval, autoRedeem, createdBy, gameType = getDefaultGameType()) =>
+            allianceQueries.addAlliance.run(resolveGameType(gameType), priority, name, guideId, channelId, interval, autoRedeem, createdBy),
+        getAllianceById: (id, gameType = getDefaultGameType()) => allianceQueries.getAllianceById.get(resolveGameType(gameType), id),
+        getAllianceByIdAny: (id) => allianceQueries.getAllianceByIdAny.get(id),
+        getAllAlliances: (gameType = getDefaultGameType()) => allianceQueries.getAllAlliances.all(resolveGameType(gameType)),
+        getAllAlliancesAny: () => allianceQueries.getAllAlliancesAny.all(),
+        countAlliances: (gameType = getDefaultGameType()) => allianceQueries.countAlliances.get(resolveGameType(gameType))?.count || 0,
+        getAlliancesByIds: (ids, gameType = getDefaultGameType()) => allianceQueries.getAlliancesByIds.all(resolveGameType(gameType), JSON.stringify(ids)),
+        updateAlliance: (priority, name, guideId, channelId, interval, autoRedeem, id, gameType = getDefaultGameType()) =>
+            allianceQueries.updateAlliance.run(priority, name, guideId, channelId, interval, autoRedeem, resolveGameType(gameType), id),
+        updateAlliancePriority: (id, priority, gameType = getDefaultGameType()) => allianceQueries.updateAlliancePriority.run(priority, resolveGameType(gameType), id),
+        deleteAlliance: (id, gameType = getDefaultGameType()) => allianceQueries.deleteAlliance.run(resolveGameType(gameType), id),
+        getAllianceByPriority: (priority, gameType = getDefaultGameType()) => allianceQueries.getAllianceByPriority.get(resolveGameType(gameType), priority),
+        getAlliancesWithAutoRedeem: (gameType = getDefaultGameType()) => allianceQueries.getAlliancesWithAutoRedeem.all(resolveGameType(gameType))
     },
     idChannelQueries: {
         ...idChannelQueries,
-        addIdChannel: (guideId, allianceId, channelId, linkedBy) =>
-            idChannelQueries.addIdChannel.run(guideId, allianceId, channelId, linkedBy),
-        getChannelsByAlliance: (allianceId) => idChannelQueries.getChannelsByAlliance.all(allianceId),
-        getChannelsByAllianceIds: (allianceIds) => idChannelQueries.getChannelsByAllianceIds.all(JSON.stringify(allianceIds)),
-        getChannelById: (id) => idChannelQueries.getChannelById.get(id),
-        getChannelByChannelId: (channelId) => idChannelQueries.getChannelByChannelId.get(channelId),
-        getChannelsByChannelId: (channelId) => idChannelQueries.getChannelsByChannelId.all(channelId),
-        removeIdChannel: (id) => idChannelQueries.deleteChannel.run(id),
-        deleteChannel: (id) => idChannelQueries.deleteChannel.run(id),
-        getAllChannels: () => idChannelQueries.getAllChannels.all(),
-        updateAutoClean: (interval, id) => idChannelQueries.updateAutoClean.run(interval, id),
-        getAutoCleanChannels: () => idChannelQueries.getAutoCleanChannels.all()
+        addIdChannel: (guideId, allianceId, channelId, linkedBy, gameType = getDefaultGameType()) =>
+            idChannelQueries.addIdChannel.run(resolveGameType(gameType), guideId, allianceId, channelId, linkedBy),
+        getChannelsByAlliance: (allianceId, gameType = getDefaultGameType()) => idChannelQueries.getChannelsByAlliance.all(resolveGameType(gameType), allianceId),
+        getChannelsByAllianceIds: (allianceIds, gameType = getDefaultGameType()) => idChannelQueries.getChannelsByAllianceIds.all(resolveGameType(gameType), JSON.stringify(allianceIds)),
+        getChannelById: (id, gameType = getDefaultGameType()) => idChannelQueries.getChannelById.get(resolveGameType(gameType), id),
+        getChannelByChannelId: (channelId, gameType = getDefaultGameType()) => idChannelQueries.getChannelByChannelId.get(resolveGameType(gameType), channelId),
+        getChannelsByChannelId: (channelId, gameType = getDefaultGameType()) => idChannelQueries.getChannelsByChannelId.all(resolveGameType(gameType), channelId),
+        removeIdChannel: (id, gameType = getDefaultGameType()) => idChannelQueries.deleteChannel.run(resolveGameType(gameType), id),
+        deleteChannel: (id, gameType = getDefaultGameType()) => idChannelQueries.deleteChannel.run(resolveGameType(gameType), id),
+        getAllChannels: (gameType = getDefaultGameType()) => idChannelQueries.getAllChannels.all(resolveGameType(gameType)),
+        updateAutoClean: (interval, id, gameType = getDefaultGameType()) => idChannelQueries.updateAutoClean.run(interval, resolveGameType(gameType), id),
+        getAutoCleanChannels: (gameType = getDefaultGameType()) => idChannelQueries.getAutoCleanChannels.all(resolveGameType(gameType))
     },
     giftCodeChannelQueries: {
         ...giftCodeChannelQueries,
-        addChannel: (channelId, linkedBy) =>
-            giftCodeChannelQueries.addChannel.run(channelId, linkedBy, getCurrentTimestamp()),
-        getChannelByChannelId: (channelId) => giftCodeChannelQueries.getChannelByChannelId.get(channelId),
+        addChannel: (channelId, linkedBy, gameType = getDefaultGameType()) =>
+            giftCodeChannelQueries.addChannel.run(resolveGameType(gameType), channelId, linkedBy, getCurrentTimestamp()),
+        getChannelByChannelId: (channelId, gameType = getDefaultGameType()) =>
+            giftCodeChannelQueries.getChannelByChannelId.get(resolveGameType(gameType), channelId),
+        getChannelByChannelIdAny: (channelId) => giftCodeChannelQueries.getChannelByChannelIdAny.get(channelId),
         getChannelById: (id) => giftCodeChannelQueries.getChannelById.get(id),
-        getAllChannels: () => giftCodeChannelQueries.getAllChannels.all(),
+        getAllChannels: (gameType = getDefaultGameType()) => giftCodeChannelQueries.getAllChannels.all(resolveGameType(gameType)),
+        getAllChannelsAny: () => giftCodeChannelQueries.getAllChannelsAny.all(),
         deleteChannel: (id) => giftCodeChannelQueries.deleteChannel.run(id),
-        channelExists: (channelId) => {
-            const result = giftCodeChannelQueries.channelExists.get(channelId);
+        channelExists: (channelId, gameType = getDefaultGameType()) => {
+            const result = giftCodeChannelQueries.channelExists.get(resolveGameType(gameType), channelId);
             return result !== undefined;
         }
     },
     playerQueries: {
         ...playerQueries,
-        addPlayer: (fid, userId, nickname, furnaceLevel, state, imageUrl, allianceId, addedBy) => {
+        addPlayer: (fid, userId, nickname, furnaceLevel, state, imageUrl, allianceId, addedBy, gameType = getDefaultGameType()) => {
             const addedByStr = String(addedBy);
-            return playerQueries.addPlayer.run(fid, userId, nickname, furnaceLevel, state, imageUrl, allianceId, addedByStr);
+            return playerQueries.addPlayer.run(resolveGameType(gameType), fid, userId, nickname, furnaceLevel, state, imageUrl, allianceId, addedByStr);
         },
-        getPlayer: (fid) => playerQueries.getPlayer.get(fid),
-        getPlayerByFid: (fid) => playerQueries.getPlayer.get(fid),
-        getPlayersByAlliance: (allianceId) => playerQueries.getPlayersByAlliance.all(allianceId),
-        incrementPlayerExist: (fid) => playerQueries.incrementPlayerExist.run(fid),
-        resetPlayerExist: (fid) => playerQueries.resetPlayerExist.run(fid),
-        getNonExistentPlayers: () => playerQueries.getNonExistentPlayers.all(),
-        getPlayersByAllianceId: (allianceId) => playerQueries.getPlayersByAlliance.all(allianceId),
-        getPlayerCountsByAllianceIds: (allianceIds) => playerQueries.getPlayerCountsByAllianceIds.all(JSON.stringify(allianceIds)),
-        getDistinctFurnaceLevels: (allianceIds) => playerQueries.getDistinctFurnaceLevels.all(JSON.stringify(allianceIds)).map(r => r.furnace_level),
-        getDistinctStates: (allianceIds) => playerQueries.getDistinctStates.all(JSON.stringify(allianceIds)).map(r => r.state),
-        updatePlayer: (userId, nickname, furnaceLevel, state, imageUrl, allianceId, fid) =>
-            playerQueries.updatePlayer.run(userId, nickname, furnaceLevel, state, imageUrl, allianceId, fid),
-        updatePlayerAlliance: (fid, allianceId) => playerQueries.updatePlayerAlliance.run(allianceId, fid),
-        updateFurnaceLevel: (furnaceLevel, fid) => playerQueries.updateFurnaceLevel.run(furnaceLevel, fid),
-        updateNickname: (nickname, fid) => playerQueries.updateNickname.run(nickname, fid),
-        deletePlayer: (fid) => {
-            playerQueries.deleteFurnaceChanges.run(fid);
-            playerQueries.deleteNicknameChanges.run(fid);
-            playerQueries.deleteGiftcodeUsage.run(fid);
-            playerQueries.deletePlayer.run(fid);
+        getPlayer: (fid, gameType = getDefaultGameType()) => playerQueries.getPlayer.get(resolveGameType(gameType), fid),
+        getPlayerByFid: (fid, gameType = getDefaultGameType()) => playerQueries.getPlayer.get(resolveGameType(gameType), fid),
+        getPlayersByFidAny: (fid) => playerQueries.getPlayersByFidAny.all(fid),
+        getPlayersByAlliance: (allianceId, gameType = getDefaultGameType()) => playerQueries.getPlayersByAlliance.all(resolveGameType(gameType), allianceId),
+        incrementPlayerExist: (fid, gameType = getDefaultGameType()) => playerQueries.incrementPlayerExist.run(resolveGameType(gameType), fid),
+        resetPlayerExist: (fid, gameType = getDefaultGameType()) => playerQueries.resetPlayerExist.run(resolveGameType(gameType), fid),
+        getNonExistentPlayers: (gameType = getDefaultGameType()) => playerQueries.getNonExistentPlayers.all(resolveGameType(gameType)),
+        getPlayersByAllianceId: (allianceId, gameType = getDefaultGameType()) => playerQueries.getPlayersByAlliance.all(resolveGameType(gameType), allianceId),
+        getPlayerCountsByAllianceIds: (allianceIds, gameType = getDefaultGameType()) => playerQueries.getPlayerCountsByAllianceIds.all(resolveGameType(gameType), JSON.stringify(allianceIds)),
+        getDistinctFurnaceLevels: (allianceIds, gameType = getDefaultGameType()) => playerQueries.getDistinctFurnaceLevels.all(resolveGameType(gameType), JSON.stringify(allianceIds)).map(r => r.furnace_level),
+        getDistinctStates: (allianceIds, gameType = getDefaultGameType()) => playerQueries.getDistinctStates.all(resolveGameType(gameType), JSON.stringify(allianceIds)).map(r => r.state),
+        updatePlayer: (userId, nickname, furnaceLevel, state, imageUrl, allianceId, fid, gameType = getDefaultGameType()) =>
+            playerQueries.updatePlayer.run(userId, nickname, furnaceLevel, state, imageUrl, allianceId, resolveGameType(gameType), fid),
+        updatePlayerAlliance: (fid, allianceId, gameType = getDefaultGameType()) => playerQueries.updatePlayerAlliance.run(allianceId, resolveGameType(gameType), fid),
+        updateFurnaceLevel: (furnaceLevel, fid, gameType = getDefaultGameType()) => playerQueries.updateFurnaceLevel.run(furnaceLevel, resolveGameType(gameType), fid),
+        updateNickname: (nickname, fid, gameType = getDefaultGameType()) => playerQueries.updateNickname.run(nickname, resolveGameType(gameType), fid),
+        deletePlayer: (fid, gameType = getDefaultGameType()) => {
+            const resolvedGameType = resolveGameType(gameType);
+            playerQueries.deleteFurnaceChanges.run(resolvedGameType, fid);
+            playerQueries.deleteNicknameChanges.run(resolvedGameType, fid);
+            playerQueries.deleteGiftcodeUsage.run(resolvedGameType, fid);
+            playerQueries.deletePlayer.run(resolvedGameType, fid);
         },
-        getAllPlayers: () => playerQueries.getAllPlayers.all(),
-        countPlayers: () => playerQueries.countPlayers.get()?.count || 0,
-        getPlayersForExport: (filters) => {
+        getAllPlayers: (gameType = getDefaultGameType()) => playerQueries.getAllPlayers.all(resolveGameType(gameType)),
+        countPlayers: (gameType = getDefaultGameType()) => playerQueries.countPlayers.get(resolveGameType(gameType))?.count || 0,
+        getPlayersForExport: (filters, gameType = getDefaultGameType()) => {
             // Build dynamic SQL query based on provided filters
-            let query = 'SELECT p.fid, p.nickname, p.furnace_level, a.name as alliance_name, p.state FROM players p LEFT JOIN alliance a ON p.alliance_id = a.id WHERE p.exist < 3';
-            const params = [];
+            let query = 'SELECT p.fid, p.nickname, p.furnace_level, a.name as alliance_name, p.state FROM players p LEFT JOIN alliance a ON p.alliance_id = a.id WHERE p.game_type = ? AND p.exist < 3';
+            const params = [resolveGameType(gameType)];
 
             // Add state filter
             if (filters.states && filters.states.length > 0) {
@@ -1415,85 +1833,87 @@ module.exports = {
 
             return db.prepare(query).all(...params);
         },
-        updatePlayerRichStatus: (isRich, fid) => {
+        updatePlayerRichStatus: (isRich, fid, gameType = getDefaultGameType()) => {
             const isRichInt = isRich ? 1 : 0;
-            return playerQueries.updatePlayerRichStatus.run(isRichInt, fid);
+            return playerQueries.updatePlayerRichStatus.run(isRichInt, resolveGameType(gameType), fid);
         },
-        updatePlayerVipCount: (vipCount, fid) => playerQueries.updatePlayerVipCount.run(vipCount, fid),
-        incrementVipCountForNonRich: () => playerQueries.incrementVipCountForNonRich.run(),
-        resetPlayerVipCount: (fid) => playerQueries.resetPlayerVipCount.run(fid),
-        getVipEligiblePlayers: (allianceId) => playerQueries.getVipEligiblePlayers.all(allianceId),
-        getPlayersByFids: (fids) => playerQueries.getPlayersByFids(fids),
-        deletePlayers: (fids) => playerQueries.deletePlayers(fids)
+        updatePlayerVipCount: (vipCount, fid, gameType = getDefaultGameType()) => playerQueries.updatePlayerVipCount.run(vipCount, resolveGameType(gameType), fid),
+        incrementVipCountForNonRich: (gameType = getDefaultGameType()) => playerQueries.incrementVipCountForNonRich.run(resolveGameType(gameType)),
+        resetPlayerVipCount: (fid, gameType = getDefaultGameType()) => playerQueries.resetPlayerVipCount.run(resolveGameType(gameType), fid),
+        getVipEligiblePlayers: (allianceId, gameType = getDefaultGameType()) => playerQueries.getVipEligiblePlayers.all(resolveGameType(gameType), allianceId),
+        getPlayersByFids: (fids, gameType = getDefaultGameType()) => playerQueries.getPlayersByFids(resolveGameType(gameType), fids),
+        deletePlayers: (fids, gameType = getDefaultGameType()) => playerQueries.deletePlayers(resolveGameType(gameType), fids)
     },
     furnaceChangeQueries: {
         ...furnaceChangeQueries,
-        addFurnaceChange: (fid, oldLevel, newLevel) =>
-            furnaceChangeQueries.addFurnaceChange.run(fid, oldLevel, newLevel, getCurrentTimestamp()),
-        getChangesByPlayer: (fid) => furnaceChangeQueries.getChangesByPlayer.all(fid),
-        getAllChanges: () => furnaceChangeQueries.getAllChanges.all(),
+        addFurnaceChange: (fid, oldLevel, newLevel, gameType = getDefaultGameType()) =>
+            furnaceChangeQueries.addFurnaceChange.run(resolveGameType(gameType), fid, oldLevel, newLevel, getCurrentTimestamp()),
+        getChangesByPlayer: (fid, gameType = getDefaultGameType()) => furnaceChangeQueries.getChangesByPlayer.all(resolveGameType(gameType), fid),
+        getAllChanges: (gameType = getDefaultGameType()) => furnaceChangeQueries.getAllChanges.all(resolveGameType(gameType)),
         // Raw insert for migrations (allows custom timestamps)
         rawInsert: furnaceChangeQueries.addFurnaceChange
     },
     nicknameChangeQueries: {
         ...nicknameChangeQueries,
-        addNicknameChange: (fid, oldNickname, newNickname) =>
-            nicknameChangeQueries.addNicknameChange.run(fid, oldNickname, newNickname, getCurrentTimestamp()),
-        getChangesByPlayer: (fid) => nicknameChangeQueries.getChangesByPlayer.all(fid),
-        getAllChanges: () => nicknameChangeQueries.getAllChanges.all(),
+        addNicknameChange: (fid, oldNickname, newNickname, gameType = getDefaultGameType()) =>
+            nicknameChangeQueries.addNicknameChange.run(resolveGameType(gameType), fid, oldNickname, newNickname, getCurrentTimestamp()),
+        getChangesByPlayer: (fid, gameType = getDefaultGameType()) => nicknameChangeQueries.getChangesByPlayer.all(resolveGameType(gameType), fid),
+        getAllChanges: (gameType = getDefaultGameType()) => nicknameChangeQueries.getAllChanges.all(resolveGameType(gameType)),
         // Raw insert for migrations (allows custom timestamps)
         rawInsert: nicknameChangeQueries.addNicknameChange
     },
     giftCodeQueries: {
         ...giftCodeQueries,
         addGiftCode: createGiftCode,
-        getGiftCode: (giftCode) => giftCodeQueries.getGiftCode.get(giftCode),
-        getAllGiftCodes: () => giftCodeQueries.getAllGiftCodes.all(),
-        countGiftCodes: () => giftCodeQueries.countGiftCodes.get()?.count || 0,
-        updateGiftCodeStatus: (status, giftCode) => giftCodeQueries.updateGiftCodeStatus.run(status, giftCode),
-        updateLastValidated: (giftCode) => giftCodeQueries.updateLastValidated.run(getCurrentTimestamp(), giftCode),
-        getCodesNeedingValidation: () => giftCodeQueries.getCodesNeedingValidation.all(),
-        removeGiftCode: (giftCode) => {
+        getGiftCode: (giftCode, gameType = getDefaultGameType()) => giftCodeQueries.getGiftCode.get(resolveGameType(gameType), giftCode),
+        getAllGiftCodes: (gameType = getDefaultGameType()) => giftCodeQueries.getAllGiftCodes.all(resolveGameType(gameType)),
+        countGiftCodes: (gameType = getDefaultGameType()) => giftCodeQueries.countGiftCodes.get(resolveGameType(gameType))?.count || 0,
+        updateGiftCodeStatus: (status, giftCode, gameType = getDefaultGameType()) => giftCodeQueries.updateGiftCodeStatus.run(status, resolveGameType(gameType), giftCode),
+        updateLastValidated: (giftCode, gameType = getDefaultGameType()) => giftCodeQueries.updateLastValidated.run(getCurrentTimestamp(), resolveGameType(gameType), giftCode),
+        getCodesNeedingValidation: (gameType = getDefaultGameType()) => giftCodeQueries.getCodesNeedingValidation.all(resolveGameType(gameType)),
+        removeGiftCode: (giftCode, gameType = getDefaultGameType()) => {
             // Delete usage records first to avoid foreign key constraint
             try {
-                giftCodeUsageQueries.deleteUsageByGiftCode.run(giftCode);
+                giftCodeUsageQueries.deleteUsageByGiftCode.run(resolveGameType(gameType), giftCode);
             } catch (error) {
                 // Non-critical - continue with gift code deletion
             }
-            return giftCodeQueries.removeGiftCode.run(giftCode);
+            return giftCodeQueries.removeGiftCode.run(resolveGameType(gameType), giftCode);
         },
-        updateGiftCodeVipStatus: (isVip, giftCode) => {
+        updateGiftCodeVipStatus: (isVip, giftCode, gameType = getDefaultGameType()) => {
             const isVipInt = isVip ? 1 : 0;
-            return giftCodeQueries.updateGiftCodeVipStatus.run(isVipInt, giftCode);
+            return giftCodeQueries.updateGiftCodeVipStatus.run(isVipInt, resolveGameType(gameType), giftCode);
         },
-        updateApiPushed: (apiPushed, giftCode) => {
+        updateApiPushed: (apiPushed, giftCode, gameType = getDefaultGameType()) => {
             const apiPushedInt = apiPushed ? 1 : 0;
-            return giftCodeQueries.updateApiPushed.run(apiPushedInt, giftCode);
+            return giftCodeQueries.updateApiPushed.run(apiPushedInt, resolveGameType(gameType), giftCode);
         },
-        getVipGiftCodes: () => giftCodeQueries.getVipGiftCodes.all()
+        getVipGiftCodes: (gameType = getDefaultGameType()) => giftCodeQueries.getVipGiftCodes.all(resolveGameType(gameType))
     },
     giftCodeUsageQueries: {
         ...giftCodeUsageQueries,
-        addUsage: (fid, giftCode, status) => giftCodeUsageQueries.addUsage.run(fid, giftCode, status),
-        getUsageByPlayer: (fid) => giftCodeUsageQueries.getUsageByPlayer.all(fid),
-        getUsageByGiftCode: (giftCode) => giftCodeUsageQueries.getUsageByGiftCode.all(giftCode),
-        checkUsage: (fid, giftCode) => giftCodeUsageQueries.checkUsage.get(fid, giftCode),
+        addUsage: (fid, giftCode, status, gameType = getDefaultGameType()) => giftCodeUsageQueries.addUsage.run(resolveGameType(gameType), fid, giftCode, status),
+        getUsageByPlayer: (fid, gameType = getDefaultGameType()) => giftCodeUsageQueries.getUsageByPlayer.all(resolveGameType(gameType), fid),
+        getUsageByGiftCode: (giftCode, gameType = getDefaultGameType()) => giftCodeUsageQueries.getUsageByGiftCode.all(resolveGameType(gameType), giftCode),
+        checkUsage: (fid, giftCode, gameType = getDefaultGameType()) => giftCodeUsageQueries.checkUsage.get(resolveGameType(gameType), fid, giftCode),
         updateUsageStatus: (status, id) => giftCodeUsageQueries.updateUsageStatus.run(status, id),
-        getFidsWhoRedeemedCode: (giftCode) => {
-            const results = giftCodeUsageQueries.getFidsWhoRedeemedCode.all(giftCode);
+        getFidsWhoRedeemedCode: (giftCode, gameType = getDefaultGameType()) => {
+            const results = giftCodeUsageQueries.getFidsWhoRedeemedCode.all(resolveGameType(gameType), giftCode);
             return results.map(row => row.fid);
         },
-        checkBulkUsage: (giftCode, fids) => {
+        checkBulkUsage: (giftCode, fids, gameType = getDefaultGameType()) => {
             // Convert array of FIDs to JSON array for SQLite
             const fidsJson = JSON.stringify(fids);
-            const results = giftCodeUsageQueries.checkBulkUsage.all(giftCode, fidsJson);
+            const results = giftCodeUsageQueries.checkBulkUsage.all(resolveGameType(gameType), giftCode, fidsJson);
             return results.map(row => row.fid);
         },
-        getUsageCount: (giftCode) => {
-            const result = giftCodeUsageQueries.getUsageCount.get(giftCode);
+        getUsageCount: (giftCode, gameType = getDefaultGameType()) => {
+            const result = giftCodeUsageQueries.getUsageCount.get(resolveGameType(gameType), giftCode);
             return result ? result.count : 0;
         },
-        deleteUsageByGiftCode: (giftCode) => giftCodeUsageQueries.deleteUsageByGiftCode.run(giftCode)
+        getUsageCountsBatch: (giftCodes, gameType = getDefaultGameType()) =>
+            giftCodeUsageQueries.getUsageCountsBatch(resolveGameType(gameType), giftCodes),
+        deleteUsageByGiftCode: (giftCode, gameType = getDefaultGameType()) => giftCodeUsageQueries.deleteUsageByGiftCode.run(resolveGameType(gameType), giftCode)
     },
     notificationQueries: {
         ...notificationQueries,
@@ -1593,10 +2013,10 @@ module.exports = {
     },
     testIdQueries: {
         ...testIdQueries,
-        getDefaultTestId: () => testIdQueries.getDefaultTestId.get(),
-        getUserTestId: () => testIdQueries.getUserTestId.get(),
-        getAllTestIds: () => testIdQueries.getAllTestIds.all(),
-        updateUserTestId: (fid, setBy) => testIdQueries.updateUserTestId.run(fid, setBy, getCurrentTimestamp())
+        getDefaultTestId: (gameType = getDefaultGameType()) => testIdQueries.getDefaultTestId.get(resolveGameType(gameType)),
+        getUserTestId: (gameType = getDefaultGameType()) => testIdQueries.getUserTestId.get(resolveGameType(gameType)),
+        getAllTestIds: (gameType = getDefaultGameType()) => testIdQueries.getAllTestIds.all(resolveGameType(gameType)),
+        updateUserTestId: (fid, setBy, gameType = getDefaultGameType()) => testIdQueries.updateUserTestId.run(fid, setBy, getCurrentTimestamp(), resolveGameType(gameType))
     },
     settingsQueries,
     migrationQueries,

@@ -4,6 +4,8 @@ const {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
+    StringSelectMenuBuilder,
+    StringSelectMenuOptionBuilder,
     ActionRowBuilder,
     ChannelSelectMenuBuilder,
     ChannelType,
@@ -19,8 +21,69 @@ const { LOG_CODES } = require('../utility/AdminLogs');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { restartAutoRefresh } = require('./refreshAlliance');
 const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, parseRefreshInterval, formatRefreshInterval } = require('../utility/commonFunctions');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
 
+
+function buildCreateAllianceModal(userId, lang = {}) {
+    const modal = new ModalBuilder()
+        .setCustomId(`create_alliance_modal_${userId}`)
+        .setTitle(lang.alliance.createAlliance.modal.title);
+
+    if (isMultiGameModeEnabled()) {
+        const gameTypeSelect = new StringSelectMenuBuilder()
+            .setCustomId('alliance_game_type')
+            .setPlaceholder(lang.common.gameSelection.placeholder)
+            .setRequired(true)
+            .setMinValues(1)
+            .setMaxValues(1)
+            .addOptions(
+                new StringSelectMenuOptionBuilder()
+                    .setLabel(lang.common.gameSelection.options.wos)
+                    .setValue('wos'),
+                new StringSelectMenuOptionBuilder()
+                    .setLabel(lang.common.gameSelection.options.ks)
+                    .setValue('ks')
+            );
+
+        const gameTypeLabel = new LabelBuilder()
+            .setLabel(lang.common.gameSelection.label)
+            .setDescription(lang.alliance.createAlliance.modal.gameTypeField.description)
+            .setStringSelectMenuComponent(gameTypeSelect);
+
+        modal.addLabelComponents(gameTypeLabel);
+    }
+
+    const allianceNameInput = new TextInputBuilder()
+        .setCustomId('alliance_name')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder(lang.alliance.createAlliance.modal.allianceField.placeholder)
+        .setRequired(true)
+        .setMinLength(1)
+        .setMaxLength(50);
+
+    const allianceNameLabel = new LabelBuilder()
+        .setLabel(lang.alliance.createAlliance.modal.allianceField.label)
+        .setTextInputComponent(allianceNameInput);
+
+    const refreshRateInput = new TextInputBuilder()
+        .setCustomId('refresh_rate')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder(lang.alliance.createAlliance.modal.refreshRateField.placeholder)
+        .setRequired(true)
+        .setMinLength(1)
+        .setMaxLength(6);
+
+    const refreshRateLabel = new LabelBuilder()
+        .setLabel(lang.alliance.createAlliance.modal.refreshRateField.label)
+        .setDescription(lang.alliance.createAlliance.modal.refreshRateField.description)
+        .setTextInputComponent(refreshRateInput);
+
+    modal.addLabelComponents(allianceNameLabel, refreshRateLabel);
+
+    return modal;
+}
 
 /**
  * Creates a create alliance button
@@ -60,42 +123,9 @@ async function handleCreateAllianceButton(interaction) {
             });
         }
 
-        const modal = new ModalBuilder()
-            .setCustomId(`create_alliance_modal_${interaction.user.id}`)
-            .setTitle(lang.alliance.createAlliance.modal.title);
+        const modal = buildCreateAllianceModal(interaction.user.id, lang);
 
-        // Alliance name input
-        const allianceNameInput = new TextInputBuilder()
-            .setCustomId('alliance_name')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder(lang.alliance.createAlliance.modal.allianceField.placeholder)
-            .setRequired(true)
-            .setMinLength(1)
-            .setMaxLength(50);
-
-        // Wrap it in a label
-        const allianceNameLabel = new LabelBuilder()
-            .setLabel(lang.alliance.createAlliance.modal.allianceField.label)
-            .setTextInputComponent(allianceNameInput);
-
-        // Refresh rate input
-        const refreshRateInput = new TextInputBuilder()
-            .setCustomId('refresh_rate')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder(lang.alliance.createAlliance.modal.refreshRateField.placeholder)
-            .setRequired(true)
-            .setMinLength(1)
-            .setMaxLength(6);
-
-        const refreshRateLabel = new LabelBuilder()
-            .setLabel(lang.alliance.createAlliance.modal.refreshRateField.label)
-            .setDescription(lang.alliance.createAlliance.modal.refreshRateField.description)
-            .setTextInputComponent(refreshRateInput);
-
-        // Add the label components to the modal
-        modal.addLabelComponents(allianceNameLabel, refreshRateLabel);
-
-        await interaction.showModal(modal)
+        await interaction.showModal(modal);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleCreateAllianceButton');
@@ -118,6 +148,18 @@ async function handleCreateAllianceModal(interaction) {
         }
 
         // Get form values
+        const selectedGameType = isMultiGameModeEnabled()
+            ? interaction.fields.getStringSelectValues('alliance_game_type')?.[0]
+            : getDefaultGameType();
+        const gameType = normalizeGameType(selectedGameType, null);
+
+        if (!gameType) {
+            return await interaction.reply({
+                content: lang.alliance.createAlliance.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
         const allianceName = interaction.fields.getTextInputValue('alliance_name').trim();
         const refreshRateInput = interaction.fields.getTextInputValue('refresh_rate').trim();
 
@@ -131,7 +173,7 @@ async function handleCreateAllianceModal(interaction) {
         }
         const refreshRate = parseResult.value;
         // Get all existing alliances to determine the next priority
-        const existingAlliances = allianceQueries.getAllAlliances();
+        const existingAlliances = allianceQueries.getAllAlliances(gameType);
         const nextPriority = existingAlliances.length + 1;
 
         // Get admin's internal ID for the created_by field
@@ -145,7 +187,8 @@ async function handleCreateAllianceModal(interaction) {
             null,              // channel_id (will be set after channel selection)
             refreshRate,       // interval
             1,                 // auto_redeem (True by default)
-            adminId            // created_by
+            adminId,           // created_by
+            gameType
         );
 
         // Get the newly created alliance ID
@@ -209,7 +252,8 @@ async function handleCreateAllianceModal(interaction) {
                 allianceName: allianceName,
                 allianceId: newAllianceId,
                 refreshRate: refreshRate,
-                priority: nextPriority
+                priority: nextPriority,
+                gameType
             })
         );
 
@@ -258,7 +302,7 @@ async function handleAllianceChannelSelection(interaction) {
 
         try {
             // Get the alliance data
-            const alliance = allianceQueries.getAllAlliances().find(a => a.id === allianceId);
+            const alliance = allianceQueries.getAllianceByIdAny(allianceId);
             if (!alliance) {
                 return await interaction.reply({
                     content: lang.alliance.createAlliance.errors.allianceNotFound,
@@ -274,7 +318,8 @@ async function handleAllianceChannelSelection(interaction) {
                 selectedChannelId,          // channel_id
                 alliance.interval,          // interval
                 alliance.auto_redeem,       // auto_redeem
-                allianceId                  // id
+                allianceId,                 // id
+                alliance.game_type
             );
 
             // Update alliance field for relevant admins (now that alliance is complete)

@@ -18,8 +18,10 @@ const { allianceQueries } = require('../utility/database');
 const { createProcess, updateProcessProgress, getProcessById } = require('../Processes/createProcesses');
 const { queueManager } = require('../Processes/queueManager');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, getAlliancesForUser, updateComponentsV2AfterSeparator, createAllianceSelectionComponents, getChannelMissingBotPermissions } = require('../utility/commonFunctions');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, createAllianceSelectionComponents, createGameSelectionComponents, getAlliancesForUserByGame, getChannelMissingBotPermissions } = require('../utility/commonFunctions');
 const { parsePaginationCustomId } = require('../Pagination/universalPagination');
+const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
 
 /**
@@ -61,8 +63,22 @@ async function handleAddPlayerButton(interaction) {
         }
 
 
-        // Get alliances based on user permissions
-        const alliances = getAlliancesForUser(adminData);
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_add_player_game',
+                title: lang.players.addPlayer.content.title.base,
+                description: lang.players.addPlayer.content.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
+        const alliances = getAlliancesForUserByGame(adminData, getDefaultGameType(), PERMISSIONS.PLAYER_MANAGEMENT);
 
         if (alliances.length === 0) {
             return await interaction.reply({
@@ -71,8 +87,7 @@ async function handleAddPlayerButton(interaction) {
             });
         }
 
-        // Create alliance selection container
-        const { components } = createAllianceSelectionContainer(interaction, alliances, lang);
+        const { components } = createAllianceSelectionContainer(interaction, alliances, lang, 0, getDefaultGameType());
 
         await interaction.update({
             components: components,
@@ -97,7 +112,9 @@ async function handleAddPlayerButton(interaction) {
 /**
  * Creates alliance selection container using shared utility
  */
-function createAllianceSelectionContainer(interaction, alliances, lang, page = 0) {
+function createAllianceSelectionContainer(interaction, alliances, lang, page = 0, gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, null);
+
     return createAllianceSelectionComponents({
         interaction,
         alliances,
@@ -109,7 +126,8 @@ function createAllianceSelectionContainer(interaction, alliances, lang, page = 0
         title: lang.players.addPlayer.content.title.base,
         description: lang.players.addPlayer.content.description.base,
         accentColor: 0x3498db, // Blue
-        showAll: false
+        showAll: false,
+        contextData: resolvedGameType ? [resolvedGameType] : []
     });
 }
 
@@ -122,22 +140,27 @@ async function handleAddPlayerPagination(interaction) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
     try {
         // Extract user ID and page from custom ID
-        const { userId: expectedUserId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId: expectedUserId, newPage, contextData } = parsePaginationCustomId(
+            interaction.customId,
+            isMultiGameModeEnabled() ? 1 : 0
+        );
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
-        // Get alliances based on user permissions
-        const alliances = getAlliancesForUser(adminData);
+        const gameType = normalizeGameType(contextData[0] || getDefaultGameType());
+        const alliances = getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.PLAYER_MANAGEMENT);
         if (alliances.length === 0) {
             return await interaction.reply({
-                content: lang.players.addPlayer.error.noAssignedAlliances,
+                content: isMultiGameModeEnabled()
+                    ? lang.players.addPlayer.error.noAssignedAlliancesForGame
+                    : lang.players.addPlayer.error.noAssignedAlliances,
                 ephemeral: true
             });
         }
 
         // Create alliance selection embed and dropdown for new page
-        const { components } = createAllianceSelectionContainer(interaction, alliances, lang, newPage);
+        const { components } = createAllianceSelectionContainer(interaction, alliances, lang, newPage, gameType);
 
         // Update the message
         await interaction.update({
@@ -151,6 +174,52 @@ async function handleAddPlayerPagination(interaction) {
 }
 
 /**
+ * Handles game selection before alliance selection in both mode
+ * @param {import('discord.js').StringSelectMenuInteraction} interaction
+ */
+async function handleAddPlayerGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_add_player_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const selectedGameType = normalizeGameType(interaction.values[0], null);
+        if (!selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.addPlayer.error.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const alliances = getAlliancesForUserByGame(adminData, selectedGameType, PERMISSIONS.PLAYER_MANAGEMENT);
+        if (alliances.length === 0) {
+            return await interaction.reply({
+                content: lang.players.addPlayer.error.noAssignedAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        const { components } = createAllianceSelectionContainer(interaction, alliances, lang, 0, selectedGameType);
+
+        await interaction.update({
+            components,
+            flags: MessageFlags.IsComponentsV2
+        });
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleAddPlayerGameSelection');
+    }
+}
+
+/**
  * Handles alliance selection for add player
  * @param {import('discord.js').StringSelectMenuInteraction} interaction 
  */
@@ -159,7 +228,8 @@ async function handleAllianceSelection(interaction) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
     try {
         // Extract user ID from custom ID
-        const expectedUserId = interaction.customId.split('_')[4]; // alliance_select_add_player_userId
+        const customIdParts = interaction.customId.split('_');
+        const expectedUserId = customIdParts[4]; // alliance_select_add_player_userId_page_gameType?
 
         // Check if the interaction user matches the expected user
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
@@ -175,11 +245,19 @@ async function handleAllianceSelection(interaction) {
 
         // Get selected alliance
         const selectedAllianceId = parseInt(interaction.values[0]);
-        const alliance = allianceQueries.getAllianceById(selectedAllianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(selectedAllianceId);
+        const selectedGameType = normalizeGameType(customIdParts[6], null);
 
         if (!alliance) {
             return await interaction.reply({
                 content: lang.common.error,
+                ephemeral: true
+            });
+        }
+
+        if (selectedGameType && alliance.game_type !== selectedGameType) {
+            return await interaction.reply({
+                content: lang.players.addPlayer.error.invalidGameType,
                 ephemeral: true
             });
         }
@@ -252,7 +330,7 @@ async function handlePlayerFormButton(interaction) {
         }
 
         // Get alliance
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         if (!alliance) {
             return await interaction.reply({
                 content: lang.common.error,
@@ -309,7 +387,7 @@ async function handlePlayerIdModal(interaction) {
         }
 
         // Get alliance
-        const alliance = allianceQueries.getAllianceById(allianceId);
+        const alliance = allianceQueries.getAllianceByIdAny(allianceId);
         if (!alliance) {
             return await interaction.reply({
                 content: lang.common.error,
@@ -467,11 +545,14 @@ async function createAddPlayerProcess(adminId, allianceId, rawPlayerIds) {
         return null;
     }
 
+    const alliance = allianceQueries.getAllianceByIdAny(allianceId);
+
     return createProcess({
         admin_id: String(adminId),
         alliance_id: allianceId,
         player_ids: sanitizedPlayerIds,
-        action: 'addplayer'
+        action: 'addplayer',
+        game_type: alliance?.game_type || 'wos'
     });
 }
 
@@ -542,6 +623,7 @@ module.exports = {
     createAddPlayerButton,
     createAddPlayerProcess,
     handleAddPlayerButton,
+    handleAddPlayerGameSelection,
     handleAllianceSelection,
     handlePlayerFormButton,
     handlePlayerIdModal,

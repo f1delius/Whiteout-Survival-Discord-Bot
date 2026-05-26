@@ -1,4 +1,4 @@
-const { getProcessById, updateProcessStatus, updateProcessProgress, PROCESS_STATUS } = require('./createProcesses');
+const { getProcessById, resolveProcessGameType, updateProcessStatus, updateProcessProgress, PROCESS_STATUS } = require('./createProcesses');
 const { queueManager } = require('./queueManager');
 const { systemLogQueries } = require('../utility/database');
 const { executeAutoRefresh: executeAutoRefreshFunction } = require('../Alliance/refreshAlliance');
@@ -51,7 +51,8 @@ class ProcessExecutor {
             this.activeProcesses.set(process_id, {
                 startTime: Date.now(),
                 action: processData.action,
-                priority: processData.priority
+                priority: processData.priority,
+                gameType: resolveProcessGameType(processData)
             });
 
             try {
@@ -311,14 +312,17 @@ class ProcessExecutor {
     getExecutionStats() {
         const stats = {
             activeExecutions: this.activeProcesses.size,
+            activeByGame: {},
             processes: []
         };
 
         for (const [processId, info] of this.activeProcesses) {
+            stats.activeByGame[info.gameType] = (stats.activeByGame[info.gameType] || 0) + 1;
             stats.processes.push({
                 processId,
                 action: info.action,
                 priority: info.priority,
+                gameType: info.gameType,
                 duration: Date.now() - info.startTime
             });
         }

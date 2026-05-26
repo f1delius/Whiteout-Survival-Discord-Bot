@@ -1,4 +1,5 @@
 const { processQueries, systemLogQueries, allianceQueries } = require('../utility/database');
+const { normalizeGameType } = require('../utility/gameProfiles');
 
 /**
  * Priority levels for different process types
@@ -48,6 +49,29 @@ const PROCESS_STATUS = {
     FAILED: 'failed'
 };
 
+const LEGACY_PROCESS_GAME_TYPE = 'wos';
+
+function resolveProcessGameType(processData) {
+    try {
+        const detailsGameType = processData?.details?.game_type || processData?.details?.gameType;
+        if (detailsGameType) {
+            return normalizeGameType(detailsGameType);
+        }
+
+        const targetAllianceId = parseInt(processData?.target, 10);
+        if (!isNaN(targetAllianceId) && targetAllianceId > 0) {
+            const alliance = allianceQueries.getAllianceByIdAny(targetAllianceId);
+            if (alliance?.game_type) {
+                return normalizeGameType(alliance.game_type);
+            }
+        }
+    } catch (error) {
+        // Fall through to the legacy default below.
+    }
+
+    return LEGACY_PROCESS_GAME_TYPE;
+}
+
 /**
  * Creates a new process and stores it in the database
  * @param {Object} processData - Process data object
@@ -96,9 +120,23 @@ async function createProcess(processData) {
         // For redeem_giftcode action, add alliance priority to base priority
         // This ensures higher-priority alliances redeem codes first
         let priority = basePriority;
+        let resolvedGameType = processData.game_type || null;
+        let targetAlliance = null;
+
+        if (allianceIdInt > 0) {
+            try {
+                targetAlliance = allianceQueries.getAllianceByIdAny(allianceIdInt);
+                if (targetAlliance?.game_type) {
+                    resolvedGameType = targetAlliance.game_type;
+                }
+            } catch (allianceLookupError) {
+                // Keep backward-compatible fallback if alliance lookup fails
+            }
+        }
+
         if (action.toLowerCase() === 'redeem_giftcode') {
             try {
-                const alliance = allianceQueries.getAllianceById(allianceIdInt);
+                const alliance = targetAlliance || allianceQueries.getAllianceByIdAny(allianceIdInt);
                 if (alliance && alliance.priority) {
                     priority = basePriority + alliance.priority;
                     // to-do: implement debug mode to turn on this log
@@ -126,6 +164,9 @@ async function createProcess(processData) {
 
         // Prepare data object with player_ids and any extra metadata
         const dataObject = { player_ids };
+        if (resolvedGameType) {
+            dataObject.game_type = resolvedGameType;
+        }
 
         // Include ID channel metadata if present
         if (processData.id_channel_message_id) {
@@ -509,6 +550,7 @@ function resetCrashedProcesses() {
 module.exports = {
     createProcess,
     getProcessById,
+    resolveProcessGameType,
     updateProcessStatus,
     updateProcessProgress,
     deleteProcess,
@@ -521,6 +563,7 @@ module.exports = {
     getProcessesByActionAndTarget,
     hasHigherPriorityQueued,
     resetCrashedProcesses,
+    LEGACY_PROCESS_GAME_TYPE,
     PROCESS_PRIORITIES,
     PROCESS_STATUS
 };

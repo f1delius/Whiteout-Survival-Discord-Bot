@@ -14,9 +14,53 @@ const {
 const { allianceQueries, giftCodeQueries, playerQueries, systemLogQueries } = require('../utility/database');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
 const { createRedeemProcess } = require('./redeemFunction');
+const { parseGameScopedGiftCode } = require('./gameScopedGiftCode');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
+const { getActiveGameTypes, isMultiGameModeEnabled, getDefaultGameType } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
+
+function getScopedActiveGiftCodes(gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, null);
+    const activeGiftCodes = [];
+
+    for (const activeGameType of getActiveGameTypes()) {
+        if (resolvedGameType && activeGameType !== resolvedGameType) continue;
+
+        const gameGiftCodes = giftCodeQueries.getAllGiftCodes(activeGameType)
+            .filter(code => code.status === 'active')
+            .map(code => ({
+                ...code,
+                game_type: code.game_type || activeGameType
+            }));
+
+        activeGiftCodes.push(...gameGiftCodes);
+    }
+
+    return activeGiftCodes;
+}
+
+function getRedeemAlliancesForGame(adminData, gameType) {
+    return getAlliancesForUserByGame(adminData, gameType, PERMISSIONS.GIFT_CODE_MANAGEMENT);
+}
+
+function filterAlliancesWithPlayers(alliances, gameType) {
+    const allianceIds = alliances.map(a => a.id);
+    const playerCountResults = allianceIds.length > 0
+        ? playerQueries.getPlayerCountsByAllianceIds(allianceIds, gameType)
+        : [];
+
+    const alliancesWithPlayers = new Set(playerCountResults.map(row => row.alliance_id));
+    return alliances.filter(alliance => alliancesWithPlayers.has(alliance.id));
+}
+
+function buildGiftCodeOptionValue(giftCode) {
+    const gameType = giftCode.game_type || 'wos';
+    return isMultiGameModeEnabled()
+        ? `${gameType}:${giftCode.gift_code}`
+        : giftCode.gift_code;
+}
 
 /**
  * Creates a manual redeem gift code button
@@ -64,8 +108,25 @@ async function handleManualRedeemButton(interaction) {
             });
         }
 
+        if (isMultiGameModeEnabled()) {
+            const { components } = createGameSelectionComponents({
+                interaction,
+                lang,
+                customIdPrefix: 'select_manual_redeem_game',
+                title: lang.giftCode.redeemGiftCode.content.title.base,
+                description: lang.giftCode.redeemGiftCode.content.selectGameDescription
+            });
+
+            return await interaction.update({
+                components,
+                flags: MessageFlags.IsComponentsV2
+            });
+        }
+
+        const selectedGameType = getDefaultGameType();
+
         // check if there is any giftcode available, if not, return error
-        const allGiftCodes = giftCodeQueries.getAllGiftCodes();
+        const allGiftCodes = getScopedActiveGiftCodes(selectedGameType);
         if (!allGiftCodes || allGiftCodes.length === 0) {
             return await interaction.reply({
                 content: lang.giftCode.redeemGiftCode.errors.noGiftCodes,
@@ -73,29 +134,8 @@ async function handleManualRedeemButton(interaction) {
             });
         }
 
-        // Get alliances based on permissions
-        let alliances;
-        if (hasFullAccess) {
-            // Owner and full access admins can see all alliances
-            alliances = allianceQueries.getAllAlliances();
-        } else if (hasAccess) {
-            // Regular admins with alliance management can only see assigned alliances
-            const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
-
-            // Get only assigned alliances
-            alliances = allianceQueries.getAllAlliances().filter(alliance =>
-                assignedAllianceIds.includes(alliance.id)
-            );
-        }
-
-        // Filter to only alliances that have players
-        const allianceIds = alliances.map(a => a.id);
-        const playerCountResults = allianceIds.length > 0
-            ? playerQueries.getPlayerCountsByAllianceIds(allianceIds)
-            : [];
-
-        const alliancesWithPlayers = new Set(playerCountResults.map(row => row.alliance_id));
-        alliances = alliances.filter(alliance => alliancesWithPlayers.has(alliance.id));
+        let alliances = getRedeemAlliancesForGame(adminData, selectedGameType);
+        alliances = filterAlliancesWithPlayers(alliances, selectedGameType);
 
         if (alliances.length === 0) {
             return await interaction.reply({
@@ -110,7 +150,8 @@ async function handleManualRedeemButton(interaction) {
             lang,
             0,
             hasFullAccess,
-            interaction
+            interaction,
+            selectedGameType
         );
 
         await interaction.update({
@@ -123,6 +164,70 @@ async function handleManualRedeemButton(interaction) {
     }
 }
 
+async function handleManualRedeemGameSelection(interaction) {
+    const { adminData, lang } = getUserInfo(interaction.user.id);
+
+    try {
+        const expectedUserId = interaction.customId.split('_')[4]; // select_manual_redeem_game_userId
+
+        if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+        const hasAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS, PERMISSIONS.GIFT_CODE_MANAGEMENT);
+        const hasFullAccess = hasPermission(adminData, PERMISSIONS.FULL_ACCESS);
+
+        if (!hasAccess) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
+        const selectedGameType = normalizeGameType(interaction.values[0], null);
+        if (!selectedGameType) {
+            return await interaction.reply({
+                content: lang.giftCode.redeemGiftCode.errors.invalidGameType,
+                ephemeral: true
+            });
+        }
+
+        const allGiftCodes = getScopedActiveGiftCodes(selectedGameType);
+        if (!allGiftCodes || allGiftCodes.length === 0) {
+            return await interaction.reply({
+                content: lang.giftCode.redeemGiftCode.errors.noGiftCodesForGame,
+                ephemeral: true
+            });
+        }
+
+        let alliances = getRedeemAlliancesForGame(adminData, selectedGameType);
+        alliances = filterAlliancesWithPlayers(alliances, selectedGameType);
+
+        if (alliances.length === 0) {
+            return await interaction.reply({
+                content: lang.giftCode.redeemGiftCode.errors.noAlliancesForGame,
+                ephemeral: true
+            });
+        }
+
+        const { components } = createAllianceSelectionContainer(
+            alliances,
+            interaction.user.id,
+            lang,
+            0,
+            hasFullAccess,
+            interaction,
+            selectedGameType
+        );
+
+        await interaction.update({
+            components,
+            flags: MessageFlags.IsComponentsV2
+        });
+
+    } catch (error) {
+        await handleError(interaction, lang, error, 'handleManualRedeemGameSelection');
+    }
+}
+
 /**
  * Creates alliance selection embed with pagination
  * @param {Array} alliances - Array of alliance objects
@@ -132,17 +237,18 @@ async function handleManualRedeemButton(interaction) {
  * @param {boolean} isOwnerOrFullAccess - Whether user is owner or has full access
  * @returns {Object} Embed and components
  */
-function createAllianceSelectionContainer(alliances, userId, lang, page = 0, isOwnerOrFullAccess = false, interaction) {
+function createAllianceSelectionContainer(alliances, userId, lang, page = 0, isOwnerOrFullAccess = false, interaction, gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, null);
     const itemsPerPage = 24;
-    const totalPages = Math.ceil(alliances.length / itemsPerPage);
+    const totalPages = Math.max(1, Math.ceil(alliances.length / itemsPerPage));
     const startIndex = page * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     const currentPageAlliances = alliances.slice(startIndex, endIndex);
 
     // Pre-fetch player counts for all alliances on this page (and overall for totals)
     const allianceIds = alliances.map(a => a.id);
-    const playerCountResults = allianceIds.length > 0
-        ? playerQueries.getPlayerCountsByAllianceIds(allianceIds)
+    const playerCountResults = allianceIds.length > 0 && resolvedGameType
+        ? playerQueries.getPlayerCountsByAllianceIds(allianceIds, resolvedGameType)
         : [];
 
     const playerCounts = new Map();
@@ -182,7 +288,7 @@ function createAllianceSelectionContainer(alliances, userId, lang, page = 0, isO
 
     // Create dropdown menu (multi-select)
     const allianceSelect = new StringSelectMenuBuilder()
-        .setCustomId(`manual_redeem_alliance_select_${userId}_${page}`)
+        .setCustomId(`manual_redeem_alliance_select_${userId}_${page}${resolvedGameType ? `_${resolvedGameType}` : ''}`)
         .setPlaceholder(lang.giftCode.redeemGiftCode.selectMenu.selectAlliance.placeholder)
         .setMinValues(1)
         .setMaxValues(Math.min(options.length, 25)) // Discord max is 25
@@ -199,7 +305,8 @@ function createAllianceSelectionContainer(alliances, userId, lang, page = 0, isO
         userId: userId,
         currentPage: page,
         totalPages: totalPages,
-        lang: lang
+        lang: lang,
+        contextData: resolvedGameType ? [resolvedGameType] : []
     });
     if (paginationRow) {
         actionRows.push(paginationRow);
@@ -238,7 +345,7 @@ async function handleAllianceSelectionPagination(interaction) {
     const { adminData, lang } = getUserInfo(interaction.user.id);
 
     try {
-        const { userId, newPage } = parsePaginationCustomId(interaction.customId, 0);
+        const { userId, newPage, contextData } = parsePaginationCustomId(interaction.customId, isMultiGameModeEnabled() ? 1 : 0);
 
         if (!(await assertUserMatches(interaction, userId, lang))) return;
 
@@ -253,29 +360,9 @@ async function handleAllianceSelectionPagination(interaction) {
             });
         }
 
-        // Get alliances based on permissions
-        let alliances;
-        if (hasFullAccess) {
-            // Owner and full access admins can see all alliances
-            alliances = allianceQueries.getAllAlliances();
-        } else if (hasAccess) {
-            // Regular admins with alliance management can only see assigned alliances
-            const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
-
-            // Get only assigned alliances
-            alliances = allianceQueries.getAllAlliances().filter(alliance =>
-                assignedAllianceIds.includes(alliance.id)
-            );
-        }
-
-        // Filter to only alliances that have players
-        const allianceIds = alliances.map(a => a.id);
-        const playerCountResults = allianceIds.length > 0
-            ? playerQueries.getPlayerCountsByAllianceIds(allianceIds)
-            : [];
-
-        const alliancesWithPlayers = new Set(playerCountResults.map(row => row.alliance_id));
-        alliances = alliances.filter(alliance => alliancesWithPlayers.has(alliance.id));
+        const selectedGameType = normalizeGameType(contextData[0] || getDefaultGameType());
+        let alliances = getRedeemAlliancesForGame(adminData, selectedGameType);
+        alliances = filterAlliancesWithPlayers(alliances, selectedGameType);
 
         const { components } = createAllianceSelectionContainer(
             alliances,
@@ -283,7 +370,8 @@ async function handleAllianceSelectionPagination(interaction) {
             lang,
             newPage,
             hasFullAccess,
-            interaction
+            interaction,
+            selectedGameType
         );
 
         await interaction.update({ components, flags: MessageFlags.IsComponentsV2 });
@@ -304,6 +392,7 @@ async function handleAllianceSelection(interaction) {
         // Extract user ID from custom ID
         const customIdParts = interaction.customId.split('_');
         const expectedUserId = customIdParts[4]; // manual_redeem_alliance_select_userId_page
+        const selectedGameType = normalizeGameType(customIdParts[6] || getDefaultGameType());
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
 
@@ -324,23 +413,12 @@ async function handleAllianceSelection(interaction) {
         // Handle "All Alliances" selection
         let finalAllianceIds = selectedAllianceIds;
         if (selectedAllianceIds.includes('ALL_ALLIANCES')) {
-            // Get all alliances based on permissions
-            let allAlliances;
-            if (hasFullAccess) {
-                allAlliances = allianceQueries.getAllAlliances();
-            } else if (hasAccess) {
-                const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
-                allAlliances = allianceQueries.getAllAlliances().filter(alliance =>
-                    assignedAllianceIds.includes(alliance.id)
-                );
-            }
-
+            let allAlliances = getRedeemAlliancesForGame(adminData, selectedGameType);
             finalAllianceIds = allAlliances.map(alliance => alliance.id.toString());
         }
 
         // Get active gift codes
-        const allGiftCodes = giftCodeQueries.getAllGiftCodes();
-        const activeGiftCodes = allGiftCodes.filter(code => code.status === 'active');
+        const activeGiftCodes = getScopedActiveGiftCodes(selectedGameType);
 
         if (activeGiftCodes.length === 0) {
             return await interaction.reply({
@@ -355,7 +433,8 @@ async function handleAllianceSelection(interaction) {
             interaction.user.id,
             lang,
             0,
-            interaction
+            interaction,
+            selectedGameType
         );
 
         await interaction.update({
@@ -377,17 +456,18 @@ async function handleAllianceSelection(interaction) {
  * @param {number} page - Current page number
  * @returns {Object} container and components
  */
-function createGiftCodeSelectionContainer(giftCodes, allianceIds, userId, lang, page = 0, interaction) {
+function createGiftCodeSelectionContainer(giftCodes, allianceIds, userId, lang, page = 0, interaction, gameType = null) {
+    const resolvedGameType = normalizeGameType(gameType, null);
     const itemsPerPage = 24;
-    const totalPages = Math.ceil(giftCodes.length / itemsPerPage);
+    const totalPages = Math.max(1, Math.ceil(giftCodes.length / itemsPerPage));
     const startIndex = page * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     const currentPageCodes = giftCodes.slice(startIndex, endIndex);
 
     // Get alliance names with a single batch query
     const allianceIdsNumeric = allianceIds.map(id => Number(id));
-    const allianceRows = allianceIdsNumeric.length > 0
-        ? allianceQueries.getAlliancesByIds(allianceIdsNumeric)
+    const allianceRows = allianceIdsNumeric.length > 0 && resolvedGameType
+        ? allianceQueries.getAlliancesByIds(allianceIdsNumeric, resolvedGameType)
         : [];
     const allianceNameMap = new Map(allianceRows.map(a => [a.id, a.name]));
 
@@ -414,9 +494,10 @@ function createGiftCodeSelectionContainer(giftCodes, allianceIds, userId, lang, 
     const giftCodeOptions = currentPageCodes.map(code => {
         const vipLabel = code.is_vip ? lang.giftCode.redeemGiftCode.content.vip : '';
         const sourceLabel = code.source === 'api' ? ` ${lang.giftCode.redeemGiftCode.content.api}` : ` ${lang.giftCode.redeemGiftCode.content.manual}`;
+        const gameLabel = isMultiGameModeEnabled() ? `[${String(code.game_type || 'wos').toUpperCase()}] ` : '';
         return new StringSelectMenuOptionBuilder()
-            .setLabel(`${vipLabel} ${code.gift_code}`)
-            .setValue(code.gift_code)
+            .setLabel(`${gameLabel}${vipLabel} ${code.gift_code}`.trim())
+            .setValue(buildGiftCodeOptionValue(code))
             .setDescription(lang.giftCode.redeemGiftCode.selectMenu.selectGiftCode.description
                 .replace('{source}', sourceLabel)
                 .replace('{date}', new Date(code.date).toLocaleDateString()))
@@ -427,7 +508,7 @@ function createGiftCodeSelectionContainer(giftCodes, allianceIds, userId, lang, 
 
     // Create dropdown menu
     const giftCodeSelect = new StringSelectMenuBuilder()
-        .setCustomId(`manual_redeem_code_select_${userId}_${allianceIds.join('-')}_${page}`)
+        .setCustomId(`manual_redeem_code_select_${userId}_${allianceIds.join('-')}_${page}${resolvedGameType ? `_${resolvedGameType}` : ''}`)
         .setPlaceholder(lang.giftCode.redeemGiftCode.selectMenu.selectGiftCode.placeholder)
         .addOptions(options);
 
@@ -443,7 +524,7 @@ function createGiftCodeSelectionContainer(giftCodes, allianceIds, userId, lang, 
         currentPage: page,
         totalPages: totalPages,
         lang: lang,
-        contextData: allianceIds
+        contextData: [allianceIds.join('-'), ...(resolvedGameType ? [resolvedGameType] : [])]
     });
     if (paginationRow) {
         actionRows.push(paginationRow);
@@ -482,7 +563,7 @@ async function handleGiftCodeSelectionPagination(interaction) {
 
     try {
         // Parse pagination with alliance IDs as context
-        const { userId, newPage, contextData } = parsePaginationCustomId(interaction.customId, 1);
+        const { userId, newPage, contextData } = parsePaginationCustomId(interaction.customId, isMultiGameModeEnabled() ? 2 : 1);
 
         if (!(await assertUserMatches(interaction, userId, lang))) return;
 
@@ -498,9 +579,9 @@ async function handleGiftCodeSelectionPagination(interaction) {
 
         // Context data contains alliance IDs joined with '-'
         const allianceIds = contextData[0].split('-');
+        const selectedGameType = normalizeGameType(contextData[1] || getDefaultGameType());
 
-        const allGiftCodes = giftCodeQueries.getAllGiftCodes();
-        const activeGiftCodes = allGiftCodes.filter(code => code.status === 'active');
+        const activeGiftCodes = getScopedActiveGiftCodes(selectedGameType);
 
         const { components } = createGiftCodeSelectionContainer(
             activeGiftCodes,
@@ -508,7 +589,8 @@ async function handleGiftCodeSelectionPagination(interaction) {
             userId,
             lang,
             newPage,
-            interaction
+            interaction,
+            selectedGameType
         );
 
         await interaction.update({
@@ -533,6 +615,7 @@ async function handleGiftCodeSelection(interaction) {
         const customIdParts = interaction.customId.split('_');
         const expectedUserId = customIdParts[4]; // manual_redeem_code_select_userId_allianceIds_page
         const allianceIdsStr = customIdParts[5];
+        const selectedGameType = normalizeGameType(customIdParts[7] || getDefaultGameType());
 
         if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
         // Check permissions: must be owner, have FULL_ACCESS, or have GIFT_CODE_MANAGEMENT
@@ -553,8 +636,7 @@ async function handleGiftCodeSelection(interaction) {
         if (selectedGiftCode === 'ALL_GIFT_CODES') {
             if (hasFullAccess) {
                 // Get all active gift codes
-                const allGiftCodes = giftCodeQueries.getAllGiftCodes();
-                giftCodesToRedeem = allGiftCodes.filter(code => code.status === 'active');
+                giftCodesToRedeem = getScopedActiveGiftCodes(selectedGameType);
             } else {
                 // Unauthorized attempt to use ALL_GIFT_CODES without full access
                 return await interaction.reply({
@@ -564,9 +646,23 @@ async function handleGiftCodeSelection(interaction) {
             }
         } else {
             // Single gift code selection
-            const giftCodeData = giftCodeQueries.getGiftCode(selectedGiftCode);
-            if (giftCodeData && giftCodeData.status === 'active') {
-                giftCodesToRedeem = [giftCodeData];
+            const { gameType, giftCode, error } = parseGameScopedGiftCode(selectedGiftCode, {
+                strictBothMode: false
+            });
+
+            if (error) {
+                return await interaction.reply({
+                    content: error,
+                    ephemeral: true,
+                });
+            }
+
+            const giftCodeData = giftCodeQueries.getGiftCode(giftCode, gameType);
+            if (giftCodeData && giftCodeData.status === 'active' && normalizeGameType(giftCodeData.game_type || gameType) === selectedGameType) {
+                giftCodesToRedeem = [{
+                    ...giftCodeData,
+                    game_type: giftCodeData.game_type || gameType
+                }];
             } else {
                 return await interaction.reply({
                     content: lang.giftCode.redeemGiftCode.errors.invalidGiftCode,
@@ -579,14 +675,16 @@ async function handleGiftCodeSelection(interaction) {
         const processResults = [];
 
         for (const allianceId of allianceIds) {
-            const alliance = allianceQueries.getAllianceById(allianceId);
+            const alliance = allianceQueries.getAllianceById(allianceId, selectedGameType);
             if (!alliance) continue;
 
-            const players = playerQueries.getPlayersByAllianceId(allianceId);
+            const players = playerQueries.getPlayersByAllianceId(allianceId, selectedGameType);
             if (players.length === 0) continue;
 
             // Create redeem processes for each gift code
             for (const giftCode of giftCodesToRedeem) {
+                const gameType = giftCode.game_type || 'wos';
+
                 // Create redeem data
                 const redeemData = players.map(player => ({
                     id: player.fid,
@@ -599,13 +697,15 @@ async function handleGiftCodeSelection(interaction) {
                     id: alliance.id,
                     name: alliance.name,
                     channelId: alliance.channel_id,
-                    guildId: interaction.guildId
+                    guildId: interaction.guildId,
+                    gameType
                 };
 
                 // Create redeem process
                 const result = await createRedeemProcess(redeemData, {
                     adminId: interaction.user.id,
-                    allianceContext: allianceContext
+                    allianceContext: allianceContext,
+                    gameType
                 });
 
                 processResults.push({
@@ -622,7 +722,7 @@ async function handleGiftCodeSelection(interaction) {
         const totalProcesses = processResults.length;
         const successfulProcesses = processResults.filter(r => r.success).length;
         const displayCode = selectedGiftCode === 'ALL_GIFT_CODES' ?
-            `${giftCodesToRedeem.length} gift codes` : selectedGiftCode;
+            `${giftCodesToRedeem.length} gift codes` : giftCodesToRedeem[0]?.gift_code || selectedGiftCode;
 
         const container = [
             new ContainerBuilder()
@@ -649,22 +749,6 @@ async function handleGiftCodeSelection(interaction) {
             flags: MessageFlags.IsComponentsV2
         });
 
-        // Log the manual redeem action
-        systemLogQueries.addLog(
-            'manual_redeem',
-            `Manual redeem started by ${interaction.user.tag}`,
-            JSON.stringify({
-                user_id: interaction.user.id,
-                username: interaction.user.tag,
-                gift_codes: selectedGiftCode === 'ALL_GIFT_CODES' ?
-                    giftCodesToRedeem.map(gc => gc.gift_code) : [selectedGiftCode],
-                alliances: allianceIds,
-                process_ids: processResults.map(r => r.processId).filter(Boolean),
-                total_processes: totalProcesses,
-                function: 'handleGiftCodeSelection'
-            })
-        );
-
     } catch (error) {
         await handleError(interaction, lang, error, 'handleGiftCodeSelection');
     }
@@ -673,6 +757,7 @@ async function handleGiftCodeSelection(interaction) {
 module.exports = {
     createManualRedeemButton,
     handleManualRedeemButton,
+    handleManualRedeemGameSelection,
     handleAllianceSelectionPagination,
     handleAllianceSelection,
     handleGiftCodeSelectionPagination,

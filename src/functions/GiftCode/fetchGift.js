@@ -6,7 +6,9 @@ const { createRedeemProcess } = require('./redeemFunction');
 const languages = require('../../i18n');
 const { getUserInfo, handleError } = require('../utility/commonFunctions');
 const { replaceEmojiPlaceholders, getGlobalEmojiMap } = require('../utility/emojis');
-const { GIFT_CODE_API_CONFIG } = require('../utility/apiConfig');
+const { getGiftCodeApiConfig } = require('../utility/apiConfig');
+const { getActiveGameTypes, getDefaultGameType } = require('../utility/gameRuntime');
+const { normalizeGameType } = require('../utility/gameProfiles');
 
 const isDevMode = process.env.WOSLAND_DEV_MODE === '1';
 
@@ -16,10 +18,13 @@ const isDevMode = process.env.WOSLAND_DEV_MODE === '1';
  * Handles periodic synchronization with the central gift code API
  */
 class GiftCodeAPI {
-    constructor(bot) {
+    constructor(bot, gameType = getDefaultGameType()) {
         this.bot = bot;
-        this.apiUrl = GIFT_CODE_API_CONFIG.API_URL;
-        this.apiKey = GIFT_CODE_API_CONFIG.API_KEY;
+        this.gameType = normalizeGameType(gameType);
+
+        const giftCodeApiConfig = getGiftCodeApiConfig(this.gameType);
+        this.apiUrl = giftCodeApiConfig.API_URL;
+        this.apiKey = giftCodeApiConfig.API_KEY;
 
         // Keep-alive HTTP agent for connection pooling
         this.httpAgent = new http.Agent({
@@ -196,7 +201,7 @@ class GiftCodeAPI {
      */
     async validateExistingCodes() {
         try {
-            const codesToValidate = giftCodeQueries.getCodesNeedingValidation();
+            const codesToValidate = giftCodeQueries.getCodesNeedingValidation(this.gameType);
 
             if (codesToValidate.length === 0) {
                 return;
@@ -216,7 +221,8 @@ class GiftCodeAPI {
                             status: 'validation'
                         }
                     ], {
-                        adminId: 'SYSTEM_24H_VALIDATION'
+                        adminId: 'SYSTEM_24H_VALIDATION',
+                        gameType: this.gameType
                     });
 
                     // Check giftCodeActive instead of success
@@ -224,13 +230,13 @@ class GiftCodeAPI {
                     // giftCodeActive=false means the code is expired/invalid and cannot be redeemed
                     if (validationResult?.success && validationResult.results?.[0]?.giftCodeActive === true) {
                         // Code is still valid and can be used - update last_validated timestamp
-                        giftCodeQueries.updateLastValidated(codeData.gift_code);
+                        giftCodeQueries.updateLastValidated(codeData.gift_code, this.gameType);
                     } else {
                         // Code is now invalid/expired/used - delete it and its usage history, then remove from API
                         // This allows the code to be re-added and users to redeem it again if it becomes active
                         const message = validationResult?.message || validationResult?.results?.[0]?.message || 'Unknown error';
                         const status = validationResult?.results?.[0]?.status || 'UNKNOWN';
-                        giftCodeQueries.removeGiftCode(codeData.gift_code);
+                        giftCodeQueries.removeGiftCode(codeData.gift_code, this.gameType);
 
                         // Remove from API
                         try {
@@ -258,7 +264,7 @@ class GiftCodeAPI {
 
             // Get all gift codes from local database
             const dbCodes = {};
-            const allCodes = giftCodeQueries.getAllGiftCodes();
+            const allCodes = giftCodeQueries.getAllGiftCodes(this.gameType);
             allCodes.forEach(row => {
                 dbCodes[row.gift_code] = {
                     date: row.date,
@@ -383,11 +389,11 @@ class GiftCodeAPI {
                         for (const { code, date } of newCodesToValidate) {
                             try {
                                 // Check if code was added between snapshot and now (e.g., manual add or concurrent sync)
-                                const existing = giftCodeQueries.getGiftCode(code);
+                                const existing = giftCodeQueries.getGiftCode(code, this.gameType);
                                 if (existing) continue;
 
                                 // addGiftCode(giftCode, status, addedBy, source, apiPushed, isVip)
-                                giftCodeQueries.addGiftCode(code, 'active', 'system', 'api', true, false);
+                                giftCodeQueries.addGiftCode(code, 'active', 'system', 'api', true, false, this.gameType);
                                 newCodesForAutoRedeem.push({ code, date, isVipCode: false });
                             } catch (dbError) {
                                 // UNIQUE constraint or other DB error — skip silently
@@ -399,14 +405,14 @@ class GiftCodeAPI {
                         if (newCodesForAutoRedeem.length > 0) {
                             await this.notifyNewCodes(newCodesForAutoRedeem);
 
-                            const autoRedeemAlliances = allianceQueries.getAlliancesWithAutoRedeem();
+                            const autoRedeemAlliances = allianceQueries.getAlliancesWithAutoRedeem(this.gameType);
 
                             // Create processes SEQUENTIALLY so the queue system properly
                             // queues them (first = ACTIVE, rest = QUEUED).
                             for (const { code, date, isVipCode } of newCodesForAutoRedeem) {
                                 for (const alliance of autoRedeemAlliances) {
                                     try {
-                                        await this.createAutoRedeemProcessForCodeAndAlliance(code, alliance, isVipCode);
+                                    await this.createAutoRedeemProcessForCodeAndAlliance(code, alliance, isVipCode);
                                     } catch (error) {
                                         await handleError(null, null, error, `autoRedeemProcessCreation_${code}_${alliance.id}`, false);
                                     }
@@ -441,7 +447,7 @@ class GiftCodeAPI {
                                 // Check if code already exists in API
                                 const existsInAPI = await this.checkGiftcode(code);
                                 if (existsInAPI) {
-                                    giftCodeQueries.updateApiPushed(true, code);
+                                    giftCodeQueries.updateApiPushed(true, code, this.gameType);
                                     continue;
                                 }
 
@@ -462,7 +468,7 @@ class GiftCodeAPI {
                                 });
 
                                 if (postResponse.status === 409 || postResponse.status === 200) {
-                                    giftCodeQueries.updateApiPushed(true, code);
+                                    giftCodeQueries.updateApiPushed(true, code, this.gameType);
                                 }
                             } catch (error) {
                                 await handleError(null, null, error, 'pushCodeToAPI', false);
@@ -496,7 +502,7 @@ class GiftCodeAPI {
     async addGiftcode(giftcode) {
         try {
             // Check if code already exists in our database
-            const existing = giftCodeQueries.getGiftCode(giftcode);
+            const existing = giftCodeQueries.getGiftCode(giftcode, this.gameType);
             if (existing) {
                 // Don't add invalid codes to API
                 if (existing.status === 'invalid') {
@@ -541,7 +547,7 @@ class GiftCodeAPI {
                             // addGiftCode(giftCode, status, addedBy, source, apiPushed, isVip)
                             // This function is called programmatically (no user context), so use 'system'
                             // Since code is immediately pushed to API, mark api_pushed as true
-                            giftCodeQueries.addGiftCode(giftcode, 'active', 'system', 'manual', true, false);
+                            giftCodeQueries.addGiftCode(giftcode, 'active', 'system', 'manual', true, false, this.gameType);
 
                             return true;
                         } else {
@@ -560,7 +566,7 @@ class GiftCodeAPI {
                     // Check if code was rejected as invalid
                     if (responseText.toLowerCase().includes('invalid')) {
                         console.warn(`Code ${giftcode} marked invalid by API`);
-                        giftCodeQueries.updateGiftCodeStatus('invalid', giftcode);
+                        giftCodeQueries.updateGiftCodeStatus('invalid', giftcode, this.gameType);
                     }
 
                     const backoffTime = await this.handleApiError(response, responseText);
@@ -590,7 +596,7 @@ class GiftCodeAPI {
             // Check if code exists in API
             const existsInAPI = await this.checkGiftcode(giftcode);
             if (!existsInAPI) {
-                giftCodeQueries.updateGiftCodeStatus('invalid', giftcode);
+                giftCodeQueries.updateGiftCodeStatus('invalid', giftcode, this.gameType);
                 return true;
             }
 
@@ -615,7 +621,7 @@ class GiftCodeAPI {
                     try {
                         const result = JSON.parse(responseText);
                         if (result.success === true) {
-                            giftCodeQueries.updateGiftCodeStatus('invalid', giftcode);
+                            giftCodeQueries.updateGiftCodeStatus('invalid', giftcode, this.gameType);
                             return true;
                         } else {
                             console.warn(`API didn't confirm removal of code ${giftcode}: ${responseText.substring(0, 200)}`);
@@ -718,13 +724,15 @@ class GiftCodeAPI {
                 id: alliance.id,
                 name: alliance.name,
                 channelId: alliance.channel_id,
-                guildId: null // Auto-redeem doesn't have guild context
+                guildId: null, // Auto-redeem doesn't have guild context
+                gameType: this.gameType
             };
 
             // Create redeem process with SYSTEM_AUTO_REDEEM as admin
             const result = await createRedeemProcess(redeemData, {
                 adminId: 'SYSTEM_AUTO_REDEEM',
-                allianceContext: allianceContext
+                allianceContext: allianceContext,
+                gameType: this.gameType
             });
 
             return result;
@@ -756,7 +764,10 @@ class GiftCodeAPI {
                 return;
             }
 
-            const autoRedeemCount = allianceQueries.getAlliancesWithAutoRedeem().length;
+            const autoRedeemCount = allianceQueries.getAlliancesWithAutoRedeem(this.gameType).length;
+            const gameLabel = this.gameType === 'ks'
+                ? 'Kingshot'
+                : 'Whiteout Survival';
 
             // --- Owner admin DMs ---
             const allAdmins = adminQueries.getAllAdmins();
@@ -773,6 +784,7 @@ class GiftCodeAPI {
                             value: lang.giftCode.apiGiftCode.content.giftCodeDetailsField.value
                                 .replace('{giftCode}', code)
                                 .replace('{date}', date)
+                                .replace('{game}', gameLabel)
                                 .replace('{source}', lang.giftCode.apiGiftCode.content.sourceAPI)
                                 .replace('{time}', `<t:${Math.floor(Date.now() / 1000)}:R>`)
                         })
@@ -801,7 +813,7 @@ class GiftCodeAPI {
 
             // --- Gift code channel notifications ---
             try {
-                const giftChannels = giftCodeChannelQueries.getAllChannels();
+                const giftChannels = giftCodeChannelQueries.getAllChannelsAny();
                 if (giftChannels && giftChannels.length > 0) {
                     // Use English for channel embeds (public channels, no per-user lang)
                     const enLang = languages['en'] || languages[Object.keys(languages)[0]];
@@ -815,6 +827,7 @@ class GiftCodeAPI {
                                 value: replaceEmojiPlaceholders(enLang.giftCode.apiGiftCode.content.giftCodeDetailsField.value, globalEmojiMap)
                                     .replace('{giftCode}', code)
                                     .replace('{date}', date)
+                                    .replace('{game}', gameLabel)
                                     .replace('{source}', enLang.giftCode.apiGiftCode.content.sourceAPI)
                                     .replace('{time}', `<t:${Math.floor(Date.now() / 1000)}:R>`)
                             })
@@ -853,26 +866,36 @@ class GiftCodeAPI {
 
 // Singleton instance
 let apiInstance = null;
+let apiInstances = new Map();
 
 /**
  * Initialize the Gift Code API client
  * @param {Object} bot - The Discord bot client
  */
 function initializeGiftCodeAPI(bot) {
-    if (!apiInstance) {
-        apiInstance = new GiftCodeAPI(bot);
+    const activeGameTypes = getActiveGameTypes();
+
+    for (const gameType of activeGameTypes) {
+        if (!apiInstances.has(gameType)) {
+            apiInstances.set(gameType, new GiftCodeAPI(bot, gameType));
+        }
     }
+
+    apiInstance = apiInstances.get(getDefaultGameType()) || apiInstances.values().next().value || null;
     return apiInstance;
 }
 
 /**
  * Get the Gift Code API instance
  */
-function getGiftCodeAPI() {
-    if (!apiInstance) {
+function getGiftCodeAPI(gameType = getDefaultGameType()) {
+    const normalizedGameType = normalizeGameType(gameType);
+    const instance = apiInstances.get(normalizedGameType) || apiInstance;
+
+    if (!instance) {
         throw new Error('Gift Code API not initialized. Call initializeGiftCodeAPI first.');
     }
-    return apiInstance;
+    return instance;
 }
 
 module.exports = {
