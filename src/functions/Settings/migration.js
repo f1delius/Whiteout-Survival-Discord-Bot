@@ -34,6 +34,7 @@ const {
 	giftCodeChannelQueries,
 	db
 } = require('../utility/database');
+const { getSettlementName } = require('../Players/furnaceReadable');
 const { getActiveGameTypes, getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
 
@@ -822,6 +823,19 @@ async function handleDBMigrationConfirm(interaction) {
 			global.pendingDBMigrations.delete(tempId);
 
 			if (migrationResult.success) {
+				const settlementName = getSettlementName(selectedGameType, lang);
+				const defaultSettlementName = getSettlementName('wos', lang);
+				const migratedDataValue = lang.settings.migration.content.migratedDataField.value
+					.replace('Furnace', settlementName)
+					.replace(defaultSettlementName, settlementName)
+					.replace('{alliancesCount}', migrationResult.stats.alliances)
+					.replace('{playersCount}', migrationResult.stats.players)
+					.replace('{adminsCount}', migrationResult.stats.admins)
+					.replace('{idChannelsCount}', migrationResult.stats.idChannels)
+					.replace('{furnaceChangesCount}', migrationResult.stats.furnaceChanges)
+					.replace('{nicknameChangesCount}', migrationResult.stats.nicknameChanges)
+					.replace('{notificationsCount}', migrationResult.stats.notifications);
+
 				const successContainer = [
 					new ContainerBuilder()
 						.setAccentColor(0x2ecc71)
@@ -830,14 +844,7 @@ async function handleDBMigrationConfirm(interaction) {
 								`${lang.settings.migration.content.title.success}\n` +
 
 								`${lang.settings.migration.content.migratedDataField.name}\n` +
-								`${lang.settings.migration.content.migratedDataField.value
-									.replace('{alliancesCount}', migrationResult.stats.alliances)
-									.replace('{playersCount}', migrationResult.stats.players)
-									.replace('{adminsCount}', migrationResult.stats.admins)
-									.replace('{idChannelsCount}', migrationResult.stats.idChannels)
-									.replace('{furnaceChangesCount}', migrationResult.stats.furnaceChanges)
-									.replace('{nicknameChangesCount}', migrationResult.stats.nicknameChanges)
-									.replace('{notificationsCount}', migrationResult.stats.notifications)}`
+								`${migratedDataValue}`
 							)
 						)
 				];

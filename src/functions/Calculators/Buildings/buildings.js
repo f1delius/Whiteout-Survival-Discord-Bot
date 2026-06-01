@@ -909,7 +909,7 @@ async function handleBuildingTypeSelection(interaction) {
     try {
         const ctx = await initHandler(interaction);
         if (!ctx) return;
-        const { userId, lang } = ctx;
+        const { parts, userId, lang } = ctx;
 
         if (!checkFeatureAccess('calculators', interaction)) {
             return await interaction.reply({ content: lang.common.noPermission, ephemeral: true });

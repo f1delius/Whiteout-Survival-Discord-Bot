@@ -619,12 +619,12 @@ const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
                         const settlementName = getSettlementName(p.game_type, lang);
                         const defaultSettlementName = getSettlementName('wos', lang);
                         return lang.players.addPlayer.content.addedField.value
-                            .replace('furnace', settlementName)
-                            .replace(defaultSettlementName.toLowerCase(), settlementName)
                             .replace('{nickname}', p.nickname)
                             .replace('{id}', p.fid)
                             .replace('{furnace}', getFurnaceReadable(p.furnace_level, lang, p.game_type))
-                            .replace('{state}', p.state);
+                            .replace('{state}', p.state)
+                            .replace('furnace', settlementName)
+                            .replace(defaultSettlementName.toLowerCase(), settlementName);
                     })
                     .join('\n');
 
@@ -649,12 +649,12 @@ const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
                         const settlementName = getSettlementName(p.game_type, lang);
                         const defaultSettlementName = getSettlementName('wos', lang);
                         return lang.players.addPlayer.content.alreadyExistField.value
-                            .replace('furnace', settlementName)
-                            .replace(defaultSettlementName.toLowerCase(), settlementName)
                             .replace('{nickname}', p.nickname)
                             .replace('{id}', p.fid)
                             .replace('{furnace}', getFurnaceReadable(p.furnace_level, lang, p.game_type))
-                            .replace('{state}', p.state);
+                            .replace('{state}', p.state)
+                            .replace('furnace', settlementName)
+                            .replace(defaultSettlementName.toLowerCase(), settlementName);
                     })
                     .join('\n');
 

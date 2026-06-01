@@ -1959,8 +1959,21 @@ function flushAndCloseDatabases() {
     try {
         const pluginDb = require('./plugins/web-panel/pluginDb');
         pluginDb.close();
-        console.log('[SHUTDOWN] Web panel database closed cleanly (WAL checkpointed).');
     } catch { /* plugin not loaded or already closed */ }
+
+    try {
+        const guides = require('./plugins/web-panel/guides');
+        guides.close();
+    } catch { /* guides DB not loaded or already closed */ }
+
+    try {
+        const positionReservations = require('./plugins/web-panel/positionReservations');
+        positionReservations.close();
+    } catch { /* reservations DB not loaded or already closed */ }
+
+    try {
+        console.log('[SHUTDOWN] Web panel database closed cleanly (WAL checkpointed).');
+    } catch { /* ignore logging failures */ }
 }
 
 function prepareForLauncherRespawn(exitCode) {

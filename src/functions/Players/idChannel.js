@@ -781,7 +781,7 @@ async function handleIdChannelSelect(interaction) {
         }
 
         // Check if this specific alliance is already linked to this channel
-        const existingChannels = idChannelQueries.getChannelsByChannelId(alliance.game_type, selectedChannel.id);
+        const existingChannels = idChannelQueries.getChannelsByChannelId(selectedChannel.id, alliance.game_type);
         if (existingChannels.some(ch => ch.alliance_id === allianceId)) {
             return await interaction.reply({
                 content: lang.players.idChannel.errors.channelAlreadyLinked

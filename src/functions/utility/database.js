@@ -1749,6 +1749,7 @@ module.exports = {
         getChannelById: (id, gameType = getDefaultGameType()) => idChannelQueries.getChannelById.get(resolveGameType(gameType), id),
         getChannelByChannelId: (channelId, gameType = getDefaultGameType()) => idChannelQueries.getChannelByChannelId.get(resolveGameType(gameType), channelId),
         getChannelsByChannelId: (channelId, gameType = getDefaultGameType()) => idChannelQueries.getChannelsByChannelId.all(resolveGameType(gameType), channelId),
+        getChannelsByChannelIdAny: (channelId) => idChannelQueries.getChannelsByChannelIdAny.all(channelId),
         removeIdChannel: (id, gameType = getDefaultGameType()) => idChannelQueries.deleteChannel.run(resolveGameType(gameType), id),
         deleteChannel: (id, gameType = getDefaultGameType()) => idChannelQueries.deleteChannel.run(resolveGameType(gameType), id),
         getAllChannels: (gameType = getDefaultGameType()) => idChannelQueries.getAllChannels.all(resolveGameType(gameType)),

@@ -117,34 +117,309 @@ function copyDirRecursive(src, dest) {
 }
 
 /**
- * Recursively scans a plugin directory and copies files/dirs that must survive updates
- * to a staging directory, preserving relative paths.
- * @param {string} baseDir - Root plugin directory
- * @param {string} currentDir - Current scan directory
- * @param {string} stageDir - Staging destination
- * @param {{ dirs: Set<string>, files: Set<string>, extensions: Set<string> }} preserveConfig
+ * Cleans up a downloaded archive or extracted temp directory.
+ * @param {string[]} pathsToCleanup - Temp paths to delete
  */
-function scanAndStagePluginData(baseDir, currentDir, stageDir, preserveConfig) {
-    if (!fs.existsSync(currentDir)) return;
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    for (const entry of entries) {
-        const srcPath = path.join(currentDir, entry.name);
-        const relPath = path.relative(baseDir, srcPath).replace(/\\/g, '/');
-        const destPath = path.join(stageDir, relPath);
-        if (entry.isDirectory()) {
-            if (preserveConfig.dirs.has(relPath)) {
-                copyDirRecursive(srcPath, destPath);
+function cleanupTempPaths(...pathsToCleanup) {
+    for (const cleanupPath of pathsToCleanup) {
+        try {
+            if (!cleanupPath || !fs.existsSync(cleanupPath)) continue;
+            const stat = fs.statSync(cleanupPath);
+            if (stat.isDirectory()) {
+                fs.rmSync(cleanupPath, { recursive: true, force: true });
             } else {
-                scanAndStagePluginData(baseDir, srcPath, stageDir, preserveConfig);
+                fs.unlinkSync(cleanupPath);
             }
-        } else if (
-            preserveConfig.files.has(relPath) ||
-            preserveConfig.extensions.has(path.extname(entry.name).toLowerCase())
-        ) {
-            fs.mkdirSync(path.dirname(destPath), { recursive: true });
-            fs.copyFileSync(srcPath, destPath);
+        } catch { /* best-effort cleanup */ }
+    }
+}
+
+/**
+ * Resolves the extracted plugin root from an extracted archive directory.
+ * @param {string} extractDir - Extraction directory
+ * @returns {string} Plugin root directory
+ */
+function getExtractedPluginRoot(extractDir) {
+    let pluginRoot = extractDir;
+    const extracted = fs.readdirSync(extractDir);
+    if (extracted.length === 1 && fs.statSync(path.join(extractDir, extracted[0])).isDirectory()) {
+        pluginRoot = path.join(extractDir, extracted[0]);
+    }
+    return pluginRoot;
+}
+
+/**
+ * Downloads and extracts a plugin archive from a URL.
+ * @param {string} pluginName - Plugin name for temp file naming
+ * @param {string} downloadUrl - ZIP download URL
+ * @returns {Promise<{ zipPath: string, extractDir: string, pluginRoot: string }>}
+ */
+async function downloadAndExtractPluginArchive(pluginName, downloadUrl) {
+    const os = require('os');
+    const { execSync } = require('child_process');
+
+    const zipPath = path.join(os.tmpdir(), `wos_plugin_${pluginName}.zip`);
+    const extractDir = path.join(os.tmpdir(), `wos_plugin_${pluginName}_extract`);
+
+    console.log(`[PLUGINS] Downloading ${pluginName}...`);
+    const downloaded = await downloadFile(downloadUrl, zipPath);
+    if (!downloaded) {
+        throw new Error(`Failed to download plugin "${pluginName}".`);
+    }
+
+    cleanupTempPaths(extractDir);
+    fs.mkdirSync(extractDir, { recursive: true });
+
+    const { binPath: sevenZipPath, cleanupPath: sevenZipCleanup } = await acquire7z(os.tmpdir());
+    if (!sevenZipPath) {
+        cleanupTempPaths(extractDir, zipPath);
+        throw new Error('Could not locate 7-Zip binary for extraction.');
+    }
+
+    try {
+        execSync(`"${sevenZipPath}" x "${zipPath}" -o"${extractDir}" -y`, { stdio: 'pipe' });
+    } catch (error) {
+        cleanupTempPaths(extractDir, zipPath);
+        throw new Error(`Failed to extract plugin: ${error.message}`);
+    } finally {
+        if (sevenZipCleanup && fs.existsSync(sevenZipCleanup)) {
+            try { fs.unlinkSync(sevenZipCleanup); } catch { /* best-effort cleanup */ }
         }
     }
+
+    const pluginRoot = getExtractedPluginRoot(extractDir);
+    if (!fs.existsSync(path.join(pluginRoot, 'plugin.json'))) {
+        cleanupTempPaths(extractDir, zipPath);
+        throw new Error(`Plugin "${pluginName}" archive is missing plugin.json.`);
+    }
+
+    return { zipPath, extractDir, pluginRoot };
+}
+
+/**
+ * Installs plugin dependencies if package.json exists.
+ * @param {string} pluginName - Plugin name for logs
+ * @param {string} pluginDir - Plugin directory
+ */
+function installPluginDependencies(pluginName, pluginDir) {
+    const { execSync } = require('child_process');
+    const pluginPkgPath = path.join(pluginDir, 'package.json');
+    if (!fs.existsSync(pluginPkgPath)) return;
+
+    console.log(`[PLUGINS] Installing dependencies for ${pluginName}...`);
+    try {
+        execSync('npm install --omit=optional --production', { cwd: pluginDir, stdio: 'pipe' });
+    } catch (error) {
+        console.warn(`[PLUGINS] Warning: dependency install for ${pluginName} failed: ${error.message}`);
+    }
+}
+
+/**
+ * Calculates MD5 hash of a file for comparison.
+ * @param {string} filePath - Path to the file
+ * @returns {string|null} MD5 hash or null if missing/unreadable
+ */
+function getFileHash(filePath) {
+    if (!fs.existsSync(filePath)) return null;
+    try {
+        const crypto = require('crypto');
+        const fileBuffer = fs.readFileSync(filePath);
+        return crypto.createHash('md5').update(fileBuffer).digest('hex');
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Merges preserve configs from the installed and downloaded manifests.
+ * @param  {...{ dirs: Set<string>, files: Set<string>, extensions: Set<string> }} configs - Preserve configs to merge
+ * @returns {{ dirs: Set<string>, files: Set<string>, extensions: Set<string> }}
+ */
+function mergePreserveConfigs(...configs) {
+    const merged = { dirs: new Set(), files: new Set(), extensions: new Set() };
+    for (const config of configs) {
+        if (!config) continue;
+        for (const dir of config.dirs || []) merged.dirs.add(dir);
+        for (const file of config.files || []) merged.files.add(file);
+        for (const extension of config.extensions || []) merged.extensions.add(extension);
+    }
+    return merged;
+}
+
+/**
+ * Returns true if a relative plugin path must be preserved during update.
+ * @param {string} relativePath - Path relative to plugin root
+ * @param {boolean} isDirectory - Whether the path is a directory
+ * @param {{ dirs: Set<string>, files: Set<string>, extensions: Set<string> }} preserveConfig
+ * @returns {boolean}
+ */
+function isProtectedPluginPath(relativePath, isDirectory, preserveConfig) {
+    const normalizedPath = relativePath.replace(/\\/g, '/');
+
+    for (const protectedDir of preserveConfig.dirs) {
+        if (normalizedPath === protectedDir || normalizedPath.startsWith(`${protectedDir}/`)) {
+            return true;
+        }
+    }
+
+    if (!isDirectory && preserveConfig.files.has(normalizedPath)) {
+        return true;
+    }
+
+    if (!isDirectory && preserveConfig.extensions.has(path.extname(normalizedPath).toLowerCase())) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Copies changed plugin files from the extracted update into the installed plugin directory.
+ * Protected files and directories are skipped.
+ * @param {string} srcDir - Extracted plugin root
+ * @param {string} destDir - Installed plugin directory
+ * @param {{ dirs: Set<string>, files: Set<string>, extensions: Set<string> }} preserveConfig
+ * @param {string} [baseDir=srcDir] - Root directory for relative path calculations
+ * @returns {{ updated: number, added: number, skipped: number, failed: number }}
+ */
+function copyUpdatedPluginFiles(srcDir, destDir, preserveConfig, baseDir = srcDir) {
+    const stats = { updated: 0, added: 0, skipped: 0, failed: 0 };
+    if (!fs.existsSync(srcDir)) return stats;
+
+    const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+    for (const entry of entries) {
+        const srcPath = path.join(srcDir, entry.name);
+        const destPath = path.join(destDir, entry.name);
+        const relativePath = path.relative(baseDir, srcPath).replace(/\\/g, '/');
+
+        if (entry.isDirectory()) {
+            if (isProtectedPluginPath(relativePath, true, preserveConfig) && fs.existsSync(destPath)) {
+                console.log(`[PLUGINS] Preserving directory: ${relativePath}`);
+                stats.skipped++;
+                continue;
+            }
+
+            if (!fs.existsSync(destPath)) {
+                fs.mkdirSync(destPath, { recursive: true });
+            }
+
+            const subStats = copyUpdatedPluginFiles(srcPath, destPath, preserveConfig, baseDir);
+            stats.updated += subStats.updated;
+            stats.added += subStats.added;
+            stats.skipped += subStats.skipped;
+            stats.failed += subStats.failed;
+            continue;
+        }
+
+        const destExists = fs.existsSync(destPath);
+        if (isProtectedPluginPath(relativePath, false, preserveConfig) && destExists) {
+            console.log(`[PLUGINS] Preserving file: ${relativePath}`);
+            stats.skipped++;
+            continue;
+        }
+
+        const srcHash = getFileHash(srcPath);
+        const destHash = destExists ? getFileHash(destPath) : null;
+
+        try {
+            if (!destHash) {
+                fs.mkdirSync(path.dirname(destPath), { recursive: true });
+                fs.copyFileSync(srcPath, destPath);
+                console.log(`[PLUGINS] Added: ${relativePath}`);
+                stats.added++;
+            } else if (srcHash !== destHash) {
+                fs.copyFileSync(srcPath, destPath);
+                console.log(`[PLUGINS] Updated: ${relativePath}`);
+                stats.updated++;
+            } else {
+                stats.skipped++;
+            }
+        } catch (error) {
+            console.error(`[PLUGINS] Failed to sync ${relativePath}: ${error.message}`);
+            stats.failed++;
+        }
+    }
+
+    return stats;
+}
+
+/**
+ * Deletes stale plugin files/dirs that no longer exist in the extracted update.
+ * Protected files and directories are kept.
+ * @param {string} destDir - Installed plugin directory
+ * @param {string} srcDir - Extracted plugin root
+ * @param {{ dirs: Set<string>, files: Set<string>, extensions: Set<string> }} preserveConfig
+ * @param {string} [baseDir=destDir] - Root directory for relative path calculations
+ * @returns {{ removed: number, skipped: number, failed: number }}
+ */
+function removeStalePluginFiles(destDir, srcDir, preserveConfig, baseDir = destDir) {
+    const stats = { removed: 0, skipped: 0, failed: 0 };
+    if (!fs.existsSync(destDir)) return stats;
+
+    const entries = fs.readdirSync(destDir, { withFileTypes: true });
+    for (const entry of entries) {
+        const destPath = path.join(destDir, entry.name);
+        const srcPath = path.join(srcDir, entry.name);
+        const relativePath = path.relative(baseDir, destPath).replace(/\\/g, '/');
+
+        if (entry.isDirectory()) {
+            if (entry.name === 'node_modules') {
+                stats.skipped++;
+                continue;
+            }
+
+            if (isProtectedPluginPath(relativePath, true, preserveConfig)) {
+                console.log(`[PLUGINS] Keeping protected directory: ${relativePath}`);
+                stats.skipped++;
+                continue;
+            }
+
+            if (!fs.existsSync(srcPath)) {
+                try {
+                    fs.rmSync(destPath, { recursive: true, force: true });
+                    console.log(`[PLUGINS] Removed stale directory: ${relativePath}`);
+                    stats.removed++;
+                } catch (error) {
+                    console.error(`[PLUGINS] Failed to remove stale directory ${relativePath}: ${error.message}`);
+                    stats.failed++;
+                }
+                continue;
+            }
+
+            const subStats = removeStalePluginFiles(destPath, srcPath, preserveConfig, baseDir);
+            stats.removed += subStats.removed;
+            stats.skipped += subStats.skipped;
+            stats.failed += subStats.failed;
+
+            try {
+                if (fs.existsSync(destPath) && fs.readdirSync(destPath).length === 0) {
+                    fs.rmdirSync(destPath);
+                }
+            } catch { /* best-effort cleanup */ }
+            continue;
+        }
+
+        if (isProtectedPluginPath(relativePath, false, preserveConfig)) {
+            console.log(`[PLUGINS] Keeping protected file: ${relativePath}`);
+            stats.skipped++;
+            continue;
+        }
+
+        if (!fs.existsSync(srcPath)) {
+            try {
+                fs.unlinkSync(destPath);
+                console.log(`[PLUGINS] Removed stale file: ${relativePath}`);
+                stats.removed++;
+            } catch (error) {
+                console.error(`[PLUGINS] Failed to remove stale file ${relativePath}: ${error.message}`);
+                stats.failed++;
+            }
+        } else {
+            stats.skipped++;
+        }
+    }
+
+    return stats;
 }
 
 /**
@@ -470,8 +745,6 @@ async function fetchRegistry() {
  * @returns {Promise<{ success: boolean, message: string }>}
  */
 async function installPlugin(pluginName, registrar, options = {}) {
-    const os = require('os');
-    const { execSync } = require('child_process');
     const { beforeRegister = null } = options;
 
     try {
@@ -494,48 +767,7 @@ async function installPlugin(pluginName, registrar, options = {}) {
         }
 
         const downloadUrl = entry.downloadUrl || `https://github.com/${PLUGIN_REPO}/raw/main/plugins/${pluginName}.zip`;
-        const zipPath = path.join(os.tmpdir(), `wos_plugin_${pluginName}.zip`);
-        const extractDir = path.join(os.tmpdir(), `wos_plugin_${pluginName}_extract`);
-
-        console.log(`[PLUGINS] Downloading ${pluginName}...`);
-        const downloaded = await downloadFile(downloadUrl, zipPath);
-        if (!downloaded) {
-            return { success: false, message: `Failed to download plugin "${pluginName}".` };
-        }
-
-        if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
-        fs.mkdirSync(extractDir, { recursive: true });
-
-        const { binPath: sevenZipPath, cleanupPath: sevenZipCleanup } = await acquire7z(os.tmpdir());
-        if (!sevenZipPath) {
-            if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
-            if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-            return { success: false, message: 'Could not locate 7-Zip binary for extraction.' };
-        }
-
-        try {
-            execSync(`"${sevenZipPath}" x "${zipPath}" -o"${extractDir}" -y`, { stdio: 'pipe' });
-        } catch (e) {
-            if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
-            if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-            return { success: false, message: `Failed to extract plugin: ${e.message}` };
-        } finally {
-            if (sevenZipCleanup && fs.existsSync(sevenZipCleanup)) {
-                try { fs.unlinkSync(sevenZipCleanup); } catch { /* best-effort cleanup */ }
-            }
-        }
-
-        let pluginRoot = extractDir;
-        const extracted = fs.readdirSync(extractDir);
-        if (extracted.length === 1 && fs.statSync(path.join(extractDir, extracted[0])).isDirectory()) {
-            pluginRoot = path.join(extractDir, extracted[0]);
-        }
-
-        if (!fs.existsSync(path.join(pluginRoot, 'plugin.json'))) {
-            fs.rmSync(extractDir, { recursive: true, force: true });
-            if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-            return { success: false, message: `Plugin "${pluginName}" archive is missing plugin.json.` };
-        }
+        const { zipPath, extractDir, pluginRoot } = await downloadAndExtractPluginArchive(pluginName, downloadUrl);
 
         const destDir = path.join(PLUGINS_DIR, pluginName);
         if (!fs.existsSync(PLUGINS_DIR)) fs.mkdirSync(PLUGINS_DIR, { recursive: true });
@@ -543,18 +775,9 @@ async function installPlugin(pluginName, registrar, options = {}) {
 
         copyDirRecursive(pluginRoot, destDir);
 
-        fs.rmSync(extractDir, { recursive: true, force: true });
-        if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+        cleanupTempPaths(extractDir, zipPath);
 
-        const pluginPkgPath = path.join(destDir, 'package.json');
-        if (fs.existsSync(pluginPkgPath)) {
-            console.log(`[PLUGINS] Installing dependencies for ${pluginName}...`);
-            try {
-                execSync('npm install --omit=optional --production', { cwd: destDir, stdio: 'pipe' });
-            } catch (e) {
-                console.warn(`[PLUGINS] Warning: dependency install for ${pluginName} failed: ${e.message}`);
-            }
-        }
+        installPluginDependencies(pluginName, destDir);
 
         if (typeof beforeRegister === 'function') {
             await beforeRegister(destDir);
@@ -613,57 +836,104 @@ async function checkPluginUpdates() {
  * @returns {Promise<{ success: boolean, message: string }>}
  */
 async function updatePlugin(pluginName, registrar) {
-    const os = require('os');
     const { unloadPlugin } = require('./pluginDelete');
 
     const pluginDir = path.join(PLUGINS_DIR, pluginName);
-    const stageDir = path.join(os.tmpdir(), `wos_plugin_${pluginName}_preserve_${Date.now()}`);
     const pluginManifestPath = path.join(pluginDir, 'plugin.json');
-    let preserveConfig = { dirs: new Set(), files: new Set(), extensions: new Set() };
+    let zipPath = null;
+    let extractDir = null;
 
-    if (fs.existsSync(pluginManifestPath)) {
-        try {
-            const manifest = JSON.parse(fs.readFileSync(pluginManifestPath, 'utf8'));
-            preserveConfig = getPluginPreserveConfig(manifest);
-        } catch (e) {
-            console.warn(`[PLUGINS] Warning: could not read preserve rules for ${pluginName}: ${e.message}`);
+    try {
+        if (!/^[a-zA-Z0-9_-]+$/.test(pluginName)) {
+            return { success: false, message: `Invalid plugin name: "${pluginName}"` };
         }
-    }
 
-    // Unload the plugin first so that any open SQLite connections are closed
-    // and WAL data is checkpointed back into the .db file before we stage it.
-    unloadPlugin(pluginName, registrar);
-
-    // Stage important files after unload (DB connections closed = WAL flushed to .db)
-    if (fs.existsSync(pluginDir)) {
-        try {
-            scanAndStagePluginData(pluginDir, pluginDir, stageDir, preserveConfig);
-        } catch (e) {
-            console.warn(`[PLUGINS] Warning: could not stage data for ${pluginName}: ${e.message}`);
+        if (!fs.existsSync(pluginDir)) {
+            return { success: false, message: `Plugin "${pluginName}" is not installed.` };
         }
-    }
 
-    if (fs.existsSync(pluginDir)) {
-        fs.rmSync(pluginDir, { recursive: true, force: true });
-    }
+        const registry = await fetchRegistry();
+        if (!registry || !Array.isArray(registry.plugins)) {
+            return { success: false, message: 'Could not fetch plugin registry.' };
+        }
 
-    loadedPlugins.delete(pluginName);
-    const result = await installPlugin(pluginName, registrar, {
-        beforeRegister: async (destDir) => {
-            if (!fs.existsSync(stageDir) || !fs.existsSync(destDir)) return;
-            try {
-                copyDirRecursive(stageDir, destDir);
-            } catch (e) {
-                console.warn(`[PLUGINS] Warning: could not restore preserved data for ${pluginName}: ${e.message}`);
+        const entry = registry.plugins.find(p => p.name === pluginName);
+        if (!entry) {
+            return { success: false, message: `Plugin "${pluginName}" not found in registry.` };
+        }
+
+        const downloadUrl = entry.downloadUrl || `https://github.com/${PLUGIN_REPO}/raw/main/plugins/${pluginName}.zip`;
+        const archive = await downloadAndExtractPluginArchive(pluginName, downloadUrl);
+        zipPath = archive.zipPath;
+        extractDir = archive.extractDir;
+
+        const downloadedManifest = JSON.parse(fs.readFileSync(path.join(archive.pluginRoot, 'plugin.json'), 'utf8'));
+        const downloadedValidation = validateManifest(downloadedManifest, archive.pluginRoot);
+        if (!downloadedValidation.valid) {
+            return { success: false, message: downloadedValidation.error };
+        }
+
+        let installedManifest = {};
+        try {
+            if (fs.existsSync(pluginManifestPath)) {
+                installedManifest = JSON.parse(fs.readFileSync(pluginManifestPath, 'utf8'));
             }
+        } catch (error) {
+            console.warn(`[PLUGINS] Warning: could not read installed manifest for ${pluginName}: ${error.message}`);
         }
-    });
 
-    if (fs.existsSync(stageDir)) {
-        try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
+        const preserveConfig = mergePreserveConfigs(
+            getPluginPreserveConfig(installedManifest),
+            getPluginPreserveConfig(downloadedManifest)
+        );
+
+        const oldPackageHash = getFileHash(path.join(pluginDir, 'package.json'));
+        const newPackageHash = getFileHash(path.join(archive.pluginRoot, 'package.json'));
+        const shouldInstallDependencies = !!newPackageHash && (
+            oldPackageHash !== newPackageHash ||
+            !fs.existsSync(path.join(pluginDir, 'node_modules'))
+        );
+
+        // Unload the plugin so file handles are released before overwriting files in place.
+        unloadPlugin(pluginName, registrar);
+
+        const copyStats = copyUpdatedPluginFiles(archive.pluginRoot, pluginDir, preserveConfig);
+        const removeStats = removeStalePluginFiles(pluginDir, archive.pluginRoot, preserveConfig);
+
+        if (shouldInstallDependencies) {
+            installPluginDependencies(pluginName, pluginDir);
+        }
+
+        const finalManifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'plugin.json'), 'utf8'));
+        const validation = validateManifest(finalManifest, pluginDir);
+        if (!validation.valid) {
+            return { success: false, message: validation.error };
+        }
+
+        loadedPlugins.delete(pluginName);
+        registerPluginModules(pluginDir, finalManifest, registrar);
+        console.log(`[PLUGINS] Updated: ${finalManifest.name} v${finalManifest.version}`);
+
+        cleanupTempPaths(extractDir, zipPath);
+        const summary = [
+            `${copyStats.updated} files updated`,
+            `${copyStats.added} files added`,
+            `${removeStats.removed} stale entries removed`
+        ];
+        const failureCount = copyStats.failed + removeStats.failed;
+        if (failureCount > 0) {
+            summary.push(`${failureCount} file operations failed`);
+        }
+
+        return {
+            success: failureCount === 0,
+            message: `Plugin "${finalManifest.name}" v${finalManifest.version} updated successfully. ${summary.join(', ')}.`
+        };
+    } catch (error) {
+        return { success: false, message: `Update failed: ${error.message}` };
+    } finally {
+        cleanupTempPaths(extractDir, zipPath);
     }
-
-    return result;
 }
 
 module.exports = {

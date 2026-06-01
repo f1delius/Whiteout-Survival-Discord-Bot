@@ -59,7 +59,10 @@ async function handlePluginsAccessMenu(interaction) {
             );
         } else {
             container.addTextDisplayComponents(
-                new TextDisplayBuilder().setContent(`**${pluginLang.content.installed || 'Installed Plugins'}**`)
+                new TextDisplayBuilder().setContent(
+                    `**${(pluginLang.content.installed || 'Installed Plugins')
+                        .replace('{count}', String(loadedPlugins.size))}**`
+                )
             );
 
             container.addSeparatorComponents(
