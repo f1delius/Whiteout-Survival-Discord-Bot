@@ -3,12 +3,57 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn, execSync } = require('child_process');
-const {
-    getActiveGameTypes,
-    getDefaultGameProfile,
-    getRuntimeGameMode,
-    shouldUseOnnx
-} = require('./src/functions/utility/gameRuntime');
+
+function getBootstrapRuntimeDefaults(argv = process.argv.slice(2)) {
+    const typeArg = argv.find(arg => arg.startsWith('--type='));
+    const requestedMode = (typeArg ? typeArg.split('=')[1] : 'wos')?.toLowerCase();
+
+    switch (requestedMode) {
+        case 'ks':
+            return {
+                runtimeGameMode: 'ks',
+                activeGameTypes: ['ks'],
+                defaultGameProfile: { displayName: 'Kingshot' },
+                shouldUseOnnx: false
+            };
+        case 'both':
+            return {
+                runtimeGameMode: 'both',
+                activeGameTypes: ['wos', 'ks'],
+                defaultGameProfile: { displayName: 'Whiteout Survival' },
+                shouldUseOnnx: true
+            };
+        case 'wos':
+        default:
+            return {
+                runtimeGameMode: 'wos',
+                activeGameTypes: ['wos'],
+                defaultGameProfile: { displayName: 'Whiteout Survival' },
+                shouldUseOnnx: true
+            };
+    }
+}
+
+function loadRuntimeBootstrap() {
+    const gameRuntimePath = path.join(__dirname, 'src', 'functions', 'utility', 'gameRuntime.js');
+    if (!fs.existsSync(gameRuntimePath)) {
+        return getBootstrapRuntimeDefaults();
+    }
+
+    const {
+        getActiveGameTypes,
+        getDefaultGameProfile,
+        getRuntimeGameMode,
+        shouldUseOnnx
+    } = require(gameRuntimePath);
+
+    return {
+        runtimeGameMode: getRuntimeGameMode(),
+        activeGameTypes: getActiveGameTypes(),
+        defaultGameProfile: getDefaultGameProfile(),
+        shouldUseOnnx: shouldUseOnnx()
+    };
+}
 
 // ============================================================
 // DOCKER DETECTION
@@ -18,10 +63,11 @@ const isDocker = !!(process.env.DOCKER_CONTAINER || (function () {
     try { return fs.existsSync('/.dockerenv'); } catch { return false; }
 })());
 global.isDocker = isDocker;
-global.runtimeGameMode = getRuntimeGameMode();
-global.activeGameTypes = getActiveGameTypes();
-global.defaultGameProfile = getDefaultGameProfile();
-global.shouldUseOnnx = shouldUseOnnx();
+const runtimeBootstrap = loadRuntimeBootstrap();
+global.runtimeGameMode = runtimeBootstrap.runtimeGameMode;
+global.activeGameTypes = runtimeBootstrap.activeGameTypes;
+global.defaultGameProfile = runtimeBootstrap.defaultGameProfile;
+global.shouldUseOnnx = runtimeBootstrap.shouldUseOnnx;
 
 function parseRamArg(argv = []) {
     for (const arg of argv) {
