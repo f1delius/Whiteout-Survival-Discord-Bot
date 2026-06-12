@@ -2069,13 +2069,18 @@
                     "viewAdminsField": {
                         "name": "- **View Admin**",
                         "value": "  - See all admins and their permissions"
+                    },
+                    "transferOwnerField": {
+                        "name": "- **Transfer Owner**",
+                        "value": "  - Hand bot ownership to another Discord user"
                     }
                 },
                 "buttons": {
-                    "addAdmin": "Add Admin",
-                    "removeAdmin": "Remove Admin",
-                    "assignPermissions": "Assign Permissions",
-                    "viewAdmin": "View Admin"
+                    "addAdmin": "Add",
+                    "removeAdmin": "Remove",
+                    "assignPermissions": "Permissions",
+                    "viewAdmin": "View",
+                    "transferOwner": "Transfer Owner"
                 }
             },
             "addAdmin": {
@@ -2198,6 +2203,35 @@
                 "error": {
                     "noAdmins": "{emoji.1050} No admins found.",
                     "userNotAdmin": "{emoji.1050} That user isn't an admin."
+                }
+            },
+            "transferOwner": {
+                "content": {
+                    "title": {
+                        "base": "### {emoji.1050} Transfer Owner",
+                        "confirm": "### {emoji.1050} Confirm Owner Transfer",
+                        "success": "### {emoji.1004} Owner Transferred",
+                        "cancel": "### {emoji.1051} Transfer Cancelled"
+                    },
+                    "description": {
+                        "base": "Pick the Discord user who should become the new bot owner.",
+                        "confirm": "This action cannot be reversed unless you have access to the bot database or the new owner's account.\nAre you sure you want to transfer ownership to {userDiscordMention} and continue?",
+                        "success": "{userDiscordTag} is now the new bot owner.",
+                        "cancel": "Owner transfer has been cancelled."
+                    }
+                },
+                "buttons": {
+                    "confirm": "Confirm",
+                    "cancel": "Cancel"
+                },
+                "selectMenu": {
+                    "selectUser": {
+                        "placeholder": "Pick the new bot owner"
+                    }
+                },
+                "errors": {
+                    "ownerAlreadySelected": "{emoji.1050} You already own the bot.",
+                    "userIsBot": "{emoji.1050} You can't transfer ownership to a bot."
                 }
             }
         },
@@ -3288,7 +3322,8 @@
             "adminRemoved": "Removed admin privileges from {username}",
             "permissionsUpdated": "Updated permissions for admin {username}",
             "idChannelLinked": "Linked ID channel #{channelName} to alliance {allianceName} ({allianceId})",
-            "idChannelUnlinked": "Unlinked ID channel {channelId} from alliance {allianceId}"
+            "idChannelUnlinked": "Unlinked ID channel {channelId} from alliance {allianceId}",
+            "ownerTransferred": "Transferred bot ownership from {previousOwner} to {newOwner}"
         }
     }
 }

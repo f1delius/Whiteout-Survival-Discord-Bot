@@ -26,7 +26,7 @@ function createAddAdminButton(userId, lang = {}) {
     return new ButtonBuilder()
         .setCustomId(`add_admin_${userId}`)
         .setLabel(lang.settings.adminManagement.mainPage.buttons.addAdmin)
-        .setStyle(ButtonStyle.Success)
+        .setStyle(ButtonStyle.Secondary)
         .setEmoji(getComponentEmoji(getEmojiMapForUser(userId), '1000'));
 }
 

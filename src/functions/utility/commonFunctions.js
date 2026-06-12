@@ -1,10 +1,13 @@
 const { adminQueries, userQueries, systemLogQueries, settingsQueries, allianceQueries } = require('./database');
-const { SeparatorBuilder, SeparatorSpacingSize, PermissionFlagsBits } = require('discord.js');
+const { SeparatorBuilder, SeparatorSpacingSize, PermissionFlagsBits, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, ContainerBuilder, TextDisplayBuilder } = require('discord.js');
 const { getActiveGameTypes } = require('./gameRuntime');
 const { getGameProfile, normalizeGameType } = require('./gameProfiles');
 const languages = require('../../i18n');
 const { getEmojiMapForUser, wrapLangWithEmojis, getComponentEmoji } = require('./emojis');
 const path = require('path');
+const ascii85 = require('ascii85');
+const { PERMISSIONS } = require('../Settings/admin/permissions');
+const { createUniversalPaginationButtons } = require('../Pagination/universalPagination');
 
 // Detect project root (where package.json is located)
 const PROJECT_ROOT = path.resolve(__dirname, '../../../');
@@ -12,7 +15,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '../../../');
 /**
  * Returns admin data and language object for a given user id.
  * The lang object automatically replaces {emoji.XXX} placeholders.
- * { adminData, userLang, lang }
+ * { adminData, userData, userLang, lang }
  */
 function getUserInfo(userId) {
     const adminData = adminQueries.getAdmin(userId);
@@ -21,6 +24,7 @@ function getUserInfo(userId) {
     const baseLang = languages[userLang] || languages['en'];
     const emojiMap = getEmojiMapForUser(userId);
     const lang = wrapLangWithEmojis(baseLang, emojiMap);
+
     return { adminData, userData, userLang, lang };
 }
 
@@ -231,7 +235,6 @@ function updateComponentsV2AfterSeparator(interaction, newSection) {
  * @returns {Array} Array of alliance objects the user can access
  */
 function getAlliancesForUser(adminData) {
-    const { PERMISSIONS } = require('../Settings/admin/permissions');
     try {
         if (hasPermission(adminData, PERMISSIONS.FULL_ACCESS)) {
             return allianceQueries.getAllAlliancesAny();
@@ -241,8 +244,9 @@ function getAlliancesForUser(adminData) {
             const assignedAllianceIds = JSON.parse(adminData.alliances || '[]');
             if (assignedAllianceIds.length === 0) return [];
 
-            return assignedAllianceIds
-                .map(id => allianceQueries.getAllianceByIdAny(id))
+            if (assignedAllianceIds.length === 0) return [];
+            // Use batch query to fetch all alliances in one DB call (avoids N+1)
+            return allianceQueries.getAlliancesByIdsAny(assignedAllianceIds)
                 .filter(Boolean);
         }
 
@@ -262,7 +266,6 @@ function getAlliancesForUser(adminData) {
  * @returns {Array} Array of alliance objects
  */
 function getAlliancesForUserByGame(adminData, gameType, scopedPermission) {
-    const { PERMISSIONS } = require('../Settings/admin/permissions');
     const resolvedGameType = normalizeGameType(gameType);
 
     try {
@@ -274,8 +277,9 @@ function getAlliancesForUserByGame(adminData, gameType, scopedPermission) {
             const assignedAllianceIds = JSON.parse(adminData?.alliances || '[]');
             if (assignedAllianceIds.length === 0) return [];
 
-            return assignedAllianceIds
-                .map(id => allianceQueries.getAllianceByIdAny(id))
+            if (assignedAllianceIds.length === 0) return [];
+            // Use batch query to fetch all alliances in one DB call (avoids N+1)
+            return allianceQueries.getAlliancesByIds(assignedAllianceIds, resolvedGameType)
                 .filter(alliance => alliance && alliance.game_type === resolvedGameType);
         }
 
@@ -325,7 +329,6 @@ function createAllianceSelectionComponents(options) {
 
     const { StringSelectMenuBuilder, ActionRowBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = require('discord.js');
     const { createUniversalPaginationButtons } = require('../Pagination/universalPagination');
-    const { PERMISSIONS } = require('../Settings/admin/permissions');
 
     // Filter alliances based on showAll parameter
     let filteredAlliances = alliances;
@@ -433,13 +436,6 @@ function createGameSelectionComponents(options) {
         accentColor = 0x3498db
     } = options;
 
-    const {
-        StringSelectMenuBuilder,
-        StringSelectMenuOptionBuilder,
-        ActionRowBuilder,
-        ContainerBuilder,
-        TextDisplayBuilder
-    } = require('discord.js');
 
     const gameSelectionLang = lang?.common?.gameSelection || {};
     const resolvedPlaceholder = placeholder || gameSelectionLang.placeholder || 'Pick a game';
@@ -594,7 +590,6 @@ function getRefreshTimeout(interval) {
  * @returns {string} Compact encoded string
  */
 function encodeExportSelection(selections) {
-    const ascii85 = require('ascii85');
 
     // Helper to compress consecutive numbers into ranges (e.g., [1,2,3,4,6,8,9,10] -> "1-4,6,8-10")
     function compressRanges(arr) {
@@ -653,7 +648,6 @@ function encodeExportSelection(selections) {
  * @returns {Object} Decoded selections: { states: [], allianceIds: [], furnaceLevels: [] }
  */
 function decodeExportSelection(encodedStr) {
-    const ascii85 = require('ascii85');
 
     if (!encodedStr || encodedStr === 'none') {
         return { states: [], allianceIds: [], furnaceLevels: [], gameType: null };

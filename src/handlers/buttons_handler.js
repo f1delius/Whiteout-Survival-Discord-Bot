@@ -74,6 +74,7 @@ const notifAutoClean = require('../functions/Notification/autoClean');
 const buildings = require('../functions/Calculators/Buildings/buildings');
 const warAcademy = require('../functions/Calculators/WarAcademy/warAcademy');
 const calculators = require('../functions/Calculators/calculators');
+const { createInteractionDispatcher } = require('../functions/utility/interactionDispatcher');
 
 
 // === HANDLER REGISTRY ===
@@ -261,6 +262,9 @@ const buttonHandlers = [
     // Admin management
     { pattern: /^manage_admins_/, fn: admin.handleManageAdminsButton },
     { pattern: /^add_admin_/, fn: admin.handleAddAdminButton },
+    { pattern: /^transfer_owner_/, fn: admin.handleTransferOwnerButton },
+    { pattern: /^confirm_transfer_owner_/, fn: admin.handleConfirmTransferOwner },
+    { pattern: /^cancel_transfer_owner_/, fn: admin.handleCancelTransferOwner },
     { pattern: /^confirm_remove_admin_/, fn: admin.handleConfirmRemoveAdmin },
     { pattern: /^cancel_remove_admin_/, fn: admin.handleCancelRemoveAdmin },
     { pattern: /^(remove_admin_prev_|remove_admin_next_)/, fn: admin.handleRemoveAdminPagination },
@@ -358,12 +362,14 @@ const buttonHandlers = [
     { pattern: /^calc_main_wa_/, fn: warAcademy.handleWarAcademyButton }
 ];
 
+const buttonDispatcher = createInteractionDispatcher(buttonHandlers);
+
 // === SETUP FUNCTION ===
 function setupButtonHandlers(client) {
     const listener = async (interaction) => {
         if (!interaction.isButton()) return;
 
-        for (const { pattern, fn } of buttonHandlers) {
+        for (const { pattern, fn } of buttonDispatcher.getCandidates(interaction.customId)) {
             if (pattern.test(interaction.customId)) {
                 try {
                     await fn(interaction);

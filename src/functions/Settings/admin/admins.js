@@ -12,6 +12,7 @@ const { createAddAdminButton } = require('./addAdmin');
 const { createRemoveAdminButton } = require('./removeAdmin');
 const { createEditAdminButton } = require('./assignPermission');
 const { createViewAdminButton } = require('./viewAdmin');
+const { createTransferOwnerButton } = require('./transferOnwer');
 const { createBackToSettingsButton } = require('../backToSettings');
 const { getUserInfo, assertUserMatches, handleError } = require('../../utility/commonFunctions');
 const { getEmojiMapForUser, getComponentEmoji } = require('../../utility/emojis');
@@ -37,7 +38,7 @@ function createManageAdminsButton(userId, lang = {}) {
  */
 async function handleManageAdminsButton(interaction) {
     // Get admin language preference
-    const { lang } = getUserInfo(interaction.user.id);
+    const { adminData, lang } = getUserInfo(interaction.user.id);
     try {
         // Extract user ID from custom ID
         const expectedUserId = interaction.customId.split('_')[2];
@@ -51,7 +52,8 @@ async function handleManageAdminsButton(interaction) {
                 createAddAdminButton(interaction.user.id, lang),
                 createRemoveAdminButton(interaction.user.id, lang),
                 createEditAdminButton(interaction.user.id, lang),
-                createViewAdminButton(interaction.user.id, lang)
+                createViewAdminButton(interaction.user.id, lang),
+                createTransferOwnerButton(interaction.user.id, lang, !adminData?.is_owner)
             );
 
         // Create second row with back button
@@ -78,7 +80,10 @@ async function handleManageAdminsButton(interaction) {
                         `${lang.settings.adminManagement.mainPage.content.assignPermissionsField.value}\n` +
 
                         `${lang.settings.adminManagement.mainPage.content.viewAdminsField.name}\n` +
-                        `${lang.settings.adminManagement.mainPage.content.viewAdminsField.value}`
+                        `${lang.settings.adminManagement.mainPage.content.viewAdminsField.value}\n` +
+
+                        `${lang.settings.adminManagement.mainPage.content.transferOwnerField.name}\n` +
+                        `${lang.settings.adminManagement.mainPage.content.transferOwnerField.value}`
                     )
                 )
                 .addSeparatorComponents(

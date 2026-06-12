@@ -22,6 +22,7 @@ const dbMigration = require('../functions/Settings/migration');
 const backUpCreate = require('../functions/Settings/backup/backupCreate');
 const buildings = require('../functions/Calculators/Buildings/buildings');
 const warAcademy = require('../functions/Calculators/WarAcademy/warAcademy');
+const { createInteractionDispatcher } = require('../functions/utility/interactionDispatcher');
 
 // === HANDLER REGISTRY ===
 const formHandlers = [
@@ -73,6 +74,11 @@ const formHandlers = [
     { pattern: /^calc_wa_rmmodal_/, fn: warAcademy.handleRemoveModal }
 ];
 
+const FORM_PREFIX_DISPATCH_THRESHOLD = 75;
+const formDispatcher = formHandlers.length >= FORM_PREFIX_DISPATCH_THRESHOLD
+    ? createInteractionDispatcher(formHandlers)
+    : null;
+
 // === SETUP FUNCTION ===
 /**
  * Handles all modal form (ModalSubmit) interactions
@@ -82,7 +88,11 @@ function setupFormHandlers(client) {
     const listener = async (interaction) => {
         if (!interaction.isModalSubmit()) return;
 
-        for (const { pattern, fn } of formHandlers) {
+        const candidates = formDispatcher
+            ? formDispatcher.getCandidates(interaction.customId)
+            : formHandlers;
+
+        for (const { pattern, fn } of candidates) {
             if (pattern.test(interaction.customId)) {
                 try {
                     await fn(interaction);

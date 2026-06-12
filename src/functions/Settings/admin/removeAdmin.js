@@ -29,7 +29,7 @@ function createRemoveAdminButton(userId, lang = {}) {
     return new ButtonBuilder()
         .setCustomId(`remove_admin_${userId}`)
         .setLabel(lang.settings.adminManagement.mainPage.buttons.removeAdmin)
-        .setStyle(ButtonStyle.Danger)
+        .setStyle(ButtonStyle.Secondary)
         .setEmoji(getComponentEmoji(getEmojiMapForUser(userId), '1031'));
 }
 

@@ -5,6 +5,7 @@ const {
     ButtonBuilder,
     ButtonStyle,
     ContainerBuilder,
+    MediaGalleryBuilder,
     MessageFlags,
     TextDisplayBuilder,
     SeparatorBuilder,
@@ -30,6 +31,13 @@ let autoUpdateInterval = null;
 let lastNotifiedVersion = null;
 /** Tracks which plugin versions have already triggered a notification to avoid DM spam */
 const lastNotifiedPluginVersions = new Map();
+
+const MAX_TEXT_BLOCK_CHARS = 3500;
+const MAX_MEDIA_ITEMS_PER_GALLERY = 4;
+const MAX_BLOCKS_PER_MESSAGE = 8;
+const MAX_MESSAGES_PER_RELEASE_DM = 5;
+const MAX_MESSAGE_TEXT_CHARS = 5500;
+const MARKDOWN_IMAGE_LINE_REGEX = /^\s*!\[([^\]]*)\]\((https:\/\/[^\s)]+)\)\s*$/i;
 
 function requestJson(url, { method = 'GET', timeoutMs = 5000, headers = {}, body = null } = {}) {
     return new Promise((resolve) => {
@@ -803,25 +811,305 @@ function downloadAssetContent(url) {
     });
 }
 
+function isValidHttpsImageUrl(value) {
+    try {
+        const parsedUrl = new URL(value);
+        return parsedUrl.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
+function splitLongText(text, maxChars = MAX_TEXT_BLOCK_CHARS) {
+    const normalizedText = String(text || '').trim();
+    if (!normalizedText) return [];
+    if (normalizedText.length <= maxChars) return [normalizedText];
+
+    const chunks = [];
+    const paragraphs = normalizedText.split(/\n{2,}/);
+    let currentChunk = '';
+
+    const pushChunk = () => {
+        const trimmed = currentChunk.trim();
+        if (trimmed) chunks.push(trimmed);
+        currentChunk = '';
+    };
+
+    const appendParagraph = (paragraph) => {
+        const candidate = currentChunk ? `${currentChunk}\n\n${paragraph}` : paragraph;
+        if (candidate.length <= maxChars) {
+            currentChunk = candidate;
+            return;
+        }
+
+        if (currentChunk) pushChunk();
+
+        if (paragraph.length <= maxChars) {
+            currentChunk = paragraph;
+            return;
+        }
+
+        let remainder = paragraph;
+        while (remainder.length > maxChars) {
+            let splitIndex = remainder.lastIndexOf('\n', maxChars);
+            if (splitIndex <= 0) splitIndex = remainder.lastIndexOf(' ', maxChars);
+            if (splitIndex <= 0) splitIndex = maxChars;
+
+            const piece = remainder.slice(0, splitIndex).trim();
+            if (piece) chunks.push(piece);
+            remainder = remainder.slice(splitIndex).trimStart();
+        }
+
+        currentChunk = remainder;
+    };
+
+    for (const paragraph of paragraphs) {
+        const trimmedParagraph = paragraph.trim();
+        if (!trimmedParagraph) continue;
+        appendParagraph(trimmedParagraph);
+    }
+
+    pushChunk();
+    return chunks;
+}
+
+function flushPendingMediaBlocks(blocks, pendingImages) {
+    if (!pendingImages.length) return;
+
+    for (let index = 0; index < pendingImages.length; index += MAX_MEDIA_ITEMS_PER_GALLERY) {
+        blocks.push({
+            type: 'media',
+            items: pendingImages.slice(index, index + MAX_MEDIA_ITEMS_PER_GALLERY)
+        });
+    }
+
+    pendingImages.length = 0;
+}
+
+function flushPendingTextBlocks(blocks, pendingLines) {
+    if (!pendingLines.length) return;
+
+    const text = pendingLines.join('\n').trim();
+    pendingLines.length = 0;
+    if (!text) return;
+
+    for (const chunk of splitLongText(text)) {
+        blocks.push({ type: 'text', text: chunk });
+    }
+}
+
+function parseReleaseMarkdown(markdown) {
+    const blocks = [];
+    const pendingLines = [];
+    const pendingImages = [];
+    const normalizedMarkdown = String(markdown || '').replace(/\r\n/g, '\n');
+
+    for (const line of normalizedMarkdown.split('\n')) {
+        const match = line.match(MARKDOWN_IMAGE_LINE_REGEX);
+        const imageUrl = match?.[2];
+
+        if (imageUrl && isValidHttpsImageUrl(imageUrl)) {
+            flushPendingTextBlocks(blocks, pendingLines);
+            pendingImages.push({
+                description: (match[1] || '').trim(),
+                url: imageUrl
+            });
+            continue;
+        }
+
+        flushPendingMediaBlocks(blocks, pendingImages);
+        pendingLines.push(line);
+    }
+
+    flushPendingTextBlocks(blocks, pendingLines);
+    flushPendingMediaBlocks(blocks, pendingImages);
+    return blocks;
+}
+
 /**
- * Resolves localized release description from assets, falling back to release body
+ * Resolves localized release content from assets, falling back to release body
  * @param {Array<{name: string, url: string}>} assets - Release assets
  * @param {string} languageCode - Owner's language code (e.g., 'en', 'fr')
  * @param {string} fallbackBody - Default release body from GitHub
- * @returns {Promise<string>} The resolved description
+ * @returns {Promise<Array<{type: 'text', text: string} | {type: 'media', items: Array<{description: string, url: string}>}>>}
  */
-async function resolveLocalizedDescription(assets, languageCode, fallbackBody) {
-    if (!assets?.length) return fallbackBody;
+async function resolveLocalizedReleaseBlocks(assets, languageCode, fallbackBody) {
+    let sourceText = fallbackBody || '';
 
-    const assetPatterns = [`release_${languageCode}.md`, `release_${languageCode}.txt`];
-    const matchedAsset = assets.find(a => assetPatterns.includes(a.name.toLowerCase()));
+    if (assets?.length) {
+        const assetPatterns = [`release_${languageCode}.md`, `release_${languageCode}.txt`];
+        const matchedAsset = assets.find(a => assetPatterns.includes(a.name.toLowerCase()));
 
-    if (matchedAsset?.url) {
-        const content = await downloadAssetContent(matchedAsset.url);
-        if (content) return content;
+        if (matchedAsset?.url) {
+            const content = await downloadAssetContent(matchedAsset.url);
+            if (content) sourceText = content;
+        }
     }
 
-    return fallbackBody;
+    return parseReleaseMarkdown(sourceText);
+}
+
+function getReleaseContinuationHeading(languageCode) {
+    return languageCode === 'fr'
+        ? '## Notes de mise a jour (suite)'
+        : '## Release notes continued';
+}
+
+function getReleaseOverflowNote(languageCode, releaseUrl) {
+    if (languageCode === 'fr') {
+        return releaseUrl
+            ? `Notes completes : ${releaseUrl}`
+            : 'Les notes completes sont disponibles sur GitHub.';
+    }
+
+    return releaseUrl
+        ? `Full release notes: ${releaseUrl}`
+        : 'Full release notes are available on GitHub.';
+}
+
+function estimateBlockTextLength(block) {
+    if (block.type === 'text') return block.text.length;
+    if (block.type === 'media') {
+        return block.items.reduce((total, item) => total + (item.description?.length || 0), 0);
+    }
+    return 0;
+}
+
+function appendOverflowNote(messages, noteText) {
+    if (!messages.length || !noteText) return;
+
+    const overflowBlock = { type: 'text', text: noteText };
+    const lastMessage = messages[messages.length - 1];
+
+    while (
+        lastMessage.blocks.length > 0 &&
+        (lastMessage.blocks.length >= MAX_BLOCKS_PER_MESSAGE ||
+            (lastMessage.textChars + noteText.length) > MAX_MESSAGE_TEXT_CHARS)
+    ) {
+        const removedBlock = lastMessage.blocks.pop();
+        lastMessage.textChars -= estimateBlockTextLength(removedBlock);
+    }
+
+    if (
+        lastMessage.blocks.length < MAX_BLOCKS_PER_MESSAGE &&
+        (lastMessage.textChars + noteText.length) <= MAX_MESSAGE_TEXT_CHARS
+    ) {
+        lastMessage.blocks.push(overflowBlock);
+        lastMessage.textChars += noteText.length;
+    }
+}
+
+function buildReleaseDmMessages({
+    titleText,
+    versionText,
+    subtextText,
+    blocks,
+    languageCode,
+    releaseUrl
+}) {
+    const messages = [];
+    const firstMessageBaseChars = titleText.length + versionText.length + subtextText.length;
+    const continuationHeading = getReleaseContinuationHeading(languageCode);
+    const continuationBaseChars = continuationHeading.length;
+    const fallbackNote = getReleaseOverflowNote(languageCode, releaseUrl);
+
+    let currentMessage = {
+        continuation: false,
+        blocks: [],
+        textChars: firstMessageBaseChars
+    };
+
+    const pushCurrentMessage = () => {
+        messages.push(currentMessage);
+    };
+
+    for (const block of blocks) {
+        const blockCharLength = estimateBlockTextLength(block);
+        const exceedsCurrentMessage =
+            currentMessage.blocks.length >= MAX_BLOCKS_PER_MESSAGE ||
+            (currentMessage.textChars + blockCharLength) > MAX_MESSAGE_TEXT_CHARS;
+
+        if (exceedsCurrentMessage) {
+            pushCurrentMessage();
+
+            if (messages.length >= MAX_MESSAGES_PER_RELEASE_DM) {
+                appendOverflowNote(messages, fallbackNote);
+                return messages;
+            }
+
+            currentMessage = {
+                continuation: true,
+                blocks: [],
+                textChars: continuationBaseChars
+            };
+        }
+
+        currentMessage.blocks.push(block);
+        currentMessage.textChars += blockCharLength;
+    }
+
+    if (!messages.length || currentMessage.blocks.length > 0) {
+        pushCurrentMessage();
+    }
+
+    return messages.slice(0, MAX_MESSAGES_PER_RELEASE_DM);
+}
+
+function buildReleaseDmContainer(message, {
+    titleText,
+    versionText,
+    subtextText,
+    languageCode
+}) {
+    const container = new ContainerBuilder();
+
+    if (message.continuation) {
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(getReleaseContinuationHeading(languageCode))
+        );
+    } else {
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(titleText),
+            new TextDisplayBuilder().setContent(versionText)
+        );
+    }
+
+    if (message.blocks.length > 0) {
+        container.addSeparatorComponents(
+            new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small)
+        );
+    }
+
+    for (const block of message.blocks) {
+        if (block.type === 'text') {
+            container.addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(block.text)
+            );
+            continue;
+        }
+
+        if (block.type === 'media' && block.items.length > 0) {
+            container.addMediaGalleryComponents(
+                new MediaGalleryBuilder({
+                    items: block.items.map(item => ({
+                        description: item.description || undefined,
+                        media: { url: item.url }
+                    }))
+                })
+            );
+        }
+    }
+
+    if (!message.continuation && subtextText) {
+        container.addSeparatorComponents(
+            new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small)
+        );
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(subtextText)
+        );
+    }
+
+    return container;
 }
 
 /**
@@ -831,8 +1119,9 @@ async function resolveLocalizedDescription(assets, languageCode, fallbackBody) {
  * @param {boolean} willAutoApply - Whether the update will be auto-applied
  * @param {string} [releaseBody] - Default GitHub release body (fallback)
  * @param {Array<{name: string, url: string}>} [assets] - Release assets for localized descriptions
+ * @param {string} [releaseUrl] - GitHub release URL
  */
-async function notifyOwnerOfUpdate(client, latestVersion, willAutoApply, releaseBody, assets) {
+async function notifyOwnerOfUpdate(client, latestVersion, willAutoApply, releaseBody, assets, releaseUrl) {
     const ownerId = findOwnerUserId();
     if (!ownerId) return;
 
@@ -846,7 +1135,7 @@ async function notifyOwnerOfUpdate(client, latestVersion, willAutoApply, release
             ? global.getLocalVersion()
             : '?.?.?';
 
-        const description = await resolveLocalizedDescription(assets || [], userLang, releaseBody || '');
+        const releaseBlocks = await resolveLocalizedReleaseBlocks(assets || [], userLang, releaseBody || '');
 
         const replacePlaceholders = (text) => replaceEmojiPlaceholders(
             text
@@ -859,21 +1148,37 @@ async function notifyOwnerOfUpdate(client, latestVersion, willAutoApply, release
         const subtext = willAutoApply ? dmLang.autoApply : dmLang.notifyOnly;
         if (!title) return;
 
-        const container = new ContainerBuilder();
-        container.addTextDisplayComponents(new TextDisplayBuilder().setContent(replacePlaceholders(title)));
-        container.addTextDisplayComponents(new TextDisplayBuilder().setContent(replacePlaceholders(dmLang.version || '')));
+        const titleText = replacePlaceholders(title);
+        const versionText = replacePlaceholders(dmLang.version || '');
+        const subtextText = replacePlaceholders(subtext || '');
+        const messages = buildReleaseDmMessages({
+            titleText,
+            versionText,
+            subtextText,
+            blocks: releaseBlocks,
+            languageCode: userLang,
+            releaseUrl
+        });
 
-        if (description) {
-            container.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small));
-            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(description));
+        for (let index = 0; index < messages.length; index += 1) {
+            const container = buildReleaseDmContainer(messages[index], {
+                titleText,
+                versionText,
+                subtextText,
+                languageCode: userLang
+            });
+
+            const flags = index === 0
+                ? MessageFlags.IsComponentsV2
+                : (MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications);
+
+            try {
+                await owner.send({ components: [container], flags });
+            } catch (error) {
+                console.error(`[AUTO-UPDATE] Failed to DM owner chunk ${index + 1}:`, error.message);
+                break;
+            }
         }
-
-        if (subtext) {
-            container.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small));
-            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(replacePlaceholders(subtext)));
-        }
-
-        await owner.send({ components: [container], flags: MessageFlags.IsComponentsV2 });
     } catch (error) {
         console.error('[AUTO-UPDATE] Failed to DM owner:', error.message);
     }
@@ -936,6 +1241,7 @@ function startAutoUpdateScheduler(client) {
             let latestVersion = null;
             let releaseBody = null;
             let releaseAssets = null;
+            let releaseUrl = null;
 
             if (hasDockerSocket()) {
                 try {
@@ -954,6 +1260,7 @@ function startAutoUpdateScheduler(client) {
                         latestVersion = updateInfo.latest;
                         releaseBody = updateInfo.body;
                         releaseAssets = updateInfo.assets;
+                        releaseUrl = updateInfo.url;
                     }
                 }
             }
@@ -974,7 +1281,7 @@ function startAutoUpdateScheduler(client) {
                 if (hasBotUpdate && latestVersion !== lastNotifiedVersion) {
                     lastNotifiedVersion = latestVersion;
                     console.log(`[AUTO-UPDATE] New version v${latestVersion} available -- notifying owner (auto-apply disabled)`);
-                    await notifyOwnerOfUpdate(client, latestVersion, false, releaseBody, releaseAssets);
+                    await notifyOwnerOfUpdate(client, latestVersion, false, releaseBody, releaseAssets, releaseUrl);
                 }
                 if (hasPluginUpdates) {
                     for (const pu of newPluginUpdates) lastNotifiedPluginVersions.set(pu.name, pu.latest);
@@ -1016,7 +1323,7 @@ function startAutoUpdateScheduler(client) {
             if (hasBotUpdate && latestVersion !== lastNotifiedVersion) {
                 lastNotifiedVersion = latestVersion;
                 console.log(`[AUTO-UPDATE] New version v${latestVersion} found -- notifying and applying...`);
-                await notifyOwnerOfUpdate(client, latestVersion, true, releaseBody, releaseAssets);
+                await notifyOwnerOfUpdate(client, latestVersion, true, releaseBody, releaseAssets, releaseUrl);
 
                 if (hasDockerSocket()) {
                     try {

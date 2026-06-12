@@ -201,7 +201,7 @@ async function promptAndLogin(question) {
     while (true) {
         if (!token) {
             if (isNonInteractive) {
-                console.error('Discord token missing. Set the TOKEN environment variable in your .env file.');
+                console.error('Discord token missing. Set the TOKEN environment variable in your /src/.env file.');
                 process.exit(1);
             }
             process.stdout.write('\nDiscord token missing -- paste your bot token below and press Enter:\n');
@@ -222,7 +222,7 @@ async function promptAndLogin(question) {
             console.error('Failed to login:', isInvalid ? 'Invalid token.' : error.message);
             if (isInvalid) {
                 if (isNonInteractive) {
-                    console.error('Fix the TOKEN in your .env file and restart the container.');
+                    console.error('Fix the TOKEN in your /src/.env file and restart the container.');
                     process.exit(1);
                 }
                 process.stdout.write('\nThe provided token is invalid -- paste a valid bot token below and press Enter:\n');

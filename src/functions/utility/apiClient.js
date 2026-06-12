@@ -350,9 +350,18 @@ class PlayerApiManager {
     getNextApi() {
         const now = Date.now();
 
-        // Clean stale timestamps outside the rolling window
+        // Clean stale timestamps outside the rolling window.
+        // Timestamps are monotonically increasing, so find the first valid index
+        // and slice once (avoids creating new arrays when nothing is stale).
+        const threshold = now - this.rateLimitWindow;
         for (let i = 0; i < this.requestTimestamps.length; i++) {
-            this.requestTimestamps[i] = this.requestTimestamps[i].filter(t => now - t < this.rateLimitWindow);
+            const arr = this.requestTimestamps[i];
+            if (arr.length === 0) continue;
+            let cutoff = 0;
+            while (cutoff < arr.length && arr[cutoff] < threshold) cutoff++;
+            if (cutoff > 0) {
+                this.requestTimestamps[i] = arr.slice(cutoff);
+            }
         }
 
         let selectedIndex;

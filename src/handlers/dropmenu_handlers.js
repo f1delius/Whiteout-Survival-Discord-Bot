@@ -37,6 +37,7 @@ const featureAccess = require('../functions/Settings/featureAccess');
 const dbMigration = require('../functions/Settings/migration');
 const buildings = require('../functions/Calculators/Buildings/buildings');
 const warAcademy = require('../functions/Calculators/WarAcademy/warAcademy');
+const { createInteractionDispatcher } = require('../functions/utility/interactionDispatcher');
 
 // === HANDLER REGISTRY ===
 const dropdownHandlers = [
@@ -133,6 +134,7 @@ const dropdownHandlers = [
 
     // === User Select Menus ===
     { type: 'user', pattern: /^select_user_add_admin_/, fn: admin.handleAddAdminUserSelection },
+    { type: 'user', pattern: /^select_user_transfer_owner_/, fn: admin.handleTransferOwnerUserSelection },
     { type: 'user', pattern: /^notification_mention_select_.*\|user\|/, fn: notificationMentions.handleMentionSelection },
 
     // === Role Select Menus ===
@@ -175,30 +177,44 @@ const dropdownHandlers = [
     { type: 'channel', pattern: /^feature_access_whitelist_select_/, fn: featureAccess.handleWhitelistSelect },
 ];
 
+const dropdownDispatchers = {
+    string: createInteractionDispatcher(dropdownHandlers.filter(({ type }) => type === 'string')),
+    user: createInteractionDispatcher(dropdownHandlers.filter(({ type }) => type === 'user')),
+    role: createInteractionDispatcher(dropdownHandlers.filter(({ type }) => type === 'role')),
+    channel: createInteractionDispatcher(dropdownHandlers.filter(({ type }) => type === 'channel')),
+};
+
 // === SETUP FUNCTION ===
 function setupDropdownHandlers(client) {
     const listener = async (interaction) => {
-        for (const { type, pattern, fn } of dropdownHandlers) {
-            if (
-                (type === 'string' && interaction.isStringSelectMenu()) ||
-                (type === 'user' && interaction.isUserSelectMenu()) ||
-                (type === 'role' && interaction.isRoleSelectMenu()) ||
-                (type === 'channel' && interaction.isChannelSelectMenu())
-            ) {
-                if (pattern.test(interaction.customId)) {
+        let dispatcher = null;
+
+        if (interaction.isStringSelectMenu()) {
+            dispatcher = dropdownDispatchers.string;
+        } else if (interaction.isUserSelectMenu()) {
+            dispatcher = dropdownDispatchers.user;
+        } else if (interaction.isRoleSelectMenu()) {
+            dispatcher = dropdownDispatchers.role;
+        } else if (interaction.isChannelSelectMenu()) {
+            dispatcher = dropdownDispatchers.channel;
+        }
+
+        if (!dispatcher) return;
+
+        for (const { pattern, fn } of dispatcher.getCandidates(interaction.customId)) {
+            if (pattern.test(interaction.customId)) {
+                try {
+                    await fn(interaction);
+                } catch (error) {
+                    console.error(`[DropdownHandler] Error handling dropdown ${interaction.customId}:`, error);
                     try {
-                        await fn(interaction);
-                    } catch (error) {
-                        console.error(`[DropdownHandler] Error handling dropdown ${interaction.customId}:`, error);
-                        try {
-                            const reply = interaction.deferred || interaction.replied
-                                ? interaction.followUp.bind(interaction)
-                                : interaction.reply.bind(interaction);
-                            await reply({ content: 'An error occurred while processing this selection.', flags: 64 });
-                        } catch (_) { /* interaction may have expired */ }
-                    }
-                    return; // stop at first match
+                        const reply = interaction.deferred || interaction.replied
+                            ? interaction.followUp.bind(interaction)
+                            : interaction.reply.bind(interaction);
+                        await reply({ content: 'An error occurred while processing this selection.', flags: 64 });
+                    } catch (_) { /* interaction may have expired */ }
                 }
+                return; // stop at first match
             }
         }
     };

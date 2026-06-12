@@ -52,24 +52,37 @@ const PROCESS_STATUS = {
 const LEGACY_PROCESS_GAME_TYPE = 'wos';
 
 function resolveProcessGameType(processData) {
+    // Return cached result if already resolved (avoids repeated DB lookups)
+    if (processData?._resolvedGameType) {
+        return processData._resolvedGameType;
+    }
+
+    let result;
     try {
         const detailsGameType = processData?.details?.game_type || processData?.details?.gameType;
         if (detailsGameType) {
-            return normalizeGameType(detailsGameType);
-        }
-
-        const targetAllianceId = parseInt(processData?.target, 10);
-        if (!isNaN(targetAllianceId) && targetAllianceId > 0) {
-            const alliance = allianceQueries.getAllianceByIdAny(targetAllianceId);
-            if (alliance?.game_type) {
-                return normalizeGameType(alliance.game_type);
+            result = normalizeGameType(detailsGameType);
+        } else {
+            const targetAllianceId = parseInt(processData?.target, 10);
+            if (!isNaN(targetAllianceId) && targetAllianceId > 0) {
+                const alliance = allianceQueries.getAllianceByIdAny(targetAllianceId);
+                if (alliance?.game_type) {
+                    result = normalizeGameType(alliance.game_type);
+                }
             }
         }
     } catch (error) {
         // Fall through to the legacy default below.
     }
 
-    return LEGACY_PROCESS_GAME_TYPE;
+    result = result || LEGACY_PROCESS_GAME_TYPE;
+
+    // Cache the result on the process object for subsequent calls
+    if (processData && typeof processData === 'object') {
+        processData._resolvedGameType = result;
+    }
+
+    return result;
 }
 
 /**

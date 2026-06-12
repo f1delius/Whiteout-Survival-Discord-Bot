@@ -672,6 +672,9 @@ try {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_admin_logs_log_code ON admin_logs (log_code)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_admin_logs_user_id_time ON admin_logs (user_id, time)`);
 
+    // Create index for system_logs.time (used by daily cleanup scheduler)
+    db.exec("CREATE INDEX IF NOT EXISTS idx_system_logs_time ON system_logs (time)");
+
     // Create indexes for players table
     db.exec(`CREATE INDEX IF NOT EXISTS idx_alliance_game_priority ON alliance (game_type, priority)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_alliance_game_auto_redeem ON alliance (game_type, auto_redeem, priority)`);
@@ -898,6 +901,9 @@ const allianceQueries = {
     getAllianceById: db.prepare('SELECT * FROM alliance WHERE game_type = ? AND id = ?'),
     getAllianceByIdAny: db.prepare('SELECT * FROM alliance WHERE id = ?'),
 
+    // Get multiple alliances by IDs across all games (batch query to avoid N+1)
+    getAlliancesByIdsAny: db.prepare('SELECT * FROM alliance WHERE id IN (SELECT value FROM json_each(?))'),
+
     // Get all alliances
     getAllAlliances: db.prepare('SELECT * FROM alliance WHERE game_type = ? ORDER BY priority'),
     getAllAlliancesAny: db.prepare('SELECT * FROM alliance ORDER BY game_type, priority'),
@@ -920,7 +926,7 @@ const allianceQueries = {
     // Get alliance by priority
     getAllianceByPriority: db.prepare('SELECT * FROM alliance WHERE game_type = ? AND priority = ?'),
 
-    // Get alliances by a list of IDs
+    // Get alliances by a list of IDs for one game
     getAlliancesByIds: db.prepare('SELECT * FROM alliance WHERE game_type = ? AND id IN (SELECT value FROM json_each(?))'),
 
     // Get alliances with auto-redeem enabled, ordered by priority
@@ -1461,6 +1467,18 @@ const processQueries = {
     // Count active processes
     countActiveProcesses: db.prepare("SELECT COUNT(*) AS count FROM processes WHERE status = 'active'"),
 
+    // Count queue position for a process (how many processes are ahead in queue for same game type)
+    countQueuePosition: db.prepare(`
+        SELECT COUNT(*) AS position FROM processes 
+        WHERE status = 'queued' 
+        AND id != ?
+        AND (json_extract(details, '$.game_type') = ? OR json_extract(details, '$.gameType') = ?)
+        AND (
+            priority < ? 
+            OR (priority = ? AND created_at < ?)
+        )
+    `),
+
     // Get paused processes ready to resume (preempted processes that are now queued)
     getPausedProcessesReadyToResume: db.prepare(`
         SELECT * FROM processes 
@@ -1729,6 +1747,7 @@ module.exports = {
             allianceQueries.addAlliance.run(resolveGameType(gameType), priority, name, guideId, channelId, interval, autoRedeem, createdBy),
         getAllianceById: (id, gameType = getDefaultGameType()) => allianceQueries.getAllianceById.get(resolveGameType(gameType), id),
         getAllianceByIdAny: (id) => allianceQueries.getAllianceByIdAny.get(id),
+        getAlliancesByIdsAny: (ids) => allianceQueries.getAlliancesByIdsAny.all(JSON.stringify(ids)),
         getAllAlliances: (gameType = getDefaultGameType()) => allianceQueries.getAllAlliances.all(resolveGameType(gameType)),
         getAllAlliancesAny: () => allianceQueries.getAllAlliancesAny.all(),
         countAlliances: (gameType = getDefaultGameType()) => allianceQueries.countAlliances.get(resolveGameType(gameType))?.count || 0,

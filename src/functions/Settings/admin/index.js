@@ -41,6 +41,15 @@ const {
     handleViewFullLogsPagination
 } = require('./viewAdmin');
 
+// Export transfer owner functionality
+const {
+    createTransferOwnerButton,
+    handleTransferOwnerButton,
+    handleTransferOwnerUserSelection,
+    handleConfirmTransferOwner,
+    handleCancelTransferOwner
+} = require('./transferOnwer');
+
 module.exports = {
     // Permission system
     PERMISSIONS,
@@ -49,6 +58,11 @@ module.exports = {
     // Main admin management
     createManageAdminsButton,
     handleManageAdminsButton,
+    createTransferOwnerButton,
+    handleTransferOwnerButton,
+    handleTransferOwnerUserSelection,
+    handleConfirmTransferOwner,
+    handleCancelTransferOwner,
 
     // Navigation
     createBackToSettingsButton,

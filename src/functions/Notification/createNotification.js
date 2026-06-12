@@ -263,8 +263,16 @@ async function handleCreateNotificationModal(interaction) {
         const nextTriggerDate = new Date(Date.UTC(year, month, day, hour, minute, second));
         const nextTriggerTimestamp = Math.floor(nextTriggerDate.getTime() / 1000); // Convert to Unix timestamp
 
+        // Server notifications must stay bound to a guild context.
+        if (type === 'server' && !interaction.guildId) {
+            return await interaction.reply({
+                content: lang.common.noPermission,
+                ephemeral: true
+            });
+        }
+
         // Create notification in database
-        const guildId = type === 'server' ? interaction.guild.id : null;
+        const guildId = type === 'server' ? interaction.guildId : null;
         const channelId = null; // Will be set later for server notifications
 
         try {

@@ -29,7 +29,7 @@ function createViewAdminButton(userId, lang = {}) {
     return new ButtonBuilder()
         .setCustomId(`view_admin_${userId}`)
         .setLabel(lang.settings.adminManagement.mainPage.buttons.viewAdmin)
-        .setStyle(ButtonStyle.Primary)
+        .setStyle(ButtonStyle.Secondary)
         .setEmoji(getComponentEmoji(getEmojiMapForUser(userId), '1049'));
 }
 

@@ -183,8 +183,6 @@ class QueueManager {
             const process = await getProcessById(processId);
             if (!process) return -1;
             const processGameType = gameType || resolveProcessGameType(process);
-
-            // Count same-game queued processes with higher priority or same priority but created earlier.
             const queuedProcesses = await this.getQueuedProcesses();
             let position = 0;
 
