@@ -104,8 +104,8 @@ const ZINMAN_REDUCE = [0, 3, 6, 9, 12, 15];
 /** Fixed seconds subtracted per upgrade level per Expert level. 2h/3h/4h/6h/8h */
 const EXPERT_SECS   = [0, 7200, 10800, 14400, 21600, 28800];
 
-// Reusable set of basic (non-crystal) resource keys — defined once at module level
-const BASIC_RESOURCES = new Set(['meat', 'food', 'wood', 'coal', 'stone', 'iron']);
+// Only basic RSS should receive Zinman cost reduction.
+const DISCOUNTABLE_RESOURCES = new Set(['meat', 'food', 'wood', 'coal', 'stone', 'iron']);
 
 // Empty totals template — cloned wherever needed
 const EMPTY_TOTALS = {
@@ -385,7 +385,7 @@ function calculateUpgrade(buildingData, fromKey, toKey, buffs) {
         if (levelData.cost) {
             for (const [res, amt] of Object.entries(levelData.cost)) {
                 let amount = parseFloat(amt) || 0;
-                if (resourceReduction > 0 && BASIC_RESOURCES.has(res)) {
+                if (resourceReduction > 0 && DISCOUNTABLE_RESOURCES.has(res)) {
                     amount = Math.ceil(amount * (1 - resourceReduction));
                 }
                 if (Object.hasOwn(totals, res)) totals[res] += amount;

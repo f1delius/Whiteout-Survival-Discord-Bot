@@ -3324,6 +3324,11 @@
             "idChannelLinked": "Linked ID channel #{channelName} to alliance {allianceName} ({allianceId})",
             "idChannelUnlinked": "Unlinked ID channel {channelId} from alliance {allianceId}",
             "ownerTransferred": "Transferred bot ownership from {previousOwner} to {newOwner}"
+        },
+        "attendance": {
+            "created": "Created attendance record \"{recordTitle}\" for {allianceName} on {eventDate}",
+            "updated": "Updated attendance record \"{recordTitle}\" for {allianceName} on {eventDate}",
+            "deleted": "Deleted attendance record \"{recordTitle}\" for {allianceName} on {eventDate}"
         }
     }
 }

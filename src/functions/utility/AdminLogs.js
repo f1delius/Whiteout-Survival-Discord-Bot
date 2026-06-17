@@ -7,6 +7,7 @@ const { adminLogQueries } = require('./database');
  * - Players: 20000-29999
  * - Notification: 40000-49999
  * - Settings: 50000-59999
+ * - Attendance: 60000-69999
  */
 
 const LOG_CODES = {
@@ -51,6 +52,13 @@ const LOG_CODES = {
         ID_CHANNEL_LINKED: 50004,
         ID_CHANNEL_UNLINKED: 50005,
         OWNER_TRANSFERRED: 50006
+    },
+
+    // Attendance Management (60000-69999)
+    ATTENDANCE: {
+        CREATED: 60001,
+        UPDATED: 60002,
+        DELETED: 60003
     }
 };
 
@@ -64,6 +72,7 @@ function getCodeCategory(code) {
     if (code >= 20000 && code < 30000) return 'players';
     if (code >= 40000 && code < 50000) return 'notification';
     if (code >= 50000 && code < 60000) return 'settings';
+    if (code >= 60000 && code < 70000) return 'attendance';
     return 'unknown';
 }
 
@@ -77,7 +86,8 @@ function getCodeRangesForTypes(types) {
         alliance: { min: 10000, max: 19999 },
         players: { min: 20000, max: 29999 },
         notification: { min: 40000, max: 49999 },
-        settings: { min: 50000, max: 59999 }
+        settings: { min: 50000, max: 59999 },
+        attendance: { min: 60000, max: 69999 }
     };
 
     return types.map(type => typeRanges[type.toLowerCase()]).filter(Boolean);

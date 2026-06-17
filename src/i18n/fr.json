@@ -3324,6 +3324,11 @@
             "idChannelLinked": "Canal d'ID #{channelName} lié à l'alliance {allianceName} ({allianceId})",
             "idChannelUnlinked": "Canal d'ID {channelId} dissocié de l'alliance {allianceId}",
             "ownerTransferred": "Propriete du bot transferee de {previousOwner} a {newOwner}"
+        },
+        "attendance": {
+            "created": "Presence creee : \"{recordTitle}\" pour {allianceName} le {eventDate}",
+            "updated": "Presence mise a jour : \"{recordTitle}\" pour {allianceName} le {eventDate}",
+            "deleted": "Presence supprimee : \"{recordTitle}\" pour {allianceName} le {eventDate}"
         }
     }
 }
