@@ -209,13 +209,52 @@ function loadPlugins(registrar) {
  * Gets list of installed plugins with their metadata
  * @returns {Array<{ name: string, version: string, description: string, author: string }>}
  */
+function getInstalledPluginManifests() {
+    const installed = new Map();
+
+    for (const plugin of loadedPlugins.values()) {
+        installed.set(plugin.name, {
+            name: plugin.name,
+            version: plugin.version,
+            description: plugin.description,
+            author: plugin.author
+        });
+    }
+
+    if (!fs.existsSync(PLUGINS_DIR)) {
+        return Array.from(installed.values());
+    }
+
+    const entries = fs.readdirSync(PLUGINS_DIR, { withFileTypes: true });
+
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+
+        const pluginDir = path.join(PLUGINS_DIR, entry.name);
+        const manifestPath = path.join(pluginDir, 'plugin.json');
+        if (!fs.existsSync(manifestPath)) continue;
+
+        try {
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            const validation = validateManifest(manifest, pluginDir);
+            if (!validation.valid) continue;
+
+            installed.set(manifest.name, {
+                name: manifest.name,
+                version: manifest.version,
+                description: manifest.description || '',
+                author: manifest.author || 'Unknown'
+            });
+        } catch (error) {
+            console.warn(`[PLUGINS] Failed to read installed manifest for ${entry.name}: ${error.message}`);
+        }
+    }
+
+    return Array.from(installed.values());
+}
+
 function getInstalledPlugins() {
-    return Array.from(loadedPlugins.values()).map(p => ({
-        name: p.name,
-        version: p.version,
-        description: p.description,
-        author: p.author
-    }));
+    return getInstalledPluginManifests();
 }
 
 /**
@@ -263,6 +302,7 @@ module.exports = {
     loadedPlugins,
     validateManifest,
     getPluginPreserveConfig,
+    getInstalledPluginManifests,
     registerPluginModules,
     loadPlugins,
     rebuildPluginMap,
