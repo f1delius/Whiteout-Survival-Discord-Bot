@@ -300,6 +300,30 @@ function mergePreserveConfigs(...configs) {
 }
 
 /**
+ * Resolves the preserve config used for an update.
+ * If the downloaded manifest explicitly defines preserveOnUpdate, treat it as
+ * the source of truth so removed preserve rules can take effect on users'
+ * next update. If the field is absent entirely, fall back to merging with the
+ * installed manifest for backward compatibility.
+ * @param {object} installedManifest
+ * @param {object} downloadedManifest
+ * @returns {{ dirs: Set<string>, files: Set<string>, extensions: Set<string> }}
+ */
+function resolveUpdatePreserveConfig(installedManifest = {}, downloadedManifest = {}) {
+    if (
+        downloadedManifest &&
+        Object.prototype.hasOwnProperty.call(downloadedManifest, 'preserveOnUpdate')
+    ) {
+        return getPluginPreserveConfig(downloadedManifest);
+    }
+
+    return mergePreserveConfigs(
+        getPluginPreserveConfig(installedManifest),
+        getPluginPreserveConfig(downloadedManifest)
+    );
+}
+
+/**
  * Returns true if a relative plugin path must be preserved during update.
  * @param {string} relativePath - Path relative to plugin root
  * @param {boolean} isDirectory - Whether the path is a directory
@@ -926,10 +950,7 @@ async function updatePlugin(pluginName, registrar) {
             console.warn(`[PLUGINS] Warning: could not read installed manifest for ${pluginName}: ${error.message}`);
         }
 
-        const preserveConfig = mergePreserveConfigs(
-            getPluginPreserveConfig(installedManifest),
-            getPluginPreserveConfig(downloadedManifest)
-        );
+        const preserveConfig = resolveUpdatePreserveConfig(installedManifest, downloadedManifest);
 
         const oldPackageHash = getFileHash(path.join(pluginDir, 'package.json'));
         const newPackageHash = getFileHash(path.join(archive.pluginRoot, 'package.json'));
