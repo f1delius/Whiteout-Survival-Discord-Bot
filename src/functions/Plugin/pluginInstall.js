@@ -440,6 +440,54 @@ function compareVersions(a, b) {
     return 0;
 }
 
+/**
+ * Reads installed plugin manifests from disk so update checks still work
+ * even when a plugin failed to load into memory.
+ * @returns {Array<{ name: string, version: string, description: string, author: string }>}
+ */
+function getInstalledPluginManifests() {
+    const installed = new Map();
+
+    for (const plugin of loadedPlugins.values()) {
+        installed.set(plugin.name, {
+            name: plugin.name,
+            version: plugin.version,
+            description: plugin.description,
+            author: plugin.author
+        });
+    }
+
+    if (!fs.existsSync(PLUGINS_DIR)) {
+        return Array.from(installed.values());
+    }
+
+    const entries = fs.readdirSync(PLUGINS_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+
+        const pluginDir = path.join(PLUGINS_DIR, entry.name);
+        const manifestPath = path.join(pluginDir, 'plugin.json');
+        if (!fs.existsSync(manifestPath)) continue;
+
+        try {
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            const validation = validateManifest(manifest, pluginDir);
+            if (!validation.valid) continue;
+
+            installed.set(manifest.name, {
+                name: manifest.name,
+                version: manifest.version,
+                description: manifest.description || '',
+                author: manifest.author || 'Unknown'
+            });
+        } catch (error) {
+            console.warn(`[PLUGINS] Failed to read installed manifest for ${entry.name}: ${error.message}`);
+        }
+    }
+
+    return Array.from(installed.values());
+}
+
 const ITEMS_PER_PAGE = 5;
 
 /**
@@ -547,9 +595,7 @@ async function handlePluginsInstallMenu(interaction, page = 0) {
         const userId = interaction.user.id;
 
         // Fetch installed and registry
-        const installed = typeof global.pluginManager?.getInstalled === 'function'
-            ? global.pluginManager.getInstalled()
-            : [];
+        const installed = getInstalledPluginManifests();
 
         let registry = null;
         let registryError = false;
@@ -604,9 +650,7 @@ async function handlePluginsInstallPagination(interaction) {
         const pluginLang = lang.plugins;
         const userId = interaction.user.id;
 
-        const installed = typeof global.pluginManager?.getInstalled === 'function'
-            ? global.pluginManager.getInstalled()
-            : [];
+        const installed = getInstalledPluginManifests();
 
         let registry = null;
         let registryError = false;
@@ -811,13 +855,13 @@ async function checkPluginUpdates() {
 
     const updates = [];
 
-    for (const [name, pluginData] of loadedPlugins) {
-        const registryEntry = registry.plugins.find(p => p.name === name);
+    for (const pluginData of getInstalledPluginManifests()) {
+        const registryEntry = registry.plugins.find(p => p.name === pluginData.name);
         if (!registryEntry || !registryEntry.version) continue;
 
         if (compareVersions(registryEntry.version, pluginData.version) > 0) {
             updates.push({
-                name,
+                name: pluginData.name,
                 current: pluginData.version,
                 latest: registryEntry.version
             });
