@@ -22,6 +22,7 @@ const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createProcess } = require('../Processes/createProcesses');
 const { queueManager } = require('../Processes/queueManager');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator, createAllianceSelectionComponents, createGameSelectionComponents, getAlliancesForUser, getAlliancesForUserByGame } = require('../utility/commonFunctions');
+const { formatAllianceStateDescription } = require('../Alliance/allianceStateDescription');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { getGameProfile, normalizeGameType } = require('../utility/gameProfiles');
@@ -96,11 +97,6 @@ function removeFromIdChannelCache(channelId, dbId) {
         global.idChannelCache.set(channelId, filtered);
     }
 }
-
-/**
- * NOTE: API configuration removed - now uses process system
- * See fetchPlayerData.js for API handling with retry logic and rate limiting
- */
 
 /**
  * Creates the ID channel management button
@@ -211,7 +207,7 @@ function createChannelRemovalContainer(interaction, idChannels, lang, page = 0) 
         return {
             label: `${channel.alliance_name}`,
             value: channel.id.toString(),
-            description: lang.players.idChannel.selectMenu.selectChannel.description.replace('{channelName}', channelName),
+            description: formatAllianceStateDescription({ state: channel.alliance_state }, lang, lang.players.idChannel.selectMenu.selectChannel.description.replace('{channelName}', channelName)),
             emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1031')
         };
     });
@@ -545,6 +541,7 @@ function getIdChannelsForUser(adminData) {
             return {
                 ...channel,
                 alliance_name: alliance?.name || 'Unknown Alliance',
+                alliance_state: alliance?.state,
                 channel_name: 'Unknown' // Could fetch from Discord API if needed, but keeping simple
             };
         });
@@ -893,7 +890,6 @@ async function handleIdChannelMessage(message) {
             if (existingPlayer) {
                 existingPlayers.push({
                     id: playerId,
-                    nickname: existingPlayer.nickname,
                     alliance: allianceQueries.getAllianceById(existingPlayer.alliance_id, existingPlayer.game_type)?.name || 'Unknown'
                 });
             }
@@ -910,7 +906,6 @@ async function handleIdChannelMessage(message) {
                     {
                         name: lang.players.idChannel.content.existingPlayersField.name,
                         value: existingPlayers.map(p => lang.players.idChannel.content.existingPlayersField.value
-                            .replace('{nickname}', p.nickname)
                             .replace('{id}', p.id)
                             .replace('{alliance}', p.alliance)
                         ).join('\n').slice(0, 1024),
@@ -973,7 +968,6 @@ async function processIdChannelPlayers(message, alliance, sanitizedPlayerIds, la
         if (existingPlayer) {
             existingPlayers.push({
                 id: playerId,
-                nickname: existingPlayer.nickname,
                 alliance: allianceQueries.getAllianceById(existingPlayer.alliance_id, existingPlayer.game_type)?.name || 'Unknown'
             });
         }
@@ -991,7 +985,6 @@ async function processIdChannelPlayers(message, alliance, sanitizedPlayerIds, la
                 {
                     name: lang.players.idChannel.content.existingPlayersField.name,
                     value: existingPlayers.map(p => lang.players.idChannel.content.existingPlayersField.value
-                        .replace('{nickname}', p.nickname)
                         .replace('{id}', p.id)
                         .replace('{alliance}', p.alliance)
                     ).join('\n').slice(0, 1024),
@@ -1052,6 +1045,7 @@ function createMessageAllianceSelection(alliances, userId, originalMsgId, lang, 
     const options = currentPageAlliances.map(alliance => ({
         label: alliance.name,
         value: alliance.id.toString(),
+        description: formatAllianceStateDescription(alliance, lang),
         emoji: getComponentEmoji(getEmojiMapForUser(userId), '1001')
     }));
 
@@ -1282,7 +1276,7 @@ function createAutoCleanChannelSelection(interaction, idChannels, lang, page = 0
         return {
             label: `${channel.alliance_name} - #${channelName}`,
             value: channel.id.toString(),
-            description: statusText,
+            description: formatAllianceStateDescription({ state: channel.alliance_state }, lang, statusText),
             emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1014')
         };
     });

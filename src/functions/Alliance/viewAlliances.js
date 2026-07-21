@@ -2,7 +2,8 @@ const { ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder, S
 const { allianceQueries, playerQueries, adminQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, formatRefreshInterval, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { formatAllianceStateDescription } = require('./allianceStateDescription');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
@@ -161,10 +162,10 @@ async function showAlliancesPage(interaction, alliances, page, lang, gameType = 
             new StringSelectMenuOptionBuilder()
                 .setLabel(alliance.name)
                 .setValue(alliance.id.toString())
-                .setDescription(lang.alliance.viewAlliances.selectMenu.selectAlliance.description
+                .setDescription(formatAllianceStateDescription(alliance, lang, lang.alliance.viewAlliances.selectMenu.selectAlliance.description
                     .replace('{priority}', alliance.priority)
                     .replace('{playerCount}', playerCount)
-                )
+                ))
                 .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1001'))
         );
     }
@@ -224,9 +225,6 @@ async function showAlliancesPage(interaction, alliances, page, lang, gameType = 
                 }
             }
 
-            // Format refresh rate
-            const refreshText = formatRefreshInterval(selectedAlliance.interval, lang);
-
             // Add separator and alliance details
             container[0]
                 .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
@@ -235,8 +233,8 @@ async function showAlliancesPage(interaction, alliances, page, lang, gameType = 
                         `${lang.alliance.viewAlliances.content.allianceDetailsField.name.replace('{allianceName}', selectedAlliance.name)}\n` +
                         `${lang.alliance.viewAlliances.content.allianceDetailsField.value
                             .replace('{priority}', selectedAlliance.priority)
+                            .replace('{state}', selectedAlliance.state || lang.common.notSet || 'Not set')
                             .replace('{playerCount}', playerCount)
-                            .replace('{refreshRate}', refreshText)
                             .replace('{channel}', channelText)
                             .replace('{createdBy}', createdByText)}`
                     ),

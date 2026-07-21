@@ -58,7 +58,7 @@
                 },
                 "editAllianceField": {
                     "name": "- **Modifier une alliance**",
-                    "value": "  - Modifier les paramètres de l'alliance"
+                    "value": "  - Modifier le nom, l'état ou le canal"
                 },
                 "deleteAllianceField": {
                     "name": "- **Supprimer une alliance**",
@@ -68,9 +68,9 @@
                     "name": "- **Modifier la priorité**",
                     "value": "  - Gérer l'ordre de priorité des alliances"
                 },
-                "manualRefreshField": {
-                    "name": "- **Rafraîchissement manuel**",
-                    "value": "  - Lancer un rafraîchissement manuel pour une ou plusieurs alliances"
+                "autoSortField": {
+                    "name": "- **Tri automatique par état**",
+                    "value": "  - Trier les joueurs selon leur dernier état enregistré"
                 },
                 "viewAlliancesField": {
                     "name": "- **Voir les alliances**",
@@ -88,7 +88,7 @@
                 "viewAlliances": "Voir",
                 "editPriority": "Priorité",
                 "assignAlliance": "Assigner",
-                "manualRefresh": "Rafraîchir"
+                "autoSort": "Tri automatique"
             },
             "errors": {}
         },
@@ -99,8 +99,8 @@
                 "allianceDetailsField": {
                     "name": "- **Détails de l'alliance**",
                     "value": {
-                        "step1": "  - **Nom de l'alliance :** {allianceName}\n  - **Priorité :** {priority}\n  - **Fréquence de rafraîchissement :** {refreshRate}",
-                        "step2": "  - **Nom de l'alliance :** {allianceName}\n  - **Priorité :** {priority}\n  - **Fréquence de rafraîchissement :** {refreshRate}\n  - **Canal :** {channel}"
+                        "step1": "  - **Nom de l'alliance :** {allianceName}\n  - **État :** {state}\n  - **Priorité :** {priority}",
+                        "step2": "  - **Nom de l'alliance :** {allianceName}\n  - **État :** {state}\n  - **Priorité :** {priority}\n  - **Canal :** {channel}"
                     }
                 },
                 "warningField": {
@@ -124,10 +124,10 @@
                     "label": "Nom de l'alliance",
                     "placeholder": "Entrez le nom de l'alliance"
                 },
-                "refreshRateField": {
-                    "label": "Fréquence de rafraîchissement",
-                    "description": "Fréquence de mise à jour des joueurs. Utilisez @HH:MM pour un rafraîchissement quotidien UTC.",
-                    "placeholder": "0 = désactiver, 30+ min recommandé"
+                "stateField": {
+                    "label": "État",
+                    "description": "Utilisé pour chaque code cadeau de cette alliance.",
+                    "placeholder": "Entrez le numéro d'état"
                 }
             },
             "selectMenu": {
@@ -137,12 +137,9 @@
             },
             "errors": {
                 "invalidGameType": "{emoji.1050} Choisissez un jeu valide avant de créer l'alliance.",
-                "invalidRefreshRate": "{emoji.1050} La fréquence de rafraîchissement doit être un nombre valide (0 ou plus).",
+                "invalidState": "{emoji.1050} L'état doit être un nombre entier positif.",
                 "invalidSelection": "{emoji.1050} Sélection de canal invalide. Réessayez.",
                 "allianceNotFound": "{emoji.1050} Alliance introuvable. Créez une alliance d'abord.",
-                "wrongTimeFormat": "{emoji.1050} L'heure doit être au format HH:MM",
-                "wrongHourRange": "{emoji.1050} L'heure doit être comprise entre 0 et 23",
-                "wrongMinuteRange": "{emoji.1050} Les minutes doivent être comprises entre 0 et 59",
                 "wrongValue": "{emoji.1050} L'intervalle doit être un nombre positif ou le format horaire (@HH:MM)"
             }
         },
@@ -156,7 +153,7 @@
                 "description": "Les informations de l'alliance ont été mises à jour.",
                 "allianceInfoField": {
                     "name": "- **Informations mises à jour**",
-                    "value": "  - **Nom :** {name}\n  - **Fréquence de rafraîchissement :** {refreshRate}\n  - **Canal :** {channel}\n  - **Priorité :** {priority}"
+                    "value": "  - **Nom :** {name}\n  - **État :** {state}\n  - **Canal :** {channel}\n  - **Priorité :** {priority}"
                 },
                 "warningField": {
                     "name": "- **Attention**",
@@ -172,10 +169,10 @@
                     "label": "Nom de l'alliance",
                     "placeholder": "Entrez le nouveau nom de l'alliance"
                 },
-                "refreshRate": {
-                    "label": "Fréquence de rafraîchissement (minutes)",
-                    "description": "Fréquence de mise à jour des joueurs. Utilisez @HH:MM pour un rafraîchissement quotidien UTC.",
-                    "placeholder": "0 = désactiver, 30+ min recommandé"
+                "state": {
+                    "label": "État",
+                    "description": "Utilisé pour les nouveaux joueurs et les codes cadeaux.",
+                    "placeholder": "Entrez le numéro d'état"
                 }
             },
             "selectMenu": {
@@ -189,7 +186,7 @@
             },
             "errors": {
                 "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
-                "invalidRefreshRate": "{emoji.1050} La fréquence de rafraîchissement doit être un nombre valide (0 ou plus).",
+                "invalidState": "{emoji.1050} L'état doit être un nombre entier positif.",
                 "noAssignedAlliances": "{emoji.1050} Vous n'êtes affecté à aucune alliance.",
                 "noAssignedAlliancesForGame": "{emoji.1050} Vous n'êtes affecté à aucune alliance pour ce jeu.",
                 "noAlliances": "{emoji.1050} Aucune alliance trouvée. Créez une alliance d'abord.",
@@ -350,33 +347,6 @@
                 "noAlliancesForGame": "{emoji.1050} Aucune alliance trouvee pour ce jeu. Creez-en une d'abord."
             }
         },
-        "refreshAlliance": {
-            "content": {
-                "title": {
-                    "base": "### {emoji.1033} Rafraîchissement manuel des alliances",
-                    "results": "### {emoji.1041} Résultats du rafraîchissement"
-                },
-                "selectGameDescription": "Choisissez les alliances du jeu que vous voulez rafraîchir.",
-                "description": "Choisissez une ou plusieurs alliances pour lancer un rafraîchissement manuel.",
-                "allianceSuccess": "Alliance **{allianceName}** : {playerCount} joueurs mis en file pour le rafraîchissement, les modifications seront publiées dans le canal de l'alliance.",
-                "autoRefreshStopped": "Arrêté {cancelledCount} processus(s) d'auto-rafraîchissement pour l'alliance {allianceId} afin de permettre le rafraîchissement manuel"
-            },
-            "selectMenu": {
-                "selectAlliance": {
-                    "placeholder": "Choisissez l(es) alliance(s) à rafraîchir",
-                    "description": "Priorité {priority} | Joueurs : {playerCount}"
-                }
-            },
-            "errors": {
-                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
-                "noAlliances": "{emoji.1050} Aucune alliance avec des joueurs trouvée.",
-                "noAlliancesForGame": "{emoji.1050} Aucune alliance avec des joueurs trouvée pour ce jeu.",
-                "noValidAlliances": "{emoji.1050} Aucune alliance valide disponible pour le rafraîchissement.",
-                "allianceNotFound": "{emoji.1050} Alliance {allianceId} introuvable.",
-                "allianceHasNoPlayers": "{emoji.1050} L'alliance {allianceId} n'a pas de joueurs à rafraîchir.",
-                "allianceError": "{emoji.1050} Erreur lors du traitement de l'alliance {allianceId} : {errorMessage}"
-            }
-        },
         "viewAlliances": {
             "content": {
                 "title": "### {emoji.1021} Voir les alliances",
@@ -384,7 +354,7 @@
                 "description": "Choisissez une alliance ci-dessous pour voir ses détails.",
                 "allianceDetailsField": {
                     "name": "- **{allianceName}**",
-                    "value": "  - Priorité : {priority}\n  - Joueurs : {playerCount}\n  - Fréquence de rafraîchissement : {refreshRate}\n  - Canal : {channel}\n  - Créé par : {createdBy}"
+                    "value": "  - Priorité : {priority}\n  - État : {state}\n  - Joueurs : {playerCount}\n  - Canal : {channel}\n  - Créé par : {createdBy}"
                 },
                 "channelNotFound": "Canal introuvable",
                 "noPlayers": "Aucun joueur dans cette alliance.",
@@ -456,7 +426,7 @@
                 },
                 "selectGameDescription": "Choisissez les alliances du jeu dont vous voulez voir les joueurs.",
                 "playerField": {
-                    "value": "- **{nickname}**\n  - ID: {fid}\n  - Fourneau: {furnace}\n  - État: {state}"
+                    "value": "- **ID {fid}**\n  - État assigné : {state}"
                 }
             },
             "buttons": {
@@ -475,44 +445,6 @@
                 "noAvailableAlliances": "{emoji.1050} Aucune alliance avec des joueurs trouvée.",
                 "noAvailableAlliancesForGame": "{emoji.1050} Aucune alliance avec des joueurs trouvée pour ce jeu.",
                 "noPlayersInAlliance": "{emoji.1050} Aucun joueur trouvé dans cette alliance."
-            }
-        },
-        "history": {
-            "content": {
-                "title": "### {emoji.1044} Historique des Joueurs",
-                "typeDescription": "Choisissez le type de changements que vous souhaitez consulter.",
-                "allianceTitle": "### {emoji.1044} Choisir une Alliance",
-                "allianceDescription": "Choisissez une alliance pour voir l'historique des changements.",
-                "selectGameDescription": "Choisissez les alliances du jeu dont vous voulez voir l'historique des joueurs.",
-                "changesTitle": "### {emoji.1044} Historique {type} - {allianceName}",
-                "playerTitle": "### {emoji.1044} Historique {type} - {playerName} ({fid})",
-                "furnaceChange": "- **{nickname}** (`{fid}`)\n  - {oldLevel} → {newLevel}\n  - {date}",
-                "nicknameChange": "- **{nickname}** (`{fid}`)\n  - {oldNickname} → {newNickname}\n  - {date}"
-            },
-            "buttons": {
-                "furnace": "Fourneau",
-                "nickname": "Pseudo",
-                "search": "Rechercher par ID"
-            },
-            "selectMenu": {
-                "allianceSelect": {
-                    "placeholder": "Choisissez une alliance pour voir l'historique",
-                    "description": "Priorité: {alliancePriority}"
-                }
-            },
-            "modal": {
-                "title": "Rechercher l'Historique",
-                "label": "ID du Joueur",
-                "placeholder": "Entrez l'ID de jeu du joueur"
-            },
-            "errors": {
-                "noAlliances": "{emoji.1050} Vous n'êtes assigné à aucune alliance.",
-                "noAlliancesForGame": "{emoji.1050} Vous n'êtes assigné à aucune alliance pour ce jeu.",
-                "noChanges": "{emoji.1050} Aucun changement trouvé.",
-                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
-                "invalidId": "{emoji.1050} Entrez un ID de joueur numérique valide.",
-                "playerNotFound": "{emoji.1050} Ce joueur n'a pas été trouvé dans la base de données.",
-                "noAccessToPlayer": "{emoji.1050} Vous n'avez pas accès à l'alliance de ce joueur."
             }
         },
         "addPlayer": {
@@ -552,7 +484,7 @@
                 },
                 "alreadyExistField": {
                     "name": "Joueurs déjà existants",
-                    "value": "- **Pseudo** : {nickname}\n  - ID : {id}\n  - fournaise : {furnace}\n  - état : {state}"
+                    "value": "- **ID {id}**\n  - État assigné : {state}"
                 },
                 "statisticsField": {
                     "name": "Statistiques",
@@ -560,7 +492,7 @@
                 },
                 "addedField": {
                     "name": "Joueurs ajoutés",
-                    "value": "- **Pseudo** : {nickname}\n  - ID : {id}\n  - fournaise : {furnace}\n  - état : {state}"
+                    "value": "- **ID {id}**\n  - État assigné : {state}"
                 },
                 "failedField": {
                     "name": "- **Échec d'ajout**",
@@ -568,7 +500,7 @@
                 },
                 "skippedExistingField": {
                     "name": "Joueurs existants ignorés {count}",
-                    "value": "- **{nickname}** (ID : {id})  - {alliance}"
+                    "value": "- **ID {id}** - {alliance}"
                 },
                 "moreThanTen": "\n\n*...et {count} de plus*",
                 "processStarted": "Processus démarré ! Les mises à jour de progression seront affichées dans {channelMention}",
@@ -632,7 +564,7 @@
                 },
                 "existingPlayersField": {
                     "name": "Joueurs existants",
-                    "value": "  - **{nickname}** (ID : {id})  - {alliance}"
+                    "value": "  - **ID {id}** - {alliance}"
                 },
                 "unknownAlliance": "Alliance inconnue",
                 "selectGameDescription": "Choisissez les alliances du jeu pour lesquelles vous voulez configurer un canal d'ID."
@@ -738,7 +670,7 @@
                     "name": "- **Alliances différentes détectées**",
                     "value": "  - Certains joueurs appartiennent à différentes alliances. Voulez-vous quand même les déplacer ?"
                 },
-                "listEntry": "  - {name} (ID : {fid})",
+                "listEntry": "  - ID {fid}",
                 "andMore": "  - ... et {n} de plus"
             },
             "buttons": {
@@ -764,7 +696,7 @@
                 },
                 "playerSelection": {
                     "placeholder": "Choisissez les joueurs à déplacer",
-                    "description": "ID : {id} | Fournaise : {furnace} | état : {state}"
+                    "description": "État assigné : {state}"
                 },
                 "placeholder": {
                     "sourceAlliance": "Choisissez l'alliance source",
@@ -800,7 +732,7 @@
                 "selectGameDescription": "Choisissez les alliances du jeu desquelles vous voulez supprimer des joueurs.",
                 "playersToRemoveField": {
                     "name": "**Joueurs à supprimer**",
-                    "value": "- pseudo : {nickname}\n  - ID : {id}\n  - fournaise : {furnace}\n  - état : {state}"
+                    "value": "- **ID {id}**\n  - État assigné : {state}"
                 },
                 "playersRemovedField": {
                     "name": "- **Joueurs supprimés**",
@@ -827,7 +759,7 @@
                 },
                 "playerSelect": {
                     "placeholder": "Choisissez les joueurs à supprimer",
-                    "description": "ID : {id} | Fournaise : {furnace} | état : {state}"
+                    "description": "État assigné : {state}"
                 }
             },
             "errors": {
@@ -847,19 +779,17 @@
                     "base": "### {emoji.1043} Exporter les joueurs",
                     "selectState": "### {emoji.1040} Choisir les états",
                     "selectAlliance": "### {emoji.1001} Choisir les alliances",
-                    "selectFurnace": "### {emoji.1012} Choisir les niveaux de fournaise",
                     "generated": "### {emoji.1004} CSV généré"
                 },
                 "description": {
                     "base": "Choisissez des filtres et générez un export CSV des joueurs.",
                     "selectState": "Choisissez les états à filtrer, ou choisissez \"Tous les états\".",
-                    "selectAlliance": "Choisissez les alliances à filtrer, ou choisissez \"Toutes les alliances\".",
-                    "selectFurnace": "Choisissez les niveaux de fournaise à filtrer. Choisir un niveau FC inclut tous ses sous-niveaux dans l'export."
+                    "selectAlliance": "Choisissez les alliances à filtrer, ou choisissez \"Toutes les alliances\"."
                 },
                 "selectGameDescription": "Choisissez les joueurs du jeu que vous voulez exporter.",
                 "filtersField": {
                     "name": "- **Filtres actuels**",
-                    "value": "  - État : {state}\n  - Alliance : {alliance}\n  - Niveau de fournaise : {furnace}"
+                    "value": "  - État assigné : {state}\n  - Alliance : {alliance}"
                 },
                 "all": "Tous",
                 "count": "Joueurs correspondants : {playerCount}",
@@ -868,7 +798,6 @@
             "buttons": {
                 "state": "État",
                 "alliance": "Alliance",
-                "furnace": "Fournaise",
                 "generate": "Générer"
             },
             "selectMenu": {
@@ -879,10 +808,6 @@
                 "allianceFilter": {
                     "placeholder": "Choisissez les alliances à filtrer",
                     "all": "Toutes les alliances"
-                },
-                "furnaceFilter": {
-                    "placeholder": "Choisissez les niveaux de fournaise à filtrer",
-                    "all": "Tous les niveaux de fournaise"
                 }
             },
             "errors": {
@@ -971,9 +896,9 @@
                 "description": "L'ID de test personnalisé a été défini pour le joueur suivant :",
                 "playerInfoField": {
                     "name": "- {emoji.1026} **Infos Joueur**",
-                    "value": "  - **Pseudo :** {nickname}\n  - **ID Joueur :** {playerId}\n  - **Niveau de fournaise :** {furnace}\n  - **État :** {state}"
+                    "value": "  - **ID :** {playerId}\n  - **État assigné :** {state}"
                 },
-                "processingMessage": "Récupération des informations du joueur..."
+                "processingMessage": "Vérification de l'ID enregistré et de l'état de l'alliance..."
             },
             "buttons": {
                 "setTestId": "Définir ID"
@@ -1925,8 +1850,8 @@
                     "value": "  - Personnaliser l'apparence des messages du bot avec différents thèmes."
                 },
                 "autoDeleteField": {
-                    "name": "- **Suppression automatique des joueurs supprimés**",
-                    "value": "  - Supprimer automatiquement les joueurs qui n'existent plus après 3 vérifications.\n  - Statut actuel : **{autoDelete}**."
+                    "name": "- **Supprimer les ID joueur invalides**",
+                    "value": "  - Supprimer un joueur après 3 réponses d'utilisation de code confirmant que l'ID n'existe pas.\n  - Statut actuel : **{autoDelete}**."
                 },
                 "autoRemoveTransferredField": {
                     "name": "- **Suppression automatique des joueurs transférés**",
@@ -1958,7 +1883,7 @@
             "buttons": {
                 "language": "Langue",
                 "manageAdmins": "Gérer",
-                "autoDelete": "Suppression",
+                "autoDelete": "ID invalides",
                 "autoRemoveTransferred": "Retrait État",
                 "theme": "Thèmes",
                 "merge": "Fusionner",
@@ -3246,7 +3171,7 @@
     "permissions": {
         "alliance": {
             "name": "Alliance",
-            "description": "Créer/Modifier/Supprimer/Rafraîchir"
+            "description": "Créer/Modifier/Supprimer/Tri automatique"
         },
         "players": {
             "name": "Joueurs",

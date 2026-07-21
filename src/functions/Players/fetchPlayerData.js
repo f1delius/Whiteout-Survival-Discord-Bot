@@ -4,8 +4,8 @@ const { allianceQueries, playerQueries } = require('../utility/database');
 const languages = require('../../i18n');
 const { handleError, getUserInfo } = require('../utility/commonFunctions');
 const { getComponentEmoji, getGlobalEmojiMap } = require('../utility/emojis');
-const { API_CONFIG } = require('../utility/apiConfig');
-const { fetchPlayerData: fetchPlayerFromAPIShared, getPlayerApiManager } = require('../utility/apiClient');
+
+const PROGRESS_UPDATE_INTERVAL = 10;
 
 /**
  * Player data fetching and processing
@@ -35,6 +35,9 @@ class PlayerDataProcessor {
         const alliance = allianceQueries.getAllianceByIdAny(processData.target);
         if (!alliance) {
             throw new Error(`Alliance ${processData.target} not found`);
+        }
+        if (!Number.isSafeInteger(alliance.state) || alliance.state <= 0) {
+            throw new Error(`Alliance ${alliance.name} does not have a valid state configured`);
         }
 
         // Get admin language for messages
@@ -141,12 +144,8 @@ class PlayerDataProcessor {
         } catch (error) {
             await handleError(null, lang, error, 'processPlayerData', false);
 
-            // If it's not a rate limit error, mark as failed
-            if (!this.isRateLimitError(error)) {
-                await updateProcessStatus(processId, 'failed');
-                // Clean up processing state
-                this.processing.delete(processId);
-            }
+            await updateProcessStatus(processId, 'failed');
+            this.processing.delete(processId);
 
             throw error;
         }
@@ -212,7 +211,6 @@ class PlayerDataProcessor {
             let currentProgress = await getProcessById(processId);
             const processingState = this.processing.get(processId);
             const gameType = this.resolveProcessGameType(processData, alliance);
-            const playerApiManager = getPlayerApiManager(gameType);
 
             // First, check for players that are already in the database
             const pendingPlayers = [...currentProgress.progress.pending];
@@ -259,7 +257,8 @@ class PlayerDataProcessor {
             // Get updated progress after checking database
             currentProgress = await getProcessById(processId);
 
-            // Process remaining players that need API calls
+            // Player profile lookup was removed by both games. Add the IDs with
+            // neutral profile values and inherit the alliance's state.
             for (let i = 0; i < currentProgress.progress.pending.length; i++) {
                 const playerId = currentProgress.progress.pending[i];
                 try {
@@ -269,61 +268,26 @@ class PlayerDataProcessor {
                         break;
                     }
 
-                    let success = false;
-                    while (!success) {
-                        try {
-                            // Double check if player was added by another process
-                            const existingPlayer = playerQueries.getPlayer(playerId, gameType);
-                            if (existingPlayer) {
-                                // Player was added while we were processing
-                                await this.movePlayerToStatus(processId, playerId, 'pending', 'existing');
-                                processingState.existing++;
-                                processingState.processed++;
-                                success = true;
-                                continue;
-                            }
-
-                            // Fetch player data from API
-                            const playerData = await this.fetchPlayerFromAPI(playerId, gameType);
-
-                            if (playerData) {
-                                // Add player to database
-                                await this.addPlayerToDatabase(playerId, playerData, alliance.id, processData.created_by, gameType);
-
-                                // Move to done
-                                await this.movePlayerToStatus(processId, playerId, 'pending', 'done');
-                                processingState.added++;
-                            } else {
-                                // Move to failed
-                                await this.movePlayerToStatus(processId, playerId, 'pending', 'failed');
-                                processingState.failed++;
-                            }
-
-                            processingState.processed++;
-                            success = true;
-
-                            // Delay between API calls: 1s (dual-API mode) or 2s (single-API mode)
-                            await this.delay(playerApiManager.getRequestDelay());
-
-                        } catch (error) {
-                            // Handle rate limiting
-                            if (this.isRateLimitError(error)) {
-                                await this.handleRateLimit(processId, processData, alliance, lang);
-                                // Don't mark as success - will retry the same player
-                                continue;
-                            }
-
-                            // For non-rate-limit errors, mark as failed and move on
-                            await this.movePlayerToStatus(processId, playerId, 'pending', 'failed');
-                            processingState.failed++;
-                            processingState.processed++;
-                            success = true;
-                        }
+                    const existingPlayer = playerQueries.getPlayer(playerId, gameType);
+                    if (existingPlayer) {
+                        await this.movePlayerToStatus(processId, playerId, 'pending', 'existing');
+                        processingState.existing++;
+                    } else {
+                        await this.addPlayerToDatabase(
+                            playerId,
+                            alliance.id,
+                            alliance.state,
+                            processData.created_by,
+                            gameType
+                        );
+                        await this.movePlayerToStatus(processId, playerId, 'pending', 'done');
+                        processingState.added++;
                     }
+                    processingState.processed++;
 
                     // Update embed every 10 players or if it's the last one (ONLY if embed exists)
                     if (processingState.embedMessage &&
-                        (processingState.processed % API_CONFIG.UPDATE_INTERVAL === 0 ||
+                        (processingState.processed % PROGRESS_UPDATE_INTERVAL === 0 ||
                             processingState.processed === processingState.totalPlayers)) {
                         await this.updateProgressEmbed(processId, processData, alliance, lang);
                     }
@@ -331,12 +295,9 @@ class PlayerDataProcessor {
                 } catch (error) {
                     await handleError(null, lang, error, 'fetchAndProcessPlayers', false);
 
-                    // Move to failed for non-rate-limit errors
-                    if (!this.isRateLimitError(error)) {
-                        await this.movePlayerToStatus(processId, playerId, 'pending', 'failed');
-                        processingState.failed++;
-                        processingState.processed++;
-                    }
+                    await this.movePlayerToStatus(processId, playerId, 'pending', 'failed');
+                    processingState.failed++;
+                    processingState.processed++;
                 }
             }
 
@@ -349,38 +310,19 @@ class PlayerDataProcessor {
     }
 
     /**
-     * Fetches player data from API with retry logic
-     * @param {string} playerId - Player ID to fetch
-     * @returns {Promise<Object|null>} Player data or null if failed
-     */
-    async fetchPlayerFromAPI(playerId, gameType) {
-        return fetchPlayerFromAPIShared(playerId, {
-            onError: (error, context) => handleError(null, null, error, context, false),
-            delay: (ms) => this.delay(ms),
-            returnErrorObject: false,
-            gameType
-        });
-    }
-
-    /**
      * Adds player to database
      * @param {string} playerId - Player ID
-     * @param {Object} playerData - Player data from API
      * @param {number} allianceId - Alliance ID
      * @param {string} addedBy - Admin ID who added the player
      * @returns {Promise<void>}
      */
-    async addPlayerToDatabase(playerId, playerData, allianceId, addedBy, gameType) {
+    async addPlayerToDatabase(playerId, allianceId, state, addedBy, gameType) {
         try {
             playerQueries.addPlayer(
-                playerId,                                   // fid
-                null,                                       // user_id (Discord user ID, null for API additions)
-                playerData.nickname || 'Unknown',           // nickname
-                playerData.stove_lv || 0,                   // furnace_level
-                playerData.kid || 0,                        // state - should be kid from API response
-                playerData.avatar_image || '',              // image_url
-                allianceId,                                 // alliance_id
-                String(addedBy),                            // added_by - convert to string
+                playerId,
+                state,
+                allianceId,
+                String(addedBy),
                 gameType
             );
 
@@ -420,44 +362,6 @@ class PlayerDataProcessor {
 
         } catch (error) {
             await handleError(null, null, error, 'movePlayerToStatus', false);
-            throw error;
-        }
-    }
-
-    /**
-     * Handles rate limiting by pausing the process
-     * @param {number} processId - Process ID
-     * @param {Object} processData - Process data
-     * @param {Object} alliance - Alliance data
-     * @param {Object} lang - Language object
-     * @returns {Promise<void>}
-     */
-    async handleRateLimit(processId, processData, alliance, lang) {
-        try {
-            const processingState = this.processing.get(processId);
-            if (processingState && processingState.embedMessage) {
-                const rateLimitEmbed = this.createProgressEmbed(
-                    processData,
-                    alliance,
-                    lang,
-                    {
-                        totalPlayers: processingState.totalPlayers,
-                        processed: processingState.processed,
-                        added: processingState.added,
-                        failed: processingState.failed,
-                        existing: processingState.existing,
-                        status: lang.players.addPlayer.content.status.rateLimit
-                    },
-                    processData,
-                    { status: processData.status }
-                );
-                await processingState.embedMessage.edit({
-                    embeds: [rateLimitEmbed]
-                });
-            }
-            await this.delay(API_CONFIG.RATE_LIMIT_DELAY);
-        } catch (error) {
-            await handleError(null, lang, error, 'handleRateLimit', false);
             throw error;
         }
     }
@@ -542,7 +446,6 @@ class PlayerDataProcessor {
     async sendIdChannelResultEmbed(processId, processData, finalProgress, alliance, lang) {
         try {
             const { client } = require('../../index');
-const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
 
             // Fetch the ID channel and original message
             const channel = await client.channels.fetch(processData.details.id_channel_channel_id);
@@ -562,10 +465,7 @@ const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
                 if (player) {
                     added.push({
                         fid: playerId,
-                        nickname: player.nickname,
-                        furnace_level: player.furnace_level,
                         state: player.state,
-                        image_url: player.image_url,
                         game_type: player.game_type || alliance.game_type
                     });
                 }
@@ -576,9 +476,7 @@ const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
                 if (player) {
                     existing.push({
                         fid: playerId,
-                        nickname: player.nickname,
-                        furnace_level: player.furnace_level,
-                        image_url: player.image_url,
+                        state: player.state,
                         game_type: player.game_type || alliance.game_type
                     });
                 }
@@ -606,26 +504,13 @@ const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
                 ]);
             }
 
-            // If only 1 player was added, show their image
-            if (added.length === 1 && added[0].image_url) {
-                embed.setThumbnail(added[0].image_url);
-            }
-
             // Show added players (limit to 10)
             if (added.length > 0) {
                 const displayedAdded = added.slice(0, 10);
                 const addedList = displayedAdded
-                    .map(p => {
-                        const settlementName = getSettlementName(p.game_type, lang);
-                        const defaultSettlementName = getSettlementName('wos', lang);
-                        return lang.players.addPlayer.content.addedField.value
-                            .replace('{nickname}', p.nickname)
+                    .map(p => lang.players.addPlayer.content.addedField.value
                             .replace('{id}', p.fid)
-                            .replace('{furnace}', getFurnaceReadable(p.furnace_level, lang, p.game_type))
-                            .replace('{state}', p.state)
-                            .replace('furnace', settlementName)
-                            .replace(defaultSettlementName.toLowerCase(), settlementName);
-                    })
+                            .replace('{state}', p.state))
                     .join('\n');
 
                 let addedValue = addedList;
@@ -645,17 +530,9 @@ const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
             if (existing.length > 0) {
                 const displayedExisting = existing.slice(0, 10);
                 const existingList = displayedExisting
-                    .map(p => {
-                        const settlementName = getSettlementName(p.game_type, lang);
-                        const defaultSettlementName = getSettlementName('wos', lang);
-                        return lang.players.addPlayer.content.alreadyExistField.value
-                            .replace('{nickname}', p.nickname)
+                    .map(p => lang.players.addPlayer.content.alreadyExistField.value
                             .replace('{id}', p.fid)
-                            .replace('{furnace}', getFurnaceReadable(p.furnace_level, lang, p.game_type))
-                            .replace('{state}', p.state)
-                            .replace('furnace', settlementName)
-                            .replace(defaultSettlementName.toLowerCase(), settlementName);
-                    })
+                            .replace('{state}', p.state))
                     .join('\n');
 
                 let existingValue = existingList;
@@ -816,25 +693,6 @@ const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
         return style.filled.repeat(filled) + style.empty.repeat(empty) + ` ${percent}%`;
     }
 
-    /**
-     * Checks if error is a rate limit error
-     * @param {Error} error - Error object
-     * @returns {boolean} True if rate limit error
-     */
-    isRateLimitError(error) {
-        return error.message === 'RATE_LIMIT' ||
-            error.message.includes('429') ||
-            error.message.includes('rate limit');
-    }
-
-    /**
-     * Utility delay function
-     * @param {number} ms - Milliseconds to delay
-     * @returns {Promise<void>}
-     */
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
 }
 
 // Create singleton instance
@@ -877,7 +735,7 @@ async function handleViewFailedPlayersButton(interaction) {
         // Build embed
         const embed = new EmbedBuilder()
             .setTitle(lang.players.addPlayer.content.failedField.name)
-            .setDescription(`Failed player IDs for alliance **${allianceName}**:\n\nThese players could not be added. They may have invalid IDs or the API failed to fetch their data.`)
+            .setDescription(`Failed player IDs for alliance **${allianceName}**:\n\nThese players could not be stored. Check the bot logs for the database error.`)
             .setColor('#ff0000')
             .setTimestamp();
 
@@ -931,7 +789,6 @@ async function processPlayerData(processId) {
 module.exports = {
     processPlayerData,
     playerDataProcessor,
-    fetchPlayerFromAPI: playerDataProcessor.fetchPlayerFromAPI.bind(playerDataProcessor),
     handleViewFailedPlayersButton
 };
 

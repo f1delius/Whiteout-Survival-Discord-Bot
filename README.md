@@ -17,7 +17,7 @@ A powerful Discord bot for managing Whiteout Survival and Kingshot game data, al
 ## Features
 
 - **Multi-Game Support** - Run the bot in `wos`, `ks`, or `both` mode
-- **Player Tracking** - Add players and monitor level, nickname and state changes
+- **FID-Based Player Management** - Add, move, remove, export, and organize players by alliance-assigned state
 - **Gift Code System** - Add and auto-redeem gift codes
 - **Notification Scheduler** - Create scheduled notifications with embeds, patterns, and mentions
 - **Admin System** - Multi-admin support with granular permissions

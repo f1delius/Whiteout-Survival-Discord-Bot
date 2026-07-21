@@ -32,7 +32,6 @@ This document covers the technical architecture, contribution guidelines, and de
 │   ├── utility/
 │   │   └── database.js     # SQLite database schema and queries
 │   ├── i18n/               # Language files (en.json, ar.json)
-│   ├── model/              # ONNX captcha model
 │   ├── events/             # Discord event handlers
 │   ├── handlers/           # Button, dropdown, form handlers
 │   ├── commands/           # Slash commands
@@ -49,9 +48,9 @@ This document covers the technical architecture, contribution guidelines, and de
 
 ### Key Design Principles
 
-- **Singleton Managers**: Long-running systems (AutoRefreshManager, PlayerDataProcessor) use singleton pattern
+- **Singleton Managers**: Long-running systems such as PlayerDataProcessor use a singleton pattern
 - **Pattern-Based Routing**: Handlers use regex pattern matching on `customId` to route interactions
-- **Process Queue**: Long-running operations (player fetching, gift redemption) go through a priority queue
+- **Process Queue**: Long-running operations (player ingestion, gift redemption) go through a priority queue
 - **Components v2**: UI uses Discord's new Container/TextDisplay/Separator components
 
 ---

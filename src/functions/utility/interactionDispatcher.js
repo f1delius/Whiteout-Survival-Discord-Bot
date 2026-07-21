@@ -4,10 +4,9 @@ const ROOT_PRIORITY = new Map([
     ['notification_', 2],
     ['alliance_', 3],
     ['gift_', 4],
-    ['history_', 5],
-    ['plugins_', 6],
-    ['emoji_', 7],
-    ['calc_', 8],
+    ['plugins_', 5],
+    ['emoji_', 6],
+    ['calc_', 7],
 ]);
 
 function findMatchingParen(source, startIndex) {

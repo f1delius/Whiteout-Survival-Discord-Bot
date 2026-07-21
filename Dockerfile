@@ -3,7 +3,7 @@ FROM node:22-slim AS builder
 
 WORKDIR /app
 
-# Install build tools needed for native modules (better-sqlite3, sharp, onnxruntime)
+# Install build tools needed for better-sqlite3
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
@@ -14,22 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json ./
 
 # Install all dependencies and build native modules
-RUN npm ci && \
-    # Strip unused platform binaries and GPU providers from onnxruntime-node (~549MB saved)
-    rm -rf node_modules/onnxruntime-node/bin/napi-v6/darwin \
-           node_modules/onnxruntime-node/bin/napi-v6/win32 \
-           node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime_providers_cuda.so \
-           node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime_providers_tensorrt.so
+RUN npm ci
 
 # Stage 2: Production image
 FROM node:22-slim
 
 WORKDIR /app
-
-# Install only runtime libraries needed by native modules
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libvips42 \
-    && rm -rf /var/lib/apt/lists/*
 
 # Patch CVE-2026-33671: replace picomatch 4.0.3 with 4.0.4 in npm's bundled deps
 RUN cd /usr/local/lib/node_modules/npm/node_modules && \

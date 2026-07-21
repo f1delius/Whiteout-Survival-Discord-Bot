@@ -1,11 +1,9 @@
 /**
  * Shared API client for game APIs
- * Centralizes sign building, HTTP requests, and player data fetching
- * Used by: fetchPlayerData.js, refreshAlliance.js, redeemFunction.js
+ * Centralizes gift-code signing and HTTP requests.
  */
 
 const crypto = require('crypto');
-const fetch = require('node-fetch');
 const { getGameProxyAgent } = require('./proxySupport');
 const { getDefaultGameType } = require('./gameRuntime');
 
@@ -95,13 +93,10 @@ function generateBrowserHeaders(origin = API_CONFIG.ORIGIN) {
 }
 
 /**
- * Builds MD5 signed form data for simple player API calls
- * Uses fixed key order: fid, time (milliseconds)
- * @param {string} playerId - Player FID
- * @returns {string} Signed form data string
+ * Resolves a game API configuration.
  */
 function resolveApiConfig(gameTypeOrConfig = null) {
-    if (gameTypeOrConfig && typeof gameTypeOrConfig === 'object' && gameTypeOrConfig.PLAYER_URL) {
+    if (gameTypeOrConfig && typeof gameTypeOrConfig === 'object' && gameTypeOrConfig.SECRET) {
         return gameTypeOrConfig;
     }
     if (typeof gameTypeOrConfig === 'string') {
@@ -110,17 +105,9 @@ function resolveApiConfig(gameTypeOrConfig = null) {
     return getApiConfig(getDefaultGameType());
 }
 
-function buildPlayerPayload(playerId, gameTypeOrConfig = null) {
-    const apiConfig = resolveApiConfig(gameTypeOrConfig);
-    const currentTime = Date.now();
-    const form = `fid=${playerId}&time=${currentTime}`;
-    const sign = crypto.createHash('md5').update(form + apiConfig.SECRET).digest('hex');
-    return `sign=${sign}&${form}`;
-}
-
 /**
  * Builds MD5 signed form data with alphabetically sorted keys
- * Used for gift code API calls (captcha, redeem, auth)
+ * Used for gift-code redemption calls.
  * @param {Object} data - Key-value pairs to encode
  * @returns {string} Signed form data string
  */
@@ -139,47 +126,15 @@ function encodeData(data, gameTypeOrConfig = null) {
 }
 
 /**
- * Makes a POST request using node-fetch (for player API)
- * @param {string} url - API endpoint URL
- * @param {string} body - Signed form data string
- * @param {string} [origin] - Origin URL for headers. Defaults to API_CONFIG.ORIGIN.
- * @returns {Promise<{status: number, data: Object}>} Response
- */
-async function fetchPost(url, body, origin = API_CONFIG.ORIGIN) {
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            ...generateBrowserHeaders(origin)
-        },
-        body,
-        // disable keep-alive and add a timeout so we don't hang on stale sockets
-        agent: getAgentForGameRequest(url),
-        timeout: 15000
-    });
-
-    if (response.status === 429) {
-        throw new Error('RATE_LIMIT');
-    }
-
-    if (response.status !== 200) {
-        throw new Error(`API returned status ${response.status}`);
-    }
-
-    const data = await response.json();
-    return { status: response.status, data };
-}
-
-/**
  * Makes a POST request using native http/https (for gift code API)
  * Includes Origin header required by the gift code endpoint
  * @param {string} url - API endpoint URL
  * @param {Object} payload - Data to encode and send
  * @param {string} label - Label for error logging
- * @param {string} [cookies] - Optional cookie string to send with the request
- * @returns {Promise<{ok: boolean, status: number, data: Object, raw: string, cookies: string[]}>} Response
+ * @param {string|Object} [gameTypeOrConfig] - Game type or resolved API configuration
+ * @returns {Promise<{ok: boolean, status: number, data: Object, raw: string, rateLimit: Object}>} Response
  */
-async function nativePost(url, payload, label, cookies, gameTypeOrConfig = null) {
+async function nativePost(url, payload, label, gameTypeOrConfig = null) {
     const apiConfig = resolveApiConfig(gameTypeOrConfig);
     return new Promise((resolve, reject) => {
         const postData = encodeData(payload, apiConfig);
@@ -194,11 +149,6 @@ async function nativePost(url, payload, label, cookies, gameTypeOrConfig = null)
             ...browserHeaders
         };
 
-        // Send cookies from previous responses (session reuse)
-        if (cookies) {
-            headers['Cookie'] = cookies;
-        }
-
         const options = {
             hostname: urlObject.hostname,
             port: urlObject.port || (isHttps ? 443 : 80),
@@ -211,9 +161,6 @@ async function nativePost(url, payload, label, cookies, gameTypeOrConfig = null)
         const client = urlObject.protocol === 'https:' ? https : http;
         const req = client.request(options, (res) => {
             let raw = '';
-
-            // Capture Set-Cookie headers for session reuse
-            const setCookies = res.headers['set-cookie'] || [];
 
             // Capture rate limit headers for adaptive throttling
             const rateLimit = {
@@ -238,7 +185,6 @@ async function nativePost(url, payload, label, cookies, gameTypeOrConfig = null)
                     status: res.statusCode,
                     data,
                     raw,
-                    cookies: setCookies,
                     rateLimit
                 });
             });
@@ -262,253 +208,7 @@ async function nativePost(url, payload, label, cookies, gameTypeOrConfig = null)
     });
 }
 
-/**
- * Manages dual-API routing and rate limiting for player data fetching.
- * Mirrors the Python LoginHandler dual-API approach: when both APIs are
- * reachable, alternates between them (1 player/second). Falls back to
- * single-API mode (1 player/2 seconds) when only one API is available.
- */
-class PlayerApiManager {
-    constructor(gameType = getDefaultGameType()) {
-        this.gameType = gameType;
-        this.apiConfig = getApiConfig(gameType);
-        /** @type {{url: string, origin: string}[]} index 0 = API 1, index 1 = API 2 */
-        this.apis = [
-            { url: this.apiConfig.PLAYER_URL, origin: this.apiConfig.ORIGIN },
-            this.apiConfig.PLAYER_URL_2
-                ? { url: this.apiConfig.PLAYER_URL_2, origin: this.apiConfig.ORIGIN_2 || this.apiConfig.ORIGIN }
-                : null
-        ].filter(Boolean);
-
-        // Per-API request timestamp windows (rolling 60-second window)
-        this.requestTimestamps = this.apis.map(() => []);
-        this.rateLimitPerApi   = 30;
-        this.rateLimitWindow   = 60000; // ms
-
-        this.lastApiUsed  = 0; // index into this.apis
-        this.dualApiMode  = false;
-        this.availableApis = [0]; // indices of available apis (starts with API 1 only)
-        this.requestDelay  = 2000; // ms; updated by checkAvailability()
-    }
-
-    /**
-     * Probes both player API endpoints to determine availability.
-     * Updates dualApiMode and requestDelay accordingly.
-     * Should be called once at bot startup.
-     * @param {string} [testFid='46765089'] - Player FID used for availability probe
-     * @returns {Promise<void>}
-     */
-    async checkAvailability(testFid = '46765089') {
-        const results = await Promise.allSettled(
-            this.apis.map(async (api) => {
-                const body = buildPlayerPayload(testFid, this.apiConfig);
-                const response = await fetch(api.url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        ...generateBrowserHeaders(api.origin)
-                    },
-                    body,
-                    agent: getAgentForGameRequest(api.url),
-                    timeout: 5000
-                });
-                // 200 (success) or 429 (rate limited) both mean the API is reachable
-                return response.status === 200 || response.status === 429;
-            })
-        );
-
-        const available = results.map((r) => r.status === 'fulfilled' && r.value === true);
-        this.availableApis = available.map((ok, i) => ok ? i : -1).filter(i => i !== -1);
-
-        if (this.availableApis.length >= 2) {
-            this.dualApiMode  = true;
-            this.requestDelay = 1000; // 1s — alternating across two APIs
-            console.log(`[PlayerApiManager:${this.gameType}] Dual-API mode active (1 player/second)`);
-        } else if (this.availableApis.length === 1) {
-            this.dualApiMode  = false;
-            this.requestDelay = 2000; // 2s — 30 req/min on single API
-            const unavailableIndex = this.availableApis[0] === 0 ? 1 : 0;
-            if (this.apis.length >= 2) {
-                console.log(`[PlayerApiManager:${this.gameType}] Single-API mode — API ${unavailableIndex + 1} unavailable (1 player/2 seconds)`);
-            } else {
-                console.log(`[PlayerApiManager:${this.gameType}] Single-API mode active (1 player/2 seconds)`);
-            }
-        } else {
-            // No APIs reachable; fall back to API 1 with conservative delay
-            this.availableApis = [0];
-            this.dualApiMode   = false;
-            this.requestDelay  = 2000;
-            console.warn(`[PlayerApiManager:${this.gameType}] No player APIs reachable — defaulting to API 1`);
-        }
-    }
-
-    /**
-     * Returns the next API endpoint info, respecting rate limits and alternation.
-     * Records the request timestamp automatically.
-     * @returns {{url: string, origin: string}}
-     */
-    getNextApi() {
-        const now = Date.now();
-
-        // Clean stale timestamps outside the rolling window.
-        // Timestamps are monotonically increasing, so find the first valid index
-        // and slice once (avoids creating new arrays when nothing is stale).
-        const threshold = now - this.rateLimitWindow;
-        for (let i = 0; i < this.requestTimestamps.length; i++) {
-            const arr = this.requestTimestamps[i];
-            if (arr.length === 0) continue;
-            let cutoff = 0;
-            while (cutoff < arr.length && arr[cutoff] < threshold) cutoff++;
-            if (cutoff > 0) {
-                this.requestTimestamps[i] = arr.slice(cutoff);
-            }
-        }
-
-        let selectedIndex;
-
-        if (this.dualApiMode) {
-            // Prefer the API that wasn't used last; fall back if at rate limit
-            const candidates = this.availableApis.filter(
-                i => this.requestTimestamps[i].length < this.rateLimitPerApi
-            );
-            if (candidates.length >= 2) {
-                // Both have capacity — alternate
-                selectedIndex = candidates.find(i => i !== this.lastApiUsed) ?? candidates[0];
-            } else if (candidates.length === 1) {
-                selectedIndex = candidates[0];
-            } else {
-                // Both at limit — fall back to API 1 (caller's rate limit handling kicks in)
-                selectedIndex = 0;
-            }
-        } else {
-            // Single-API mode: always use the first available
-            const available = this.availableApis.find(
-                i => this.requestTimestamps[i].length < this.rateLimitPerApi
-            );
-            selectedIndex = available ?? this.availableApis[0] ?? 0;
-        }
-
-        this.requestTimestamps[selectedIndex].push(now);
-        this.lastApiUsed = selectedIndex;
-        return this.apis[selectedIndex];
-    }
-
-    /**
-     * Returns the current inter-request delay in milliseconds.
-     * 1000ms in dual-API mode, 2000ms in single-API mode.
-     * @returns {number}
-     */
-    getRequestDelay() {
-        return this.requestDelay;
-    }
-
-    /**
-     * Returns a human-readable description of the current API mode.
-     * @returns {string}
-     */
-    getModeDescription() {
-        if (this.dualApiMode) {
-            return 'Dual-API mode active (1 player/second)';
-        }
-        if (this.apis.length < 2) {
-            return 'Single-API mode active (1 player/2 seconds)';
-        }
-        const unavailable = this.availableApis[0] === 0 ? 2 : 1;
-        return `Single-API mode (1 player/2 seconds) — API ${unavailable} unavailable`;
-    }
-}
-
-/** Singleton instance shared across the entire bot process. */
-const playerApiManagers = new Map();
-
-function getPlayerApiManager(gameType = getDefaultGameType()) {
-    if (!playerApiManagers.has(gameType)) {
-        playerApiManagers.set(gameType, new PlayerApiManager(gameType));
-    }
-    return playerApiManagers.get(gameType);
-}
-
-const playerApiManager = getPlayerApiManager();
-
-/**
- * Fetches player data from the game API with retry logic
- * @param {string} playerId - Player FID
- * @param {Object} [options] - Options
- * @param {Function} [options.onError] - Error callback: (error, context) => void
- * @param {Function} [options.delay] - Delay function: (ms) => Promise<void>
- * @param {boolean} [options.returnErrorObject] - If true, returns { error, playerNotExist } instead of null on failure
- * @returns {Promise<Object|null>} Player data, error object, or null
- */
-async function fetchPlayerData(playerId, options = {}) {
-    const { onError, delay, returnErrorObject = false, gameType } = options;
-    const apiConfig = resolveApiConfig(gameType);
-    const apiManager = getPlayerApiManager(apiConfig.GAME_TYPE);
-    const delayFn = delay || ((ms) => new Promise(resolve => setTimeout(resolve, ms)));
-    let retries = 0;
-
-    while (retries < apiConfig.MAX_RETRIES) {
-        try {
-            const body = buildPlayerPayload(playerId, apiConfig);
-            const { url: apiUrl, origin: apiOrigin } = apiManager.getNextApi();
-            const { data } = await fetchPost(apiUrl, body, apiOrigin);
-
-            // Check for player not exist
-            if (data.err_code === 40001 || data.msg === 'ROLE NOT EXIST' || data.msg === 'ROLE NOT EXIST.') {
-                if (returnErrorObject) {
-                    return { error: 'ROLE NOT EXIST', playerNotExist: true };
-                }
-                // Known API response for invalid/non-existent player IDs.
-                // Treat as an expected failure so process flows can count it without noisy error logging.
-                return null;
-            }
-
-            // Check for non-retryable errors
-            const errorMsg = (data.msg || '').toLowerCase();
-            if (errorMsg.includes('not exist') || errorMsg.includes('invalid')) {
-                if (returnErrorObject) {
-                    return { error: data.msg || 'Unknown error', playerNotExist: true };
-                }
-                // Same expected invalid-player outcome as ROLE NOT EXIST above.
-                return null;
-            }
-
-            // Success
-            if (data.code === 0 && data.data) {
-                return data.data;
-            }
-
-            throw new Error(`API returned error: ${data.msg || 'Unknown error'}`);
-
-        } catch (error) {
-            if (error.message === 'RATE_LIMIT') {
-                throw error; // Caller handles rate limits
-            }
-
-            retries++;
-
-            if (onError) {
-                await onError(error, 'fetchPlayerFromAPI');
-            }
-
-            if (retries < apiConfig.MAX_RETRIES) {
-                await delayFn(apiConfig.RETRY_DELAY);
-            }
-        }
-    }
-
-    // All retries exhausted
-    if (returnErrorObject) {
-        return { error: 'MAX_RETRIES_EXCEEDED', playerNotExist: false };
-    }
-    return null;
-}
-
 module.exports = {
-    buildPlayerPayload,
     encodeData,
-    fetchPost,
-    nativePost,
-    fetchPlayerData,
-    getPlayerApiManager,
-    playerApiManager
+    nativePost
 };

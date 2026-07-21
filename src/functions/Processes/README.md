@@ -2,13 +2,13 @@
 
 ## Overview
 
-This is a sophisticated **SQLite-based process management system** designed for Discord bots that need to handle long-running, asynchronous operations with priority queuing, rate limiting, and crash recovery.
+This is a **SQLite-based process management system** for long-running player ingestion and gift-code redemption with priority queuing and crash recovery.
 
 ### What It Solves
 
-- **Long-running operations** that can't block the bot (player data fetching, alliance refreshes)
-- **Rate limiting** from external APIs (automatic pausing/resuming)
-- **Priority management** (notifications > add players > gift codes > refreshes)
+- **Long-running operations** that can't block the bot (player ingestion and gift-code redemption)
+- **Rate limiting** from the gift-code API
+- **Priority management** (add players before gift codes)
 - **Crash recovery** (bot restarts don't lose progress)
 - **Resource management** (prevents multiple operations from running simultaneously)
 
@@ -74,11 +74,8 @@ await updateProcessStatus(42, 'completed');
 
 ```javascript
 const PROCESS_PRIORITIES = {
-    NOTIFICATIONS: 1,    // Highest priority
-    ADD_PLAYER: 2,
-    REDEEM_GIFTCODE: 3,
-    REFRESH: 4,
-    AUTO_REFRESH: 5       // Lowest priority
+    ADD_PLAYER: 100000,
+    REDEEM_GIFTCODE: 200000
 };
 ```
 
@@ -87,11 +84,9 @@ const PROCESS_PRIORITIES = {
 ```
 QUEUED ───▶ ACTIVE ───▶ COMPLETED
     │           │
-    │           ├───▶ PAUSED ───▶ ACTIVE (resume)
-    │           │       │
-    │           │       └───▶ FAILED (timeout)
+    │           └───▶ FAILED (error)
     │
-    └───▶ FAILED (error)
+    └───▶ FAILED (validation error)
 ```
 
 ### 2. **queueManager.js** - Priority Queue Management
@@ -104,7 +99,7 @@ Manages process execution queue with priority-based scheduling and preemption.
 - **Priority Queuing**: Lower numbers = higher priority
 - **Preemption**: Higher priority processes can pause lower priority ones
 - **Auto-Start**: Automatically starts next process when current completes
-- **Rate Limit Handling**: Pauses processes during API rate limits
+- **Preemption Recovery**: Returns interrupted work to the queue
 
 #### Queue Operations
 
@@ -121,7 +116,7 @@ const nextProcess = await queueManager.startNextProcess();
 
 // Get queue statistics
 const stats = await queueManager.getQueueStats();
-// Returns: { queued: 3, active: 1, paused: 0, total: 4 }
+// Returns queue and active-process totals.
 ```
 
 #### Preemption Logic
@@ -129,8 +124,8 @@ const stats = await queueManager.getQueueStats();
 ```javascript
 // If new process has higher priority (lower number)
 if (newPriority < activePriority) {
-    // Pause current process
-    await updateProcessStatus(activeProcessId, 'paused');
+    // Return the current process to the queue.
+    await updateProcessStatus(activeProcessId, 'queued');
     await setProcessPreemption(activeProcessId, newProcessId);
     
     // Start higher priority process
@@ -147,13 +142,12 @@ Executes processes based on their action type with error handling and preemption
 
 ```javascript
 const ACTIONS = {
-    'addplayer': executeAddPlayer,        // Fetch player data from API
-    'refresh': executeRefresh,            // Refresh alliance data
-    'redeem_giftcode': executeRedeemGiftcode, // Redeem gift codes
-    'notifications': executeNotifications,    // Send notifications
-    'auto_refresh': executeAutoRefresh    // Automated refreshes
+    'addplayer': executeAddPlayer,
+    'redeem_giftcode': executeRedeemGiftcode
 };
 ```
+
+Old `refresh` and `auto_refresh` rows are only recognized so upgrades can drain jobs queued by earlier releases; new jobs cannot use those actions.
 
 #### Execution Flow
 
@@ -181,7 +175,7 @@ async executeProcess(processInfo) {
 // Check for preemption before/after each major operation
 const preemptionCheck = await this.checkForPreemption(processId);
 if (preemptionCheck.shouldStop) {
-    // Process was paused by higher priority or stopped
+    // Process was preempted by higher-priority work or stopped
     return; // Exit cleanly without error
 }
 ```
@@ -195,8 +189,7 @@ Handles bot restarts and crashes, ensuring no progress is lost.
 
 1. **Clean Restart**: Bot stopped normally, resume queued processes
 2. **Crash During Execution**: Process was active, needs admin confirmation
-3. **Rate Limited**: Process paused for API limits, auto-resume when ready
-4. **Preempted**: Process paused for higher priority, resume when available
+3. **Preempted**: Process returned to the queue for higher-priority work
 
 #### Recovery Process
 
@@ -255,7 +248,7 @@ if (no active processes) {
     executeProcess()
 } else if (higher priority) {
     // Preempt current, start new
-    current.status = PAUSED
+    current.status = QUEUED
     new.status = ACTIVE
 } else {
     // Queue for later
@@ -269,8 +262,7 @@ if (no active processes) {
 // Execute based on action
 switch (action) {
     case 'addplayer':
-        // Fetch player data from API
-        // Handle rate limiting
+        // Store new player IDs with their alliance-assigned state
         // Update progress
         break;
 }
@@ -298,16 +290,16 @@ await processRecovery.initialize(client);
 ```sql
 CREATE TABLE processes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    action TEXT NOT NULL,              -- 'addplayer', 'refresh', etc.
+    action TEXT NOT NULL,              -- 'addplayer' or 'redeem_giftcode'
     alliance_id TEXT NOT NULL,         -- Target alliance
-    status TEXT DEFAULT 'queued',      -- queued/active/paused/completed/failed
-    priority INTEGER NOT NULL,         -- 1=highest, 5=lowest
+    status TEXT DEFAULT 'queued',      -- queued/active/completed/failed
+    priority INTEGER NOT NULL,         -- lower values execute first
     data TEXT,                         -- JSON: { player_ids: "fid1,fid2" }
     progress TEXT,                     -- JSON: { pending: [], done: [], failed: [] }
     created_by TEXT NOT NULL,          -- Admin Discord ID
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    resume_after INTEGER,              -- Timestamp for rate limit resume
+    resume_after INTEGER,              -- Legacy compatibility field
     preempted_by INTEGER               -- Process ID that preempted this one
 );
 ```
@@ -334,11 +326,8 @@ CREATE TABLE processes (
 
 ```javascript
 const PROCESS_PRIORITIES = {
-    NOTIFICATIONS: 1,    // Immediate user feedback
-    ADD_PLAYER: 2,       // User-initiated data fetching
-    REDEEM_GIFTCODE: 3,  // User rewards
-    REFRESH: 4,          // Background data updates
-    AUTO_REFRESH: 5      // Automated maintenance
+    ADD_PLAYER: 100000,
+    REDEEM_GIFTCODE: 200000
 };
 ```
 
@@ -379,7 +368,7 @@ const result = await createProcess({
 // 2. Queue manager handles execution
 await queueManager.manageQueue(result);
 
-// 3. Process executes (fetches from API, updates database)
+// 3. Process executes (stores player IDs and assigned state)
 // 4. Progress embed updates in real-time
 // 5. Completion notification sent
 ```
@@ -410,11 +399,9 @@ const stats = await queueManager.getQueueStats();
 // {
 //   queued: 3,
 //   active: 1,
-//   paused: 0,
 //   total: 4,
-//   queuedByPriority: { 1: 0, 2: 2, 3: 1, 4: 0, 5: 0 },
-//   activeByPriority: { 2: 1 },
-//   pausedByPriority: {}
+//   queuedByPriority: { 100000: 2, 200000: 1 },
+//   activeByPriority: { 100000: 1 }
 // }
 ```
 
@@ -450,10 +437,7 @@ deleteProcess(processId) → boolean
 getProcessesByStatus(status) → ProcessArray
 getNextQueuedProcess() → ProcessObject | null
 getActiveProcesses() → ProcessArray
-getPausedProcessesReadyToResume() → ProcessArray
-
 // Utility functions
-setProcessResumeTime(processId, timestamp) → boolean
 setProcessPreemption(processId, preemptedBy) → boolean
 hasHigherPriorityQueued(currentPriority) → boolean
 cleanupOldProcesses(maxAgeMs) → boolean
@@ -467,8 +451,6 @@ resetCrashedProcesses() → number
 manageQueue(processInfo) → QueueResult
 startNextProcess() → ProcessInfo | null
 completeProcess(processId) → ProcessInfo | null
-pauseForRateLimit(processId, resumeTime) → boolean
-
 // Statistics
 getQueueStats() → StatsObject
 getQueuePosition(processId) → number
@@ -512,13 +494,7 @@ handleProcessCancel(interaction) → void
 try {
     await executeProcess(processInfo);
 } catch (error) {
-    if (error.message === 'RATE_LIMIT') {
-        // Handle rate limiting
-        await queueManager.pauseForRateLimit(processId, resumeTime);
-    } else {
-        // Fatal error (preemption is handled internally via return values)
-        await failProcess(processId, error);
-    }
+    await failProcess(processId, error);
 }
 ```
 

@@ -5,7 +5,7 @@ const { createEditAllianceButton } = require('./editAlliance');
 const { createDeleteAllianceButton } = require('./deleteAlliance');
 const { createViewAlliancesButton } = require('./viewAlliances');
 const { createEditPriorityButton } = require('./editPriority');
-const { createTriggerRefreshButton } = require('./triggerRefresh');
+const { createAutoSortButton } = require('./autoSort');
 const { createAssignAllianceButton } = require('./assignAlliance');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { getUserInfo, assertUserMatches, handleError, hasPermission } = require('../utility/commonFunctions');
@@ -68,9 +68,9 @@ async function handleAllianceManagementButton(interaction) {
 
         const actionRow2 = new ActionRowBuilder()
             .addComponents(
-                createTriggerRefreshButton(interaction.user.id, lang),
                 createViewAlliancesButton(interaction.user.id, lang),
                 assignAllianceButton,
+                createAutoSortButton(interaction.user.id, lang),
                 createBackToPanelButton(interaction.user.id, lang)
             );
 
@@ -93,8 +93,8 @@ async function handleAllianceManagementButton(interaction) {
                         `${lang.alliance.mainPage.content.editPriorityField.name}\n` +
                         `${lang.alliance.mainPage.content.editPriorityField.value}\n` +
 
-                        `${lang.alliance.mainPage.content.manualRefreshField.name}\n` +
-                        `${lang.alliance.mainPage.content.manualRefreshField.value}\n` +
+                        `${lang.alliance.mainPage.content.autoSortField.name}\n` +
+                        `${lang.alliance.mainPage.content.autoSortField.value}\n` +
 
                         `${lang.alliance.mainPage.content.viewAlliancesField.name}\n` +
                         `${lang.alliance.mainPage.content.viewAlliancesField.value}\n` +

@@ -3,6 +3,7 @@ const { db, allianceQueries, playerQueries } = require('../utility/database');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { formatAllianceStateDescription } = require('./allianceStateDescription');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji, replaceEmojiPlaceholders } = require('./../utility/emojis');
@@ -186,9 +187,9 @@ async function showPrioritySelectPage(interaction, alliances, page, lang, gameTy
         const option = new StringSelectMenuOptionBuilder()
             .setLabel(`${alliance.name}`)
             .setValue(alliance.id.toString())
-            .setDescription(lang.alliance.editPriority.selectMenu.selectAlliance.description
+            .setDescription(formatAllianceStateDescription(alliance, lang, lang.alliance.editPriority.selectMenu.selectAlliance.description
                 .replace('{priority}', alliance.priority)
-                .replace('{playerCount}', playerCount));
+                .replace('{playerCount}', playerCount)));
         selectMenu.addOptions(option);
     }
 

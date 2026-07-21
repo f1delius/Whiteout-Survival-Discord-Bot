@@ -8,6 +8,7 @@ const path = require('path');
 const ascii85 = require('ascii85');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons } = require('../Pagination/universalPagination');
+const { formatAllianceStateDescription } = require('../Alliance/allianceStateDescription');
 
 // Detect project root (where package.json is located)
 const PROJECT_ROOT = path.resolve(__dirname, '../../../');
@@ -358,7 +359,13 @@ function createAllianceSelectionComponents(options) {
         emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1001')
     });
     const mapperFn = optionMapper || defaultMapper;
-    const selectOptions = currentPageAlliances.map(mapperFn);
+    const selectOptions = currentPageAlliances.map(alliance => {
+        const option = mapperFn(alliance);
+        return {
+            ...option,
+            description: formatAllianceStateDescription(alliance, lang, option.description)
+        };
+    });
 
     const contextSuffix = contextData.length > 0
         ? `_${contextData.join('_')}`
@@ -475,118 +482,9 @@ function createGameSelectionComponents(options) {
 }
 
 /**
- * Parses and validates refresh interval input.
- * Supports both minute-based (e.g., "60") and time-based (e.g., "@2:30") formats.
- * @param {string} input - The refresh interval input from user
- * @param {Object} lang - Language object for translations
- * @returns {{isValid: boolean, type: 'minutes'|'time'|null, value: number|string|null, error: string|null}}
- */
-function parseRefreshInterval(input, lang) {
-    const trimmed = input.trim();
-
-    // Check if it's time-based format (@HH:MM)
-    if (trimmed.startsWith('@')) {
-        const timeStr = trimmed.substring(1); // Remove @ prefix
-        const timeParts = timeStr.split(':');
-
-        if (timeParts.length !== 2) {
-            return { isValid: false, type: null, value: null, error: lang.alliance.createAlliance.errors.wrongTimeFormat };
-        }
-
-        const hours = parseInt(timeParts[0], 10);
-        const minutes = parseInt(timeParts[1], 10);
-
-        // Validate hours (0-23) and minutes (0-59)
-        if (isNaN(hours) || hours < 0 || hours > 23) {
-            return { isValid: false, type: null, value: null, error: lang.alliance.createAlliance.errors.wrongHourRange };
-        }
-        if (isNaN(minutes) || minutes < 0 || minutes > 59) {
-            return { isValid: false, type: null, value: null, error: lang.alliance.createAlliance.errors.wrongMinuteRange };
-        }
-
-        // Return the original @HH:MM format for storage
-        const formattedTime = `@${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-        return { isValid: true, type: 'time', value: formattedTime, error: null };
-    }
-
-    // Otherwise, treat as minute-based interval
-    const intervalMinutes = parseInt(trimmed, 10);
-    if (isNaN(intervalMinutes) || intervalMinutes < 0) {
-        return { isValid: false, type: null, value: null, error: lang.alliance.createAlliance.errors.wrongValue };
-    }
-
-    return { isValid: true, type: 'minutes', value: intervalMinutes, error: null };
-}
-
-/**
- * Calculates milliseconds until the next occurrence of a specific UTC time.
- * @param {string} timeStr - Time string in format "HH:MM" (without @ prefix)
- * @returns {number} Milliseconds until next occurrence
- */
-function calculateMillisecondsUntilTime(timeStr) {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-
-    const now = new Date();
-    const target = new Date();
-    target.setUTCHours(hours, minutes, 0, 0);
-
-    // If target time has already passed today, schedule for tomorrow
-    if (target <= now) {
-        target.setUTCDate(target.getUTCDate() + 1);
-    }
-
-    return target - now;
-}
-
-/**
- * Formats refresh interval for display.
- * @param {string|number} interval - The stored interval value (minutes or @HH:MM)
- * @param {Object} lang - Language object for translations
- * @returns {string} Formatted display string
- */
-function formatRefreshInterval(interval, lang) {
-    // Handle null/undefined/0 cases
-    if (!interval || interval === 0 || interval === '0') {
-        return lang.alliance.createAlliance.content.disabled;
-    }
-
-    // Check if it's time-based format
-    if (typeof interval === 'string' && interval.startsWith('@')) {
-        const timeStr = interval.substring(1);
-        return lang.alliance.createAlliance.content.dailyAt.replace('{time}', timeStr);
-    }
-
-    // Otherwise it's minute-based
-    const minutes = typeof interval === 'string' ? parseInt(interval, 10) : interval;
-    return lang.alliance.createAlliance.content.minutes.replace('{min}', minutes.toString());
-}
-
-/**
- * Gets the timeout duration in milliseconds based on interval type.
- * @param {string|number} interval - The stored interval value
- * @returns {number} Milliseconds until next refresh
- */
-function getRefreshTimeout(interval) {
-    // Handle disabled refresh
-    if (!interval || interval === 0 || interval === '0') {
-        return 0;
-    }
-
-    // Time-based format (@HH:MM)
-    if (typeof interval === 'string' && interval.startsWith('@')) {
-        const timeStr = interval.substring(1);
-        return calculateMillisecondsUntilTime(timeStr);
-    }
-
-    // Minute-based format
-    const minutes = typeof interval === 'string' ? parseInt(interval, 10) : interval;
-    return minutes * 60 * 1000;
-}
-
-/**
  * Encodes export filter selections into a compact string for custom_id storage.
  * Uses range compression for consecutive numbers and base85 encoding.
- * @param {Object} selections - Object with arrays: { states: [], allianceIds: [], furnaceLevels: [] }
+ * @param {Object} selections - Object with arrays: { states: [], allianceIds: [] }
  * @returns {string} Compact encoded string
  */
 function encodeExportSelection(selections) {
@@ -620,9 +518,6 @@ function encodeExportSelection(selections) {
     if (selections.allianceIds && selections.allianceIds.length > 0) {
         parts.push('a:' + compressRanges(selections.allianceIds));
     }
-    if (selections.furnaceLevels && selections.furnaceLevels.length > 0) {
-        parts.push('f:' + compressRanges(selections.furnaceLevels));
-    }
     if (selections.gameType) {
         parts.push('g:' + selections.gameType);
     }
@@ -645,12 +540,12 @@ function encodeExportSelection(selections) {
 /**
  * Decodes export filter selections from a compact custom_id token.
  * @param {string} encodedStr - Encoded string from custom_id
- * @returns {Object} Decoded selections: { states: [], allianceIds: [], furnaceLevels: [] }
+ * @returns {Object} Decoded selections: { states: [], allianceIds: [] }
  */
 function decodeExportSelection(encodedStr) {
 
     if (!encodedStr || encodedStr === 'none') {
-        return { states: [], allianceIds: [], furnaceLevels: [], gameType: null };
+        return { states: [], allianceIds: [], gameType: null };
     }
 
     // Decode base85 if prefixed
@@ -660,7 +555,7 @@ function decodeExportSelection(encodedStr) {
                 const b85Data = encodedStr.substring(4);
                 decoded = ascii85.decode(b85Data).toString('utf8');
             } catch (err) {
-            return { states: [], allianceIds: [], furnaceLevels: [], gameType: null };
+            return { states: [], allianceIds: [], gameType: null };
             }
         }
 
@@ -683,14 +578,13 @@ function decodeExportSelection(encodedStr) {
         return result;
     }
 
-      const selections = { states: [], allianceIds: [], furnaceLevels: [], gameType: null };
+      const selections = { states: [], allianceIds: [], gameType: null };
       const sections = decoded.split('|');
 
       for (const section of sections) {
           const [prefix, data] = section.split(':');
           if (prefix === 's') selections.states = expandRanges(data);
           else if (prefix === 'a') selections.allianceIds = expandRanges(data);
-          else if (prefix === 'f') selections.furnaceLevels = expandRanges(data);
           else if (prefix === 'g') selections.gameType = data || null;
       }
 
@@ -742,10 +636,6 @@ module.exports = {
     updateComponentsV2AfterSeparator,
     createGameSelectionComponents,
     createAllianceSelectionComponents,
-    parseRefreshInterval,
-    calculateMillisecondsUntilTime,
-    formatRefreshInterval,
-    getRefreshTimeout,
     encodeExportSelection,
     decodeExportSelection,
     checkCustomIdLength,

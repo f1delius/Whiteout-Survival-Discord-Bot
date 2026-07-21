@@ -7,7 +7,7 @@ const { normalizeGameType } = require('../utility/gameProfiles');
  * 
  * Priority Calculation Formula:
  * - For redeem_giftcode: Base Priority (200000) + Alliance Priority (1-99999)
- * - For other actions: Flat priority (no alliance modifier)
+ * - For add-player actions: Flat priority (no alliance modifier)
  * 
  * Priority Range Explanation:
  * - 6-digit base priorities (100000, 200000, etc.) allow for up to 99,999 alliances
@@ -19,16 +19,12 @@ const { normalizeGameType } = require('../utility/gameProfiles');
  * - Redeem (Alliance priority 1): 200000 + 1 = 200001 (starts first)
  * - Redeem (Alliance priority 50): 200000 + 50 = 200050
  * - Redeem (Alliance priority 99999): 200000 + 99999 = 299999
- * - Refresh: 300000 (flat, no alliance priority modifier)
- * - Auto-refresh: 400000 (flat, lowest priority)
  * 
  * Note: Notifications don't use processes - they're direct messages
  */
 const PROCESS_PRIORITIES = {
     ADD_PLAYER: 100000,
-    REDEEM_GIFTCODE: 200000,
-    REFRESH: 300000,
-    AUTO_REFRESH: 400000
+    REDEEM_GIFTCODE: 200000
 };
 
 /**
@@ -91,7 +87,7 @@ function resolveProcessGameType(processData) {
  * @param {string} processData.admin_id - ID of the admin who initiated the process
  * @param {string} processData.alliance_id - ID of the target alliance
  * @param {string} processData.player_ids - Raw string of player IDs
- * @param {string} processData.action - Type of action (addplayer, refresh, etc.)
+ * @param {string} processData.action - Type of action (`addplayer` or `redeem_giftcode`)
  * @returns {Promise<Object>} Process creation result
  */
 async function createProcess(processData) {
@@ -119,15 +115,8 @@ async function createProcess(processData) {
             case 'redeem_giftcode':
                 basePriority = PROCESS_PRIORITIES.REDEEM_GIFTCODE;
                 break;
-            case 'refresh':
-                basePriority = PROCESS_PRIORITIES.REFRESH;
-                break;
-            case 'autorefresh':
-            case 'auto_refresh':
-                basePriority = PROCESS_PRIORITIES.AUTO_REFRESH;
-                break;
             default:
-                basePriority = PROCESS_PRIORITIES.AUTO_REFRESH; // Default to lowest priority
+                throw new Error(`Unsupported process action: ${action}`);
         }
 
         // For redeem_giftcode action, add alliance priority to base priority
@@ -168,12 +157,6 @@ async function createProcess(processData) {
             failed: [],
             existing: []
         };
-
-        // Add extra fields for auto-refresh processes
-        if (action.toLowerCase() === 'auto_refresh') {
-            progress.changed = [];
-            progress.unchanged = [];
-        }
 
         // Prepare data object with player_ids and any extra metadata
         const dataObject = { player_ids };
@@ -366,32 +349,6 @@ function getProcessesByStatus(status) {
 }
 
 /**
- * Sets process resume timestamp for rate limit handling
- * @param {number} processId - Process ID to update
- * @param {number} resumeAfter - Timestamp when process should resume
- * @returns {boolean} Success status
- */
-function setProcessResumeTime(processId, resumeAfter) {
-    try {
-        processQueries.setProcessResumeTime(processId, resumeAfter);
-        return true;
-    } catch (error) {
-        systemLogQueries.addLog(
-            'error',
-            `Error setting process resume time for ${processId}`,
-            JSON.stringify({
-                processId,
-                resumeAfter,
-                error: error.message,
-                stack: error.stack,
-                function: 'setProcessResumeTime'
-            })
-        );
-        return false;
-    }
-}
-
-/**
  * Sets process preemption by a higher priority process
  * @param {number} processId - Process ID to preempt
  * @param {number} preemptedBy - ID of the preempting process
@@ -568,7 +525,6 @@ module.exports = {
     updateProcessProgress,
     deleteProcess,
     getProcessesByStatus,
-    setProcessResumeTime,
     setProcessPreemption,
     clearProcessPreemption,
     getNextQueuedProcess,

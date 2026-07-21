@@ -1177,15 +1177,11 @@ async function migratePlayers(usersPath, allianceIdMap, ownerId, gameType = getD
 
 			try {
 				playerQueries.addPlayer(
-					old.fid,                    // fid
-					null,                       // user_id (set to null)
-					old.nickname,               // nickname
-					old.furnace_lv,             // furnace_level
-					old.kid,                    // state (using old.kid)
-					null,                       // image_url (set to null)
-					newAllianceId,              // alliance_id (mapped to new ID)
-					ownerId,                    // added_by (owner)
-					gameType                    // game_type
+					old.fid,
+					old.kid,
+					newAllianceId,
+					ownerId,
+					gameType
 				);
 				count++;
 			} catch (e) {

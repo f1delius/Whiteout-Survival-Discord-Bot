@@ -17,6 +17,7 @@ const { createRedeemProcess } = require('./redeemFunction');
 const { parseGameScopedGiftCode } = require('./gameScopedGiftCode');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { formatAllianceStateDescription } = require('../Alliance/allianceStateDescription');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
 const { getActiveGameTypes, isMultiGameModeEnabled, getDefaultGameType } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
@@ -278,9 +279,9 @@ function createAllianceSelectionContainer(alliances, userId, lang, page = 0, isO
         return new StringSelectMenuOptionBuilder()
             .setLabel(alliance.name)
             .setValue(alliance.id.toString())
-            .setDescription(lang.giftCode.redeemGiftCode.selectMenu.selectAlliance.description
+            .setDescription(formatAllianceStateDescription(alliance, lang, lang.giftCode.redeemGiftCode.selectMenu.selectAlliance.description
                 .replace('{priority}', alliance.priority)
-                .replace('{playerCount}', playerCount))
+                .replace('{playerCount}', playerCount)))
             .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1001'));
     });
 

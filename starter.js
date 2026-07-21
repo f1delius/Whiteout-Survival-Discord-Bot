@@ -13,23 +13,20 @@ function getBootstrapRuntimeDefaults(argv = process.argv.slice(2)) {
             return {
                 runtimeGameMode: 'ks',
                 activeGameTypes: ['ks'],
-                defaultGameProfile: { displayName: 'Kingshot' },
-                shouldUseOnnx: false
+                defaultGameProfile: { displayName: 'Kingshot' }
             };
         case 'both':
             return {
                 runtimeGameMode: 'both',
                 activeGameTypes: ['wos', 'ks'],
-                defaultGameProfile: { displayName: 'Whiteout Survival' },
-                shouldUseOnnx: true
+                defaultGameProfile: { displayName: 'Whiteout Survival' }
             };
         case 'wos':
         default:
             return {
                 runtimeGameMode: 'wos',
                 activeGameTypes: ['wos'],
-                defaultGameProfile: { displayName: 'Whiteout Survival' },
-                shouldUseOnnx: true
+                defaultGameProfile: { displayName: 'Whiteout Survival' }
             };
     }
 }
@@ -43,15 +40,13 @@ function loadRuntimeBootstrap() {
     const {
         getActiveGameTypes,
         getDefaultGameProfile,
-        getRuntimeGameMode,
-        shouldUseOnnx
+        getRuntimeGameMode
     } = require(gameRuntimePath);
 
     return {
         runtimeGameMode: getRuntimeGameMode(),
         activeGameTypes: getActiveGameTypes(),
-        defaultGameProfile: getDefaultGameProfile(),
-        shouldUseOnnx: shouldUseOnnx()
+        defaultGameProfile: getDefaultGameProfile()
     };
 }
 
@@ -67,7 +62,6 @@ const runtimeBootstrap = loadRuntimeBootstrap();
 global.runtimeGameMode = runtimeBootstrap.runtimeGameMode;
 global.activeGameTypes = runtimeBootstrap.activeGameTypes;
 global.defaultGameProfile = runtimeBootstrap.defaultGameProfile;
-global.shouldUseOnnx = runtimeBootstrap.shouldUseOnnx;
 
 function parseRamArg(argv = []) {
     for (const arg of argv) {
@@ -250,8 +244,8 @@ if (!ALLOWED_NODE_MAJORS.includes(_currentNodeMajor)) {
     console.error(`
 ❌  Unsupported Node.js version: v${process.versions.node}`);
     console.error(`   This bot requires Node.js 18, 20, or 22 (LTS releases).`);
-    console.error(`   Other versions lack prebuilt binaries for native addons`);
-    console.error(`   (better-sqlite3, onnxruntime-node) and will OOM or fail`);
+    console.error(`   Other versions may lack prebuilt binaries for better-sqlite3`);
+    console.error(`   and may OOM or fail`);
     console.error(`   to compile on memory-constrained containers.`);
     console.error(`   Please switch to Node 18, 20, or 22 and restart.\n`);
     process.exit(1);
@@ -1203,10 +1197,7 @@ function getAvailableDiskSpaceMb(dir) {
 
 
 // Config entries written to .npmrc before every install.
-// onnxruntime-node reads these to skip the ~500 MB CUDA provider download.
 const REQUIRED_NPMRC_ENTRIES = {
-    'onnxruntime-node-install': 'skip',       // primary flag (v1.20+)
-    'onnxruntime-node-install-cuda': 'skip',  // legacy fallback (v1.24.3)
     'audit': 'false',
     'fund': 'false',
     'progress': 'false',
@@ -1298,8 +1289,7 @@ async function robustNpmInstall(cwd, context, { preferCleanInstall = false, isUp
     const totalMb = getEffectiveTotalMemMb();
     const freeMb  = getEffectiveFreeMemMb();
 
-    // Write onnxruntime-node CUDA-skip entries to both the project .npmrc and
-    // the user home .npmrc so npm forwards them to lifecycle scripts.
+    // Keep install settings consistent for project and launcher-driven installs.
     ensureNpmrc(cwd);
 
     const npmEnv = {
@@ -1309,15 +1299,7 @@ async function robustNpmInstall(cwd, context, { preferCleanInstall = false, isUp
         npm_config_maxsockets: '1',
         npm_config_progress: 'false',
         npm_config_fund: 'false',
-        npm_config_audit: 'false',
-        // Primary flag (onnxruntime-node v1.20+)
-        ONNXRUNTIME_NODE_INSTALL: 'skip',
-        npm_config_onnxruntime_node_install: 'skip',
-        'npm_config_onnxruntime-node-install': 'skip',
-        // Legacy CUDA-specific fallback (still checked in v1.24.3)
-        ONNXRUNTIME_NODE_INSTALL_CUDA: 'skip',
-        npm_config_onnxruntime_node_install_cuda: 'skip',
-        'npm_config_onnxruntime-node-install-cuda': 'skip',
+        npm_config_audit: 'false'
     };
 
     const hasLockfile = fs.existsSync(path.join(cwd, 'package-lock.json'));
@@ -1582,7 +1564,6 @@ if (!validateFiles()) {
 console.log(`[PREFLIGHT] Version: ${getLocalVersion()}`);
 console.log(`[PREFLIGHT] Game mode: ${global.runtimeGameMode} (${global.activeGameTypes.join(', ')})`);
 console.log(`[PREFLIGHT] Default game: ${global.defaultGameProfile.displayName}`);
-console.log(`[PREFLIGHT] ONNX required: ${global.shouldUseOnnx ? 'yes' : 'no'}`);
 console.log('[PREFLIGHT] All checks passed.\n');
 
 // Load environment variables from src/.env
@@ -2025,7 +2006,6 @@ function flushAndCloseDatabases() {
 function prepareForLauncherRespawn(exitCode) {
     writeRestartRequest(exitCode, exitCode === 43 ? 'starter-update' : 'restart');
     cleanupAllSchedulers();
-    runCachedModuleCleanup('./src/functions/GiftCode/redeemFunction', 'cleanupNativeResources');
     flushAndCloseDatabases();
     if (global.gc) global.gc();
 }

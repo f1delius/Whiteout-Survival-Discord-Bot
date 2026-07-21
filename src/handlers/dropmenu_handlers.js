@@ -11,13 +11,11 @@ const removePlayers = require('../functions/Players/removePlayers');
 const viewPlayers = require('../functions/Players/viewPlayers');
 const idChannel = require('../functions/Players/idChannel');
 const exportPlayers = require('../functions/Players/export');
-const history = require('../functions/Players/history');
 const redeemGift = require('../functions/GiftCode/redeemGift');
 const removeGift = require('../functions/GiftCode/removeGift');
 const autoRedeem = require('../functions/GiftCode/autoRedeem');
 const giftCodeChannel = require('../functions/GiftCode/giftCodeChannel');
 const viewGift = require('../functions/GiftCode/viewGift');
-const triggerRefresh = require('../functions/Alliance/triggerRefresh');
 const assignAlliance = require('../functions/Alliance/assignAlliance');
 const deleteNotification = require('../functions/Notification/deleteNotification');
 const editNotification = require('../functions/Notification/editNotification');
@@ -98,11 +96,6 @@ const dropdownHandlers = [
     { type: 'string', pattern: /^select_export_game_/, fn: exportPlayers.handleExportGameSelection },
     { type: 'string', pattern: /^export_state_select_/, fn: exportPlayers.handleStateSelection },
     { type: 'string', pattern: /^export_alliance_select_/, fn: exportPlayers.handleAllianceSelection },
-    { type: 'string', pattern: /^export_furnace_select_/, fn: exportPlayers.handleFurnaceSelection },
-
-    // Player history selections
-    { type: 'string', pattern: /^select_history_game_/, fn: history.handleHistoryGameSelection },
-    { type: 'string', pattern: /^history_alliance_/, fn: history.handleHistoryAllianceSelection },
 
     // Manual redeem selections
     { type: 'string', pattern: /^select_manual_redeem_game_/, fn: redeemGift.handleManualRedeemGameSelection },
@@ -123,10 +116,6 @@ const dropdownHandlers = [
     // Gift code channel selections
     { type: 'string', pattern: /^select_gift_code_channel_game_/, fn: giftCodeChannel.handleGiftCodeChannelGameSelection },
     { type: 'string', pattern: /^gift_code_channel_remove_select_/, fn: giftCodeChannel.handleGiftCodeChannelRemoveSelect },
-
-    // Trigger refresh selections
-    { type: 'string', pattern: /^select_trigger_refresh_game_/, fn: triggerRefresh.handleTriggerRefreshGameSelection },
-    { type: 'string', pattern: /^select_trigger_refresh_/, fn: triggerRefresh.handleTriggerRefreshSelection },
 
     // Assign alliance selections
     { type: 'string', pattern: /^select_assign_admin_/, fn: assignAlliance.handleAssignAdminSelection },

@@ -19,8 +19,7 @@ const {
 const { adminQueries, allianceQueries, adminLogQueries } = require('../utility/database');
 const { LOG_CODES } = require('../utility/AdminLogs');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { restartAutoRefresh } = require('./refreshAlliance');
-const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, parseRefreshInterval, formatRefreshInterval } = require('../utility/commonFunctions');
+const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
@@ -67,20 +66,20 @@ function buildCreateAllianceModal(userId, lang = {}) {
         .setLabel(lang.alliance.createAlliance.modal.allianceField.label)
         .setTextInputComponent(allianceNameInput);
 
-    const refreshRateInput = new TextInputBuilder()
-        .setCustomId('refresh_rate')
+    const stateInput = new TextInputBuilder()
+        .setCustomId('alliance_state')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder(lang.alliance.createAlliance.modal.refreshRateField.placeholder)
+        .setPlaceholder(lang.alliance.createAlliance.modal.stateField.placeholder)
         .setRequired(true)
         .setMinLength(1)
-        .setMaxLength(6);
+        .setMaxLength(10);
 
-    const refreshRateLabel = new LabelBuilder()
-        .setLabel(lang.alliance.createAlliance.modal.refreshRateField.label)
-        .setDescription(lang.alliance.createAlliance.modal.refreshRateField.description)
-        .setTextInputComponent(refreshRateInput);
+    const stateLabel = new LabelBuilder()
+        .setLabel(lang.alliance.createAlliance.modal.stateField.label)
+        .setDescription(lang.alliance.createAlliance.modal.stateField.description)
+        .setTextInputComponent(stateInput);
 
-    modal.addLabelComponents(allianceNameLabel, refreshRateLabel);
+    modal.addLabelComponents(allianceNameLabel, stateLabel);
 
     return modal;
 }
@@ -161,17 +160,16 @@ async function handleCreateAllianceModal(interaction) {
         }
 
         const allianceName = interaction.fields.getTextInputValue('alliance_name').trim();
-        const refreshRateInput = interaction.fields.getTextInputValue('refresh_rate').trim();
+        const stateInput = interaction.fields.getTextInputValue('alliance_state').trim();
 
-        // Validate refresh rate (supports both minutes and @HH:MM format)
-        const parseResult = parseRefreshInterval(refreshRateInput, lang);
-        if (!parseResult.isValid) {
+        const allianceState = Number(stateInput);
+        if (!Number.isSafeInteger(allianceState) || allianceState <= 0) {
             return await interaction.reply({
-                content: parseResult.error || lang.alliance.createAlliance.errors.invalidRefreshRate,
+                content: lang.alliance.createAlliance.errors.invalidState,
                 ephemeral: true
             });
         }
-        const refreshRate = parseResult.value;
+
         // Get all existing alliances to determine the next priority
         const existingAlliances = allianceQueries.getAllAlliances(gameType);
         const nextPriority = existingAlliances.length + 1;
@@ -185,10 +183,11 @@ async function handleCreateAllianceModal(interaction) {
             allianceName,      // name
             null,              // guide_id (null for now)
             null,              // channel_id (will be set after channel selection)
-            refreshRate,       // interval
+            0,                 // interval (profile refresh API was removed)
             1,                 // auto_redeem (True by default)
             adminId,           // created_by
-            gameType
+            gameType,
+            allianceState
         );
 
         // Get the newly created alliance ID
@@ -203,7 +202,6 @@ async function handleCreateAllianceModal(interaction) {
             .setMaxValues(1);
 
         const channelRow = new ActionRowBuilder().addComponents(channelSelect);
-        const refreshRateText = formatRefreshInterval(refreshRate, lang);
 
         const container = [
             new ContainerBuilder()
@@ -215,21 +213,11 @@ async function handleCreateAllianceModal(interaction) {
                         `${lang.alliance.createAlliance.content.allianceDetailsField.name}\n` +
                         `${lang.alliance.createAlliance.content.allianceDetailsField.value.step1
                             .replace('{allianceName}', allianceName)
-                            .replace('{priority}', nextPriority)
-                            .replace('{refreshRate}', refreshRateText)}`
+                            .replace('{state}', allianceState)
+                            .replace('{priority}', nextPriority)}`
                     )
                 )
         ];
-
-        // Add warning if refresh rate is less than 30 minutes (only for minute-based intervals)
-        if (typeof refreshRate === 'number' && refreshRate > 0 && refreshRate < 30) {
-            container[0].addTextDisplayComponents(
-                new TextDisplayBuilder().setContent(
-                    `${lang.alliance.createAlliance.content.warningField.name}\n` +
-                    `${lang.alliance.createAlliance.content.warningField.value}`
-                ),
-            );
-        }
 
         container[0].addSeparatorComponents(
             new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
@@ -251,7 +239,6 @@ async function handleCreateAllianceModal(interaction) {
             JSON.stringify({
                 allianceName: allianceName,
                 allianceId: newAllianceId,
-                refreshRate: refreshRate,
                 priority: nextPriority,
                 gameType
             })
@@ -339,9 +326,6 @@ async function handleAllianceChannelSelection(interaction) {
                 })
             );
 
-            // Create refresh rate text
-            const refreshRateText = formatRefreshInterval(alliance.interval, lang);
-
             const container = [
                 new ContainerBuilder()
                     .setAccentColor(5763719) // green
@@ -352,20 +336,12 @@ async function handleAllianceChannelSelection(interaction) {
                             `${lang.alliance.createAlliance.content.allianceDetailsField.name}\n` +
                             `${lang.alliance.createAlliance.content.allianceDetailsField.value.step2
                                 .replace('{allianceName}', alliance.name)
+                                .replace('{state}', alliance.state)
                                 .replace('{priority}', alliance.priority)
-                                .replace('{refreshRate}', refreshRateText)
                                 .replace('{channel}', `<#${selectedChannelId}>`)}`
                         )
                     )
             ];
-
-            // Add warning if refresh rate is less than 30 minutes (only for minute-based)
-            if (typeof alliance.interval === 'number' && alliance.interval > 0 && alliance.interval < 30) {
-                container[0].addTextDisplayComponents(
-                    new TextDisplayBuilder().setContent(lang.alliance.createAlliance.content.warningField.name),
-                    new TextDisplayBuilder().setContent(lang.alliance.createAlliance.content.warningField.value)
-                );
-            }
 
             const content = updateComponentsV2AfterSeparator(interaction, container);
 
@@ -375,19 +351,6 @@ async function handleAllianceChannelSelection(interaction) {
                 flags: MessageFlags.IsComponentsV2
             });
 
-
-            // Start auto-refresh if interval is configured (either number > 0 or time-based string)
-            const shouldAutoRefresh = alliance.interval &&
-                (typeof alliance.interval === 'string' && alliance.interval.startsWith('@')) ||
-                (typeof alliance.interval === 'number' && alliance.interval > 0);
-
-            if (shouldAutoRefresh) {
-                try {
-                    await restartAutoRefresh(allianceId);
-                } catch (autoRefreshError) {
-                    await handleError(interaction, lang, autoRefreshError, 'handleAllianceChannelSelection_autoRefresh', false);
-                }
-            }
 
         } catch (dbError) {
             await handleError(interaction, lang, dbError, 'handleAllianceChannelSelection_databaseError');

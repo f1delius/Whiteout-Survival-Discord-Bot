@@ -13,6 +13,7 @@ const { adminQueries, allianceQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');;
 const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
+const { formatAllianceStateDescription } = require('./allianceStateDescription');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { getGameProfile } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
@@ -281,9 +282,9 @@ async function showAllianceSelection(interaction, page = 0, lang = {}, selectedA
 
         return {
             label: formatAllianceLabel(alliance),
-            description: isAssigned
+            description: formatAllianceStateDescription(alliance, lang, isAssigned
                 ? lang.alliance.assignAlliance.selectMenu.selectAlliances.description.add.replace('{alliancePriority}', alliance.priority)
-                : lang.alliance.assignAlliance.selectMenu.selectAlliances.description.remove.replace('{alliancePriority}', alliance.priority),
+                : lang.alliance.assignAlliance.selectMenu.selectAlliances.description.remove.replace('{alliancePriority}', alliance.priority)),
             value: `alliance_${alliance.id}`,
             emoji: isAssigned ? getComponentEmoji(emojiMap, '1004') : getComponentEmoji(emojiMap, '1051')
         };

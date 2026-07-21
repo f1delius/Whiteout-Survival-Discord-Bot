@@ -79,6 +79,7 @@ const schemas = {
             game_type TEXT NOT NULL DEFAULT 'wos',
             priority INTEGER NOT NULL,
             name TEXT NOT NULL,
+            state INTEGER,
             guide_id TEXT,
             channel_id TEXT,
             interval TEXT,
@@ -327,6 +328,7 @@ try {
                     game_type TEXT NOT NULL DEFAULT 'wos',
                     priority INTEGER NOT NULL,
                     name TEXT NOT NULL,
+                    state INTEGER,
                     guide_id TEXT,
                     channel_id TEXT,
                     interval TEXT,
@@ -334,12 +336,36 @@ try {
                     created_by TEXT,
                     UNIQUE (game_type, priority)
                 );
-                INSERT INTO alliance (id, game_type, priority, name, guide_id, channel_id, interval, auto_redeem, created_by)
-                SELECT id, 'wos', priority, name, guide_id, channel_id, interval, auto_redeem, created_by
+                INSERT INTO alliance (id, game_type, priority, name, state, guide_id, channel_id, interval, auto_redeem, created_by)
+                SELECT id, 'wos', priority, name, NULL, guide_id, channel_id, interval, auto_redeem, created_by
                 FROM alliance_legacy;
                 DROP TABLE alliance_legacy;
             `);
         }
+
+        const migratedAllianceCols = db.prepare('PRAGMA table_info(alliance)').all();
+        if (!migratedAllianceCols.some(c => c.name === 'state')) {
+            db.exec('ALTER TABLE alliance ADD COLUMN state INTEGER');
+        }
+
+        db.exec(`
+            UPDATE alliance
+            SET state = (
+                SELECT MIN(players.state)
+                FROM players
+                WHERE players.game_type = alliance.game_type
+                  AND players.alliance_id = alliance.id
+                  AND players.state > 0
+            )
+            WHERE state IS NULL
+              AND 1 = (
+                  SELECT COUNT(DISTINCT players.state)
+                  FROM players
+                  WHERE players.game_type = alliance.game_type
+                    AND players.alliance_id = alliance.id
+                    AND players.state > 0
+              )
+        `);
     } catch (e) {
         console.error('Database migration: failed to migrate alliance to game-scoped schema', e);
     }
@@ -681,9 +707,6 @@ try {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_id_channels_game_alliance ON id_channels (game_type, alliance_id)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_id_channels_game_channel ON id_channels (game_type, channel_id)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_players_game_alliance_exist ON players (game_type, alliance_id, exist)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_players_game_nickname ON players (game_type, nickname)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_furnace_changes_game_fid ON furnace_changes (game_type, fid)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_nickname_changes_game_fid ON nickname_changes (game_type, fid)`);
 
     // Initialize default test IDs
     ['wos', 'ks'].forEach((gameType) => {
@@ -794,16 +817,6 @@ try {
         console.error('Database migration: failed to add auto_update column to settings', e);
     }
 
-    // Ensure auto-remove-transferred-players column exists in settings (defaults to disabled)
-    try {
-        const settingsColsTransfer = db.prepare('PRAGMA table_info(settings)').all();
-        if (!settingsColsTransfer.some(c => c.name === 'auto_remove_transferred_players')) {
-            db.exec('ALTER TABLE settings ADD COLUMN auto_remove_transferred_players BOOLEAN DEFAULT 0');
-        }
-    } catch (e) {
-        console.error('Database migration: failed to add auto_remove_transferred_players column to settings', e);
-    }
-
     // Create indexes for notification_messages table
     db.exec('CREATE INDEX IF NOT EXISTS idx_notif_msgs_trigger ON notification_messages (trigger_time)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_notif_msgs_channel ON notification_messages (channel_id)');
@@ -893,8 +906,8 @@ const customEmojiQueries = {
 const allianceQueries = {
     // Create alliance
     addAlliance: db.prepare(`
-        INSERT INTO alliance (game_type, priority, name, guide_id, channel_id, interval, auto_redeem, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO alliance (game_type, priority, name, state, guide_id, channel_id, interval, auto_redeem, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
 
     // Get alliance by id
@@ -916,6 +929,8 @@ const allianceQueries = {
         UPDATE alliance SET priority = ?, name = ?, guide_id = ?, channel_id = ?, 
         interval = ?, auto_redeem = ? WHERE game_type = ? AND id = ?
     `),
+
+    updateAllianceState: db.prepare('UPDATE alliance SET state = ? WHERE game_type = ? AND id = ?'),
 
     // Update alliance priority only
     updateAlliancePriority: db.prepare('UPDATE alliance SET priority = ? WHERE game_type = ? AND id = ?'),
@@ -1002,8 +1017,8 @@ const giftCodeChannelQueries = {
 const playerQueries = {
     // Add player
     addPlayer: db.prepare(`
-        INSERT INTO players (game_type, fid, user_id, nickname, furnace_level, state, image_url, alliance_id, added_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO players (game_type, fid, state, alliance_id, added_by)
+        VALUES (?, ?, ?, ?, ?)
     `),
 
     // Get player by fid
@@ -1021,32 +1036,14 @@ const playerQueries = {
         GROUP BY alliance_id
     `),
 
-    getDistinctFurnaceLevels: db.prepare(`
-        SELECT DISTINCT furnace_level FROM players
-        WHERE game_type = ? AND exist < 3 AND alliance_id IN (SELECT value FROM json_each(?))
-        ORDER BY furnace_level ASC
-    `),
-
     getDistinctStates: db.prepare(`
         SELECT DISTINCT state FROM players
         WHERE game_type = ? AND exist < 3 AND state IS NOT NULL AND alliance_id IN (SELECT value FROM json_each(?))
         ORDER BY state ASC
     `),
 
-    // Update player
-    updatePlayer: db.prepare(`
-        UPDATE players SET user_id = ?, nickname = ?, furnace_level = ?, state = ?, 
-        image_url = ?, alliance_id = ? WHERE game_type = ? AND fid = ?
-    `),
-
-    // Update furnace level
-    updateFurnaceLevel: db.prepare('UPDATE players SET furnace_level = ? WHERE game_type = ? AND fid = ?'),
-
-    // Update nickname
-    updateNickname: db.prepare('UPDATE players SET nickname = ? WHERE game_type = ? AND fid = ?'),
-
     // Update player alliance
-    updatePlayerAlliance: db.prepare('UPDATE players SET alliance_id = ? WHERE game_type = ? AND fid = ?'),
+    updatePlayerAlliance: db.prepare('UPDATE players SET alliance_id = ?, state = ? WHERE game_type = ? AND fid = ?'),
 
     // Delete player
     deletePlayer: db.prepare('DELETE FROM players WHERE game_type = ? AND fid = ?'),
@@ -1131,11 +1128,6 @@ const furnaceChangeQueries = {
         VALUES (?, ?, ?, ?, ?)
     `),
 
-    // Get changes by player
-    getChangesByPlayer: db.prepare('SELECT * FROM furnace_changes WHERE game_type = ? AND fid = ? ORDER BY change_date DESC'),
-
-    // Get all changes
-    getAllChanges: db.prepare('SELECT * FROM furnace_changes WHERE game_type = ? ORDER BY change_date DESC')
 };
 
 // Nickname changes queries
@@ -1146,11 +1138,6 @@ const nicknameChangeQueries = {
         VALUES (?, ?, ?, ?, ?)
     `),
 
-    // Get changes by player
-    getChangesByPlayer: db.prepare('SELECT * FROM nickname_changes WHERE game_type = ? AND fid = ? ORDER BY change_date DESC'),
-
-    // Get all changes
-    getAllChanges: db.prepare('SELECT * FROM nickname_changes WHERE game_type = ? ORDER BY change_date DESC')
 };
 
 // Gift code queries
@@ -1479,13 +1466,6 @@ const processQueries = {
         )
     `),
 
-    // Get paused processes ready to resume (preempted processes that are now queued)
-    getPausedProcessesReadyToResume: db.prepare(`
-        SELECT * FROM processes 
-        WHERE status = 'queued' AND preempted_by IS NOT NULL AND (resume_after IS NULL OR resume_after <= ?)
-        ORDER BY priority ASC, created_at ASC
-    `),
-
     // Get processes by priority range
     getProcessesByPriorityRange: db.prepare(`
         SELECT * FROM processes 
@@ -1511,13 +1491,6 @@ const processQueries = {
     updateProcessDetails: db.prepare(`
         UPDATE processes 
         SET details = ?, updated_at = ?
-        WHERE id = ?
-    `),
-
-    // Set process resume time (for rate limiting)
-    setProcessResumeTime: db.prepare(`
-        UPDATE processes 
-        SET resume_after = ?, updated_at = ?
         WHERE id = ?
     `),
 
@@ -1644,9 +1617,7 @@ const settingsQueries = {
     // Update notification auto-clean frequency (in seconds)
     updateNotifAutoCleanFreq: db.prepare('UPDATE settings SET notif_auto_clean_freq = ? WHERE id = 1'),
     // Update auto-update enabled/disabled
-    updateAutoUpdate: db.prepare('UPDATE settings SET auto_update = ? WHERE id = 1'),
-    // Update auto-remove-transferred-players enabled/disabled
-    updateAutoRemoveTransferredPlayers: db.prepare('UPDATE settings SET auto_remove_transferred_players = ? WHERE id = 1')
+    updateAutoUpdate: db.prepare('UPDATE settings SET auto_update = ? WHERE id = 1')
 };
 
 // Initialize settings on startup
@@ -1743,8 +1714,8 @@ module.exports = {
     },
     allianceQueries: {
         ...allianceQueries,
-        addAlliance: (priority, name, guideId, channelId, interval, autoRedeem, createdBy, gameType = getDefaultGameType()) =>
-            allianceQueries.addAlliance.run(resolveGameType(gameType), priority, name, guideId, channelId, interval, autoRedeem, createdBy),
+        addAlliance: (priority, name, guideId, channelId, interval, autoRedeem, createdBy, gameType = getDefaultGameType(), state = null) =>
+            allianceQueries.addAlliance.run(resolveGameType(gameType), priority, name, state, guideId, channelId, interval, autoRedeem, createdBy),
         getAllianceById: (id, gameType = getDefaultGameType()) => allianceQueries.getAllianceById.get(resolveGameType(gameType), id),
         getAllianceByIdAny: (id) => allianceQueries.getAllianceByIdAny.get(id),
         getAlliancesByIdsAny: (ids) => allianceQueries.getAlliancesByIdsAny.all(JSON.stringify(ids)),
@@ -1754,6 +1725,8 @@ module.exports = {
         getAlliancesByIds: (ids, gameType = getDefaultGameType()) => allianceQueries.getAlliancesByIds.all(resolveGameType(gameType), JSON.stringify(ids)),
         updateAlliance: (priority, name, guideId, channelId, interval, autoRedeem, id, gameType = getDefaultGameType()) =>
             allianceQueries.updateAlliance.run(priority, name, guideId, channelId, interval, autoRedeem, resolveGameType(gameType), id),
+        setAllianceState: (id, state, gameType = getDefaultGameType()) =>
+            allianceQueries.updateAllianceState.run(state, resolveGameType(gameType), id),
         updateAlliancePriority: (id, priority, gameType = getDefaultGameType()) => allianceQueries.updateAlliancePriority.run(priority, resolveGameType(gameType), id),
         deleteAlliance: (id, gameType = getDefaultGameType()) => allianceQueries.deleteAlliance.run(resolveGameType(gameType), id),
         getAllianceByPriority: (priority, gameType = getDefaultGameType()) => allianceQueries.getAllianceByPriority.get(resolveGameType(gameType), priority),
@@ -1793,9 +1766,9 @@ module.exports = {
     },
     playerQueries: {
         ...playerQueries,
-        addPlayer: (fid, userId, nickname, furnaceLevel, state, imageUrl, allianceId, addedBy, gameType = getDefaultGameType()) => {
+        addPlayer: (fid, state, allianceId, addedBy, gameType = getDefaultGameType()) => {
             const addedByStr = String(addedBy);
-            return playerQueries.addPlayer.run(resolveGameType(gameType), fid, userId, nickname, furnaceLevel, state, imageUrl, allianceId, addedByStr);
+            return playerQueries.addPlayer.run(resolveGameType(gameType), fid, state, allianceId, addedByStr);
         },
         getPlayer: (fid, gameType = getDefaultGameType()) => playerQueries.getPlayer.get(resolveGameType(gameType), fid),
         getPlayerByFid: (fid, gameType = getDefaultGameType()) => playerQueries.getPlayer.get(resolveGameType(gameType), fid),
@@ -1806,13 +1779,8 @@ module.exports = {
         getNonExistentPlayers: (gameType = getDefaultGameType()) => playerQueries.getNonExistentPlayers.all(resolveGameType(gameType)),
         getPlayersByAllianceId: (allianceId, gameType = getDefaultGameType()) => playerQueries.getPlayersByAlliance.all(resolveGameType(gameType), allianceId),
         getPlayerCountsByAllianceIds: (allianceIds, gameType = getDefaultGameType()) => playerQueries.getPlayerCountsByAllianceIds.all(resolveGameType(gameType), JSON.stringify(allianceIds)),
-        getDistinctFurnaceLevels: (allianceIds, gameType = getDefaultGameType()) => playerQueries.getDistinctFurnaceLevels.all(resolveGameType(gameType), JSON.stringify(allianceIds)).map(r => r.furnace_level),
         getDistinctStates: (allianceIds, gameType = getDefaultGameType()) => playerQueries.getDistinctStates.all(resolveGameType(gameType), JSON.stringify(allianceIds)).map(r => r.state),
-        updatePlayer: (userId, nickname, furnaceLevel, state, imageUrl, allianceId, fid, gameType = getDefaultGameType()) =>
-            playerQueries.updatePlayer.run(userId, nickname, furnaceLevel, state, imageUrl, allianceId, resolveGameType(gameType), fid),
-        updatePlayerAlliance: (fid, allianceId, gameType = getDefaultGameType()) => playerQueries.updatePlayerAlliance.run(allianceId, resolveGameType(gameType), fid),
-        updateFurnaceLevel: (furnaceLevel, fid, gameType = getDefaultGameType()) => playerQueries.updateFurnaceLevel.run(furnaceLevel, resolveGameType(gameType), fid),
-        updateNickname: (nickname, fid, gameType = getDefaultGameType()) => playerQueries.updateNickname.run(nickname, resolveGameType(gameType), fid),
+        updatePlayerAlliance: (fid, allianceId, state, gameType = getDefaultGameType()) => playerQueries.updatePlayerAlliance.run(allianceId, state, resolveGameType(gameType), fid),
         deletePlayer: (fid, gameType = getDefaultGameType()) => {
             const resolvedGameType = resolveGameType(gameType);
             playerQueries.deleteFurnaceChanges.run(resolvedGameType, fid);
@@ -1824,7 +1792,7 @@ module.exports = {
         countPlayers: (gameType = getDefaultGameType()) => playerQueries.countPlayers.get(resolveGameType(gameType))?.count || 0,
         getPlayersForExport: (filters, gameType = getDefaultGameType()) => {
             // Build dynamic SQL query based on provided filters
-            let query = 'SELECT p.fid, p.nickname, p.furnace_level, a.name as alliance_name, p.state FROM players p LEFT JOIN alliance a ON p.alliance_id = a.id WHERE p.game_type = ? AND p.exist < 3';
+            let query = 'SELECT p.fid, a.name as alliance_name, p.state FROM players p LEFT JOIN alliance a ON p.alliance_id = a.id WHERE p.game_type = ? AND p.exist < 3';
             const params = [resolveGameType(gameType)];
 
             // Add state filter
@@ -1841,15 +1809,8 @@ module.exports = {
                 params.push(...filters.allianceIds);
             }
 
-            // Add furnace level filter
-            if (filters.furnaceLevels && filters.furnaceLevels.length > 0) {
-                const furnacePlaceholders = filters.furnaceLevels.map(() => '?').join(',');
-                query += ` AND p.furnace_level IN (${furnacePlaceholders})`;
-                params.push(...filters.furnaceLevels);
-            }
-
-            // Order players grouped by alliance, then by furnace level (desc), then by fid
-            query += ' ORDER BY p.alliance_id, p.furnace_level DESC, p.fid';
+            // Order players by alliance, then FID.
+            query += ' ORDER BY p.alliance_id, p.fid';
 
             return db.prepare(query).all(...params);
         },
@@ -1865,20 +1826,10 @@ module.exports = {
         deletePlayers: (fids, gameType = getDefaultGameType()) => playerQueries.deletePlayers(resolveGameType(gameType), fids)
     },
     furnaceChangeQueries: {
-        ...furnaceChangeQueries,
-        addFurnaceChange: (fid, oldLevel, newLevel, gameType = getDefaultGameType()) =>
-            furnaceChangeQueries.addFurnaceChange.run(resolveGameType(gameType), fid, oldLevel, newLevel, getCurrentTimestamp()),
-        getChangesByPlayer: (fid, gameType = getDefaultGameType()) => furnaceChangeQueries.getChangesByPlayer.all(resolveGameType(gameType), fid),
-        getAllChanges: (gameType = getDefaultGameType()) => furnaceChangeQueries.getAllChanges.all(resolveGameType(gameType)),
         // Raw insert for migrations (allows custom timestamps)
         rawInsert: furnaceChangeQueries.addFurnaceChange
     },
     nicknameChangeQueries: {
-        ...nicknameChangeQueries,
-        addNicknameChange: (fid, oldNickname, newNickname, gameType = getDefaultGameType()) =>
-            nicknameChangeQueries.addNicknameChange.run(resolveGameType(gameType), fid, oldNickname, newNickname, getCurrentTimestamp()),
-        getChangesByPlayer: (fid, gameType = getDefaultGameType()) => nicknameChangeQueries.getChangesByPlayer.all(resolveGameType(gameType), fid),
-        getAllChanges: (gameType = getDefaultGameType()) => nicknameChangeQueries.getAllChanges.all(resolveGameType(gameType)),
         // Raw insert for migrations (allows custom timestamps)
         rawInsert: nicknameChangeQueries.addNicknameChange
     },
@@ -2010,12 +1961,10 @@ module.exports = {
         getNextQueuedProcess: () => processQueries.getNextQueuedProcess.get(),
         getActiveProcesses: () => processQueries.getActiveProcesses.all(),
         countActiveProcesses: () => processQueries.countActiveProcesses.get()?.count || 0,
-        getPausedProcessesReadyToResume: () => processQueries.getPausedProcessesReadyToResume.all(Date.now()),
         getProcessesByPriorityRange: (minPriority, maxPriority) => processQueries.getProcessesByPriorityRange.all(minPriority, maxPriority),
         updateProcessStatus: (id, status) => processQueries.updateProcessStatus.run(status, getCurrentTimestamp(), id),
         updateProcessProgress: (id, progress) => processQueries.updateProcessProgress.run(progress, getCurrentTimestamp(), id),
         updateProcessDetails: (id, details) => processQueries.updateProcessDetails.run(details, getCurrentTimestamp(), id),
-        setProcessResumeTime: (id, resumeAfter) => processQueries.setProcessResumeTime.run(resumeAfter, getCurrentTimestamp(), id),
         setProcessPreemption: (id, preemptedBy) => processQueries.setProcessPreemption.run(preemptedBy, getCurrentTimestamp(), id),
         clearProcessPreemption: (id) => processQueries.clearProcessPreemption.run(getCurrentTimestamp(), id),
         getProcessesByActionAndTarget: (action, target) => processQueries.getProcessesByActionAndTarget.all(action, target),

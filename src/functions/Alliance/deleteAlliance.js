@@ -2,10 +2,10 @@ const { ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOpt
 const { adminQueries, allianceQueries, playerQueries, idChannelQueries, adminLogQueries } = require('../utility/database');
 const { LOG_CODES } = require('../utility/AdminLogs');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { stopAutoRefresh } = require('./refreshAlliance');
 const { updateIdChannelCache, removeFromIdChannelCache } = require('../Players/idChannel');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
 const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { formatAllianceStateDescription } = require('./allianceStateDescription');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('./../utility/emojis');
@@ -126,10 +126,10 @@ async function showDeleteAllianceSelection(interaction, page = 0, lang = {}, all
         selectMenu.addOptions(
             new StringSelectMenuOptionBuilder()
                 .setLabel(alliance.name)
-                .setDescription((lang.alliance.deleteAlliance.selectMenu.selectAlliance.description)
+                .setDescription(formatAllianceStateDescription(alliance, lang, (lang.alliance.deleteAlliance.selectMenu.selectAlliance.description)
                     .replace('{alliancePriority}', alliance.priority)
                     .replace('{playerCount}', playerCount.toString())
-                )
+                ))
                 .setValue(alliance.id.toString())
                 .setEmoji(getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1001'))
         );
@@ -568,13 +568,6 @@ async function performAllianceDeletion(interaction, allianceId, requesterId = nu
                 idChannelQueries.deleteChannel(channel.id, alliance.game_type);
                 // Update cache to remove only this alliance's entry
                 removeFromIdChannelCache(channel.channel_id, channel.id);
-            }
-
-            // Stop auto-refresh for this alliance before deletion
-            try {
-                await stopAutoRefresh(allianceId);
-            } catch (autoRefreshError) {
-                await handleError(interaction, lang, autoRefreshError, 'performAllianceDeletion_stopAutoRefresh', false);
             }
 
             // Delete the alliance

@@ -1,8 +1,6 @@
 const { Events, REST, Routes } = require('discord.js');
 const { processRecovery } = require('../functions/Processes/processRecovery');
-const { initializeAutoRefresh } = require('../functions/Alliance/refreshAlliance');
 const { initializeGiftCodeAPI } = require('../functions/GiftCode/fetchGift');
-const { playerApiManager } = require('../functions/utility/apiClient');
 const { initializeNotificationScheduler } = require('../functions/Notification/notificationScheduler');
 const { initializeBackupScheduler } = require('../functions/Settings/backup/backupScheduler');
 const { initializeIdChannelCache } = require('../functions/Players/idChannel');
@@ -175,8 +173,6 @@ module.exports = {
 
         // Non-critical startup work should not delay the bot becoming usable.
         const backgroundTasks = [
-            ['player API availability', () => playerApiManager.checkAvailability()],
-            ['auto-refresh system', () => initializeAutoRefresh(client)],
             ['notification scheduler', () => initializeNotificationScheduler(client)],
             ['ID channel cache', () => initializeIdChannelCache()],
             ['gift code channel cache', () => initializeGiftCodeChannelCache()],

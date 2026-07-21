@@ -1,8 +1,6 @@
-const { ButtonBuilder, ButtonStyle, ModalBuilder, SectionBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, ThumbnailBuilder, MessageFlags, TextDisplayBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
-const { adminQueries, testIdQueries, systemLogQueries } = require('../utility/database');
+const { ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
+const { adminQueries, testIdQueries, systemLogQueries, playerQueries, allianceQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
-const { getFurnaceReadable, getSettlementName } = require('../Players/furnaceReadable');
-const { fetchPlayerFromAPI } = require('../Players/fetchPlayerData');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
 const { getComponentEmoji, getEmojiMapForUser } = require('../utility/emojis');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
@@ -174,10 +172,14 @@ async function handleTestIdModal(interaction) {
             flags: MessageFlags.IsComponentsV2
         });
 
-        // Validate the player ID
-        const playerData = await fetchPlayerFromAPI(fid, gameType);
+        // The games no longer expose player profiles. The test ID must be an
+        // existing local player so its alliance supplies the required state.
+        const playerData = playerQueries.getPlayer(fid, gameType);
+        const alliance = playerData
+            ? allianceQueries.getAllianceById(playerData.alliance_id, gameType)
+            : null;
 
-        if (!playerData) {
+        if (!playerData || !alliance || !Number.isSafeInteger(alliance.state) || alliance.state <= 0) {
             const containerError = [
                 new ContainerBuilder()
                     .setAccentColor(0xe74c3c) // red
@@ -206,7 +208,7 @@ async function handleTestIdModal(interaction) {
             JSON.stringify({
                 new_fid: fid,
                 game_type: gameType,
-                player_nickname: playerData.nickname,
+                state: alliance.state,
                 updated_by: interaction.user.id,
                 updated_by_tag: interaction.user.tag
             })
@@ -215,31 +217,15 @@ async function handleTestIdModal(interaction) {
         const container2 = [
             new ContainerBuilder()
                 .setAccentColor(0x2ecc71) // green
-                .addSectionComponents(
-                    new SectionBuilder()
-                        .setThumbnailAccessory(
-                            new ThumbnailBuilder()
-                                .setURL(playerData.avatar_image || "https://gof-formal-avatar.akamaized.net//avatar-dev//2023//07//17//1001.png")
-                        )
-                        .addTextDisplayComponents(
-                            new TextDisplayBuilder().setContent(
-                                (() => {
-                                    const settlementName = getSettlementName(gameType, lang);
-                                    const defaultSettlementName = getSettlementName('wos', lang);
-
-                                    return `${lang.giftCode.giftSetTestId.content.title}` +
-                                        `\n${lang.giftCode.giftSetTestId.content.description}` +
-                                        `\n${lang.giftCode.giftSetTestId.content.playerInfoField.name}` +
-                                        `\n${lang.giftCode.giftSetTestId.content.playerInfoField.value}`
-                                            .replace('Furnace', settlementName)
-                                            .replace(defaultSettlementName, settlementName)
-                                            .replace('{playerId}', fid)
-                                            .replace('{nickname}', playerData.nickname)
-                                            .replace('{furnace}', getFurnaceReadable(playerData.stove_lv, lang, gameType))
-                                            .replace('{state}', playerData.kid);
-                                })()
-                            )
-                        )
+                .addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(
+                        `${lang.giftCode.giftSetTestId.content.title}` +
+                        `\n${lang.giftCode.giftSetTestId.content.description}` +
+                        `\n${lang.giftCode.giftSetTestId.content.playerInfoField.name}` +
+                        `\n${lang.giftCode.giftSetTestId.content.playerInfoField.value}`
+                            .replace('{playerId}', fid)
+                            .replace('{state}', alliance.state)
+                    )
                 )
         ];
 
@@ -280,9 +266,21 @@ function getTestIdForValidation(gameType) {
     }
 }
 
+function getTestPlayerForValidation(gameType) {
+    const fid = getTestIdForValidation(gameType);
+    const player = playerQueries.getPlayer(fid, gameType);
+    if (!player) return null;
+
+    const alliance = allianceQueries.getAllianceById(player.alliance_id, gameType);
+    if (!alliance || !Number.isSafeInteger(alliance.state) || alliance.state <= 0) return null;
+
+    return { fid, state: alliance.state };
+}
+
 module.exports = {
     createSetTestIdButton,
     handleSetTestIdButton,
     handleTestIdModal,
-    getTestIdForValidation
+    getTestIdForValidation,
+    getTestPlayerForValidation
 };

@@ -606,7 +606,6 @@ function createProcessResponseEmbed(processResult, queueResult, alliance, lang, 
             {
                 name: lang.players.addPlayer.content.skippedExistingField.name.replace('{count}', existingPlayers.length),
                 value: existingPlayers.slice(0, 5).map(p => lang.players.addPlayer.content.skippedExistingField.value
-                    .replace('{nickname}', p.nickname)
                     .replace('{id}', p.id)
                     .replace('{alliance}', p.alliance)
                 ).join('\n') +

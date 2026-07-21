@@ -66,7 +66,7 @@ class ProcessRecovery {
             // Reset any processes that were active during crash to queued
             await resetCrashedProcesses();
 
-            // Handle crashed active processes - these need admin confirmation (except auto_refresh)
+            // Handle crashed active processes. Legacy auto-refresh jobs are drained silently.
             let processesNeedingConfirmation = 0;
             for (const process of crashedActiveProcesses) {
                 const needsConfirmation = await this.handleCrashedProcess(process);
@@ -101,7 +101,7 @@ class ProcessRecovery {
      */
     async handleCrashedProcess(process) {
         try {
-            // Special handling for auto-refresh processes (no confirmation needed)
+            // Drain legacy auto-refresh processes without prompting an admin.
             if (process.action === 'auto_refresh') {
                 await this.handleCrashedAutoRefresh(process);
                 return false; // No confirmation needed
@@ -149,50 +149,14 @@ class ProcessRecovery {
     }
 
     /**
-     * Handles crashed auto-refresh processes with special logic
-     * @param {Object} process - Auto-refresh process data
+     * Completes a legacy auto-refresh process left in the queue by an older version.
+     * @param {Object} process - Legacy auto-refresh process data
      * @returns {Promise<void>}
      */
     async handleCrashedAutoRefresh(process) {
         try {
-            // Check how long the process has been inactive
-            const now = Date.now();
-            const processStarted = new Date(process.created_at).getTime();
-            const inactiveTime = now - processStarted;
-            const oneDayMs = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-
-            if (inactiveTime > oneDayMs) {
-                // Process has been inactive for more than 24 hours, mark as completed
-                await updateProcessStatus(process.id, PROCESS_STATUS.COMPLETED);
-
-                // Get the alliance and reschedule the refresh
-                const alliance = allianceQueries.getAllianceByIdAny(process.target);
-                if (alliance && alliance.interval > 0) {
-                    const { autoRefreshManager } = require('../Alliance/refreshAlliance');
-                    autoRefreshManager.scheduleNextRefresh(alliance);
-                }
-            } else {
-                // Process is recent, check if it has pending work or was mostly done
-                const progress = process.progress || {};
-                const pending = progress.pending || [];
-                const done = progress.done || [];
-                const totalPlayers = pending.length + done.length;
-
-                if (totalPlayers === 0 || pending.length === 0 || (done.length / totalPlayers > 0.9)) {
-                    // Process was nearly complete or fully complete, just mark as done and reschedule
-                    await updateProcessStatus(process.id, PROCESS_STATUS.COMPLETED);
-
-                    // Get the alliance and reschedule the refresh
-                    const alliance = allianceQueries.getAllianceByIdAny(process.target);
-                    if (alliance && alliance.interval > 0) {
-                        const { autoRefreshManager } = require('../Alliance/refreshAlliance');
-                        await autoRefreshManager.scheduleNextRefresh(alliance);
-                    }
-                } else {
-                    // Process has significant pending work, resume it
-                    await updateProcessStatus(process.id, PROCESS_STATUS.QUEUED);
-                }
-            }
+            // Player profile refresh no longer exists in either game.
+            await updateProcessStatus(process.id, PROCESS_STATUS.COMPLETED);
         } catch (error) {
             await handleError(null, null, error, 'handleCrashedAutoRefresh function', false);
 

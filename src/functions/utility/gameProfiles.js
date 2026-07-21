@@ -5,20 +5,14 @@ const GAME_PROFILES = Object.freeze({
         displayName: 'Whiteout Survival',
         api: {
             secret: 'tB87#kPtkxqOS2',
-            playerUrl: 'https://wos-giftcode-api.centurygame.com/api/player',
-            playerUrl2: 'https://gof-report-api-formal.centurygame.com/api/player',
             giftCodeUrl: 'https://wos-giftcode-api.centurygame.com/api/gift_code',
-            captchaUrl: 'https://wos-giftcode-api.centurygame.com/api/captcha',
-            origin: 'https://wos-giftcode.centurygame.com',
-            origin2: 'https://gof-report-api-formal.centurygame.com',
-            hasCaptcha: true
+            origin: 'https://wos-giftcode.centurygame.com'
         },
         syncApi: {
             apiKey: 'super_secret_bot_token_nobody_will_ever_find',
             apiUrl: 'http://gift-code-api.whiteout-bot.com/giftcode_api.php'
         },
-        storageKey: 'wos',
-        requiresOnnx: true
+        storageKey: 'wos'
     },
     ks: {
         type: 'ks',
@@ -26,20 +20,14 @@ const GAME_PROFILES = Object.freeze({
         displayName: 'Kingshot',
         api: {
             secret: 'mN4!pQs6JrYwV9',
-            playerUrl: 'https://kingshot-giftcode.centurygame.com/api/player',
-            playerUrl2: null,
             giftCodeUrl: 'https://kingshot-giftcode.centurygame.com/api/gift_code',
-            captchaUrl: null,
-            origin: 'https://kingshot-giftcode.centurygame.com',
-            origin2: null,
-            hasCaptcha: false
+            origin: 'https://ks-giftcode.centurygame.com'
         },
         syncApi: {
             apiKey: 'super_secret_bot_token_nobody_will_ever_find',
             apiUrl: 'http://ks-gift-code-api.whiteout-bot.com/giftcode_api.php'
         },
-        storageKey: 'ks',
-        requiresOnnx: false
+        storageKey: 'ks'
     }
 });
 

@@ -1,14 +1,5 @@
-const path = require('path');
-const fs = require('fs').promises;
 const { EmbedBuilder } = require('discord.js');
 
-// Lazy-loaded native modules — onnxruntime-node (~10-20s) and sharp (~3-8s) are heavy
-// to require at startup. They are loaded on first use instead.
-let onnx, sharp;
-function loadNativeDeps() {
-    if (!onnx) onnx = require('onnxruntime-node');
-    if (!sharp) sharp = require('sharp');
-}
 const { handleError } = require('../utility/commonFunctions');
 const {
     createProcess,
@@ -17,16 +8,11 @@ const {
 } = require('../Processes/createProcesses');
 const { queueManager } = require('../Processes/queueManager');
 const { processExecutor } = require('../Processes/executeProcesses');
-const { systemLogQueries, giftCodeQueries, playerQueries, giftCodeUsageQueries, settingsQueries, processQueries: processDbQueries } = require('../utility/database');
-const { getTestIdForValidation } = require('./setTestId');
+const { systemLogQueries, giftCodeQueries, playerQueries, giftCodeUsageQueries, settingsQueries, processQueries: processDbQueries, allianceQueries } = require('../utility/database');
+const { getTestPlayerForValidation } = require('./setTestId');
 const { API_CONFIG, getApiConfig } = require('../utility/apiConfig');
 const { getDefaultGameType } = require('../utility/gameRuntime');
-const { encodeData, nativePost } = require('../utility/apiClient');
-
-const MODEL_CONFIG = {
-    modelPath: path.join(__dirname, '../../model/captcha_model.onnx'),
-    metadataPath: path.join(__dirname, '../../model/captcha_model_metadata.json')
-};
+const { nativePost } = require('../utility/apiClient');
 
 const isDevMode = process.env.WOSLAND_DEV_MODE === '1';
 function devLog(...args) {
@@ -50,11 +36,10 @@ const RATE_LIMIT_PER_WINDOW = 30;
 const RATE_LIMIT_SAFE_MARGIN = 2; // pre-emptively pause when remaining ≤ this
 
 /**
- * Module-level rate limit tracker updated by captcha/redeem responses.
+ * Module-level rate limit tracker updated by redeem responses.
  * Tracks remaining budget per endpoint and estimates window timing.
  */
 const rateLimitState = {
-    captcha: RATE_LIMIT_PER_WINDOW,
     redeem: RATE_LIMIT_PER_WINDOW,
     windowStart: 0
 };
@@ -62,7 +47,7 @@ const rateLimitState = {
 /**
  * Updates rate limit state from an API response.
  * Detects window resets (remaining goes up) and resets the window timer.
- * @param {'captcha'|'redeem'} endpoint - Which endpoint's counter to update
+ * @param {'redeem'} endpoint - Which endpoint's counter to update
  * @param {number|undefined} remaining - X-RateLimit-Remaining value from response
  */
 function updateRateLimit(endpoint, remaining) {
@@ -78,13 +63,10 @@ function updateRateLimit(endpoint, remaining) {
 const ALREADY_REDEEMED_STATUSES = ['RECEIVED', 'SAME TYPE EXCHANGE'];
 const VIP_RESTRICTION_STATUSES = ['RECHARGE_MONEY ERROR', 'RECHARGE_MONEY_VIP ERROR'];
 const LEVEL_RESTRICTION_STATUSES = ['STOVE_LV ERROR'];
+const WRONG_STATE_STATUS = 'USER INFO ERROR';
 
 // API status code mapping for response analysis with error codes
 const API_STATUS_MAP = {
-    'CAPTCHA CHECK ERROR': { success: false, giftCodeActive: null, retry: { type: 'captcha' }, errCode: 40103 },
-    'CAPTCHA EXPIRED': { success: false, giftCodeActive: null, retry: { type: 'captcha' }, errCode: 40102 },
-    'CAPTCHA GET TOO FREQUENT': { success: false, giftCodeActive: true, retry: { type: 'rate', delay: API_CONFIG.RATE_LIMIT_DELAY }, errCode: 40100 },
-    'CAPTCHA CHECK TOO FREQUENT': { success: false, giftCodeActive: true, retry: { type: 'rate', delay: API_CONFIG.RATE_LIMIT_DELAY }, errCode: 40101 },
     'TIMEOUT RETRY': { success: false, giftCodeActive: true, retry: { type: 'rate', delay: API_CONFIG.RATE_LIMIT_DELAY }, errCode: 40004 },
     'ROLE NOT EXIST': { success: false, giftCodeActive: true, playerNotExist: true, errCode: 40001 },
     'SUCCESS': { success: true, giftCodeActive: true },
@@ -96,8 +78,9 @@ const API_STATUS_MAP = {
     'STOVE_LV ERROR': { success: true, giftCodeActive: true, errCode: 40006 },
     'RECHARGE_MONEY ERROR': { success: true, giftCodeActive: true, errCode: 40017 },
     'RECHARGE_MONEY_VIP ERROR': { success: true, giftCodeActive: true, errCode: 40018 },
-    'NOT LOGIN': { success: false, giftCodeActive: null, retry: { type: 'captcha' } },
-    'SIGN ERROR': { success: false, giftCodeActive: null, retry: { type: 'captcha' } }
+    [WRONG_STATE_STATUS]: { success: false, giftCodeActive: true, wrongState: true, errCode: 40020 },
+    'NOT LOGIN': { success: false, giftCodeActive: null },
+    'SIGN ERROR': { success: false, giftCodeActive: null }
 };
 
 // Reverse mapping: error code to status key (for handling numeric error codes from API)
@@ -112,176 +95,19 @@ const ERROR_CODE_TO_STATUS = {
     40014: 'CDK NOT FOUND',
     40017: 'RECHARGE_MONEY ERROR',
     40018: 'RECHARGE_MONEY_VIP ERROR',
-    40100: 'CAPTCHA GET TOO FREQUENT',
-    40101: 'CAPTCHA CHECK TOO FREQUENT',
-    40102: 'CAPTCHA EXPIRED',
-    40103: 'CAPTCHA CHECK ERROR'
+    40020: WRONG_STATE_STATUS
 };
 
 // Persistent module state — stored on global so values survive hot-reloads.
 // A plain module-level variable would reset to 0 / an empty Map every time
-// `reload files` re-requires this module, causing captcha rate-limit violations
-// and hanging completion promises.
+// `reload files` re-requires this module; global state keeps validation
+// completion promises alive across hot reloads.
 if (!global._wosRedeemModuleState) {
     global._wosRedeemModuleState = {
         processCompletionResolvers: new Map()
     };
 }
 const moduleState = global._wosRedeemModuleState;
-
-class CaptchaSolver {
-    constructor() {
-        this.initialising = null;
-        this.session = null;
-        this.metadata = null;
-        this.idleTimer = null;
-        this.IDLE_TIMEOUT = 2 * 60 * 1000; // 2 minutes of inactivity before unloading
-    }
-
-    async ensureReady() {
-        // Lazy-load heavy native dependencies on first use
-        loadNativeDeps();
-
-        // Clear any existing idle timer
-        if (this.idleTimer) {
-            clearTimeout(this.idleTimer);
-            this.idleTimer = null;
-        }
-
-        // Load model if not already loaded
-        if (!this.session || !this.metadata) {
-            if (!this.initialising) {
-                this.initialising = this.loadModel();
-            }
-            await this.initialising;
-        }
-
-        // Set timer to unload model after idle period
-        this.idleTimer = setTimeout(() => this.unload(), this.IDLE_TIMEOUT);
-    }
-
-    async loadModel() {
-        try {
-            const [modelExists, metadataExists] = await Promise.all([
-                fileExists(MODEL_CONFIG.modelPath),
-                fileExists(MODEL_CONFIG.metadataPath)
-            ]);
-
-            if (!modelExists || !metadataExists) {
-                throw new Error('Captcha model or metadata not found. Please ensure the ONNX model is deployed under src/model/.');
-            }
-
-            this.session = await onnx.InferenceSession.create(MODEL_CONFIG.modelPath);
-
-            const metadataContent = await fs.readFile(MODEL_CONFIG.metadataPath, 'utf8');
-            this.metadata = JSON.parse(metadataContent);
-
-            devLog(`Model loaded — input: ${JSON.stringify(this.metadata.input_shape)}, classes: ${this.metadata.num_classes}, chars: ${this.metadata.chars}`);
-
-            this.initialising = null; // Reset initializing flag
-
-        } catch (error) {
-            this.session = null;
-            this.metadata = null;
-            this.initialising = null;
-            await handleError(null, null, error, 'loadCaptchaModel', false);
-            throw error;
-        }
-    }
-
-    unload() {
-        if (this.session || this.metadata) {
-            this.session = null;
-            this.metadata = null;
-            this.initialising = null;
-
-            // Force garbage collection if available (requires --expose-gc flag)
-            if (global.gc) {
-                global.gc();
-            }
-        }
-
-        if (this.idleTimer) {
-            clearTimeout(this.idleTimer);
-            this.idleTimer = null;
-        }
-    }
-
-    async solve(imageBuffer) {
-        await this.ensureReady();
-
-        const { metadata, session } = this;
-        const [channels, height, width] = metadata.input_shape;
-
-        const processedBuffer = await sharp(imageBuffer)
-            .resize(width, height, { fit: 'fill' })
-            .grayscale()
-            .raw()
-            .toBuffer();
-
-        const imageData = new Float32Array(processedBuffer.length);
-        const mean = metadata.normalization.mean[0];
-        const std = metadata.normalization.std[0];
-
-        for (let i = 0; i < processedBuffer.length; i++) {
-            imageData[i] = (processedBuffer[i] / 255.0 - mean) / std;
-        }
-
-        const inputTensor = new onnx.Tensor('float32', imageData, [1, channels, height, width]);
-
-        const feeds = { image: inputTensor };
-        const results = await session.run(feeds);
-
-        let predictedText = '';
-        const confidences = [];
-
-        for (let pos = 0; pos < metadata.output_positions; pos++) {
-            const outputKey = `position_${pos}`;
-            const probabilities = results[outputKey].data;
-
-            let maxProb = -Infinity;
-            let maxIdx = 0;
-            for (let i = 0; i < probabilities.length; i++) {
-                if (probabilities[i] > maxProb) {
-                    maxProb = probabilities[i];
-                    maxIdx = i;
-                }
-            }
-
-            const char = metadata.idx_to_char[maxIdx.toString()];
-            predictedText += char;
-            confidences.push(maxProb);
-        }
-
-        const avgConfidence = confidences.reduce((sum, value) => sum + value, 0) / confidences.length;
-
-        devLog(`CAPTCHA solved: "${predictedText}" (confidence: ${avgConfidence.toFixed(3)}, per-char: [${confidences.map(c => c.toFixed(2)).join(', ')}])`);
-
-        return {
-            text: predictedText,
-            confidence: avgConfidence
-        };
-    }
-}
-
-const captchaSolver = new CaptchaSolver();
-
-function cleanupNativeResources() {
-    try {
-        captchaSolver.unload();
-    } catch {
-        // Best effort during process shutdown.
-    }
-    onnx = null;
-    sharp = null;
-}
-
-function fileExists(targetPath) {
-    return fs
-        .access(targetPath)
-        .then(() => true)
-        .catch(() => false);
-}
 
 const RESOLVER_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes — safety net for stale resolvers
 
@@ -362,200 +188,6 @@ function resolveRedeemApiConfig(gameType = getDefaultGameType()) {
 }
 
 /**
- * Merges new Set-Cookie headers into an existing cookie string.
- * Extracts name=value pairs from Set-Cookie headers and combines
- * with any previously accumulated cookies (session reuse).
- * @param {string} [existing] - Current cookie string (semicolon-separated)
- * @param {string[]} [setCookies] - Array of Set-Cookie header values from response
- * @returns {string} Merged cookie string for the Cookie header
- */
-function mergeCookies(existing, setCookies) {
-    const cookieMap = new Map();
-
-    // Parse existing cookies
-    if (existing) {
-        for (const part of existing.split(';')) {
-            const trimmed = part.trim();
-            const eqIdx = trimmed.indexOf('=');
-            if (eqIdx > 0) {
-                cookieMap.set(trimmed.substring(0, eqIdx), trimmed);
-            }
-        }
-    }
-
-    // Parse Set-Cookie headers (take only name=value, ignore attributes)
-    if (setCookies) {
-        for (const sc of setCookies) {
-            const nameValue = sc.split(';')[0].trim();
-            const eqIdx = nameValue.indexOf('=');
-            if (eqIdx > 0) {
-                cookieMap.set(nameValue.substring(0, eqIdx), nameValue);
-            }
-        }
-    }
-
-    return Array.from(cookieMap.values()).join('; ');
-}
-
-async function authenticatePlayer(fid, apiConfig = API_CONFIG) {
-    let lastError = null;
-    let sessionCookies = '';
-
-    // Retry authentication up to 3 times
-    for (let attempt = 1; attempt <= apiConfig.MAX_RETRIES; attempt++) {
-        try {
-            const response = await postForm(
-                apiConfig.PLAYER_URL,
-                {
-                    fid: String(fid),
-                    time: Math.floor(Date.now() / 1000).toString()
-                },
-                'Player authentication',
-                sessionCookies || undefined,
-                apiConfig
-            );
-
-            // Accumulate cookies from each response
-            if (response.cookies?.length) {
-                sessionCookies = mergeCookies(sessionCookies, response.cookies);
-            }
-
-            // Log rate limit headers
-            if (response.rateLimit?.limit !== undefined) {
-                devLog(`[RateLimit] AUTH FID ${fid}: ${response.rateLimit.remaining}/${response.rateLimit.limit} remaining`);
-            }
-
-            // Check for success (case-insensitive)
-            const msgLower = typeof response.data?.msg === 'string' ? response.data.msg.toLowerCase() : '';
-            if (response.ok && response.data && msgLower === 'success' && response.data.data) {
-                devLog(`Auth OK — FID ${fid}, nickname: ${response.data.data.nickname}, stoveLv: ${response.data.data.stove_lv}`);
-                return {
-                    stoveLv: response.data.data.stove_lv || 1,
-                    nickname: response.data.data.nickname || 'Unknown',
-                    cookies: sessionCookies
-                };
-            }
-
-            // Rate limit detected - wait longer
-            if (response.status === 429 || msgLower.includes('too frequent') || msgLower.includes('timeout')) {
-                lastError = `Rate limited (attempt ${attempt}/${apiConfig.MAX_RETRIES})`;
-                devLog(`Auth rate-limited for FID ${fid} (attempt ${attempt}/${apiConfig.MAX_RETRIES}) — waiting ${(apiConfig.RATE_LIMIT_DELAY/1000).toFixed(1)}s`);
-                await wait(apiConfig.RATE_LIMIT_DELAY);
-                continue;
-            }
-
-            // Check for non-retryable errors (player doesn't exist)
-            // Don't waste time and rate limits retrying for invalid player IDs
-            if (msgLower.includes('role not exist') ||
-                msgLower.includes('not exist') ||
-                msgLower.includes('invalid')) {
-                // Return object indicating player doesn't exist (not null)
-                return { playerNotExist: true, message: response.data?.msg || 'Player not found' };
-            }
-
-            // Other error - shorter retry delay
-            lastError = `Auth failed: ${response.data?.msg || 'Unknown error'} (HTTP ${response.status})`;
-            if (attempt < apiConfig.MAX_RETRIES) {
-                devLog(`Auth failed for FID ${fid} (attempt ${attempt}/${apiConfig.MAX_RETRIES}), retrying in ${apiConfig.RETRY_DELAY}ms`);
-                await wait(apiConfig.RETRY_DELAY);
-            }
-
-        } catch (error) {
-            lastError = error.message;
-            devLog(`Auth exception for FID ${fid} (attempt ${attempt}/${apiConfig.MAX_RETRIES}): ${error.message}`);
-            if (attempt < apiConfig.MAX_RETRIES) {
-                await wait(apiConfig.RETRY_DELAY);
-            }
-        }
-    }
-
-    // All retries exhausted
-    console.error(`Player authentication failed for FID ${fid} after ${apiConfig.MAX_RETRIES} attempts. Last error: ${lastError}`);
-    devLog(`Auth FAILED — FID ${fid}, ${apiConfig.MAX_RETRIES} attempts exhausted, last: ${lastError}`);
-    return { authFailed: true, message: lastError };
-}
-
-async function fetchCaptchaImage(fid, cookies, apiConfig = API_CONFIG) {
-    if (!apiConfig.HAS_CAPTCHA || !apiConfig.CAPTCHA_URL) {
-        return { error: 'CAPTCHA_DISABLED', authError: false, cookies };
-    }
-
-    let response;
-    try {
-        response = await postForm(
-            apiConfig.CAPTCHA_URL,
-            {
-                fid: String(fid),
-                time: Date.now().toString(),
-                init: '0'
-            },
-            'Captcha fetch',
-            cookies || undefined,
-            apiConfig
-        );
-    } catch (networkError) {
-        // nativePost already retried, but if it ultimately throws we'll handle it here
-        console.error('Captcha fetch request failed:', networkError.message);
-        devLog(`Captcha fetch FAILED for FID ${fid}: ${networkError.message}`);
-        return { error: 'NETWORK_ERROR', authError: false };
-    }
-
-    // Log rate limit headers
-    if (response.rateLimit?.limit !== undefined) {
-        devLog(`[RateLimit] CAPTCHA FID ${fid}: ${response.rateLimit.remaining}/${response.rateLimit.limit} remaining`);
-    }
-
-    // Update rate limit tracker for adaptive throttling
-    updateRateLimit('captcha', response.rateLimit?.remaining);
-
-    // Handle HTTP 429 (rate limit) specifically before checking response structure
-    if (response.status === 429) {
-        devLog(`Captcha fetch HTTP 429 for FID ${fid} — rate limited`);
-        return { error: 'CAPTCHA GET TOO FREQUENT', authError: false };
-    }
-
-    if (!response.ok || !response.data || typeof response.data !== 'object') {
-        devLog(`Captcha fetch invalid response for FID ${fid}: ok=${response.ok}, status=${response.status}, dataType=${typeof response.data}`);
-        return { error: 'INVALID_RESPONSE', authError: false };
-    }
-
-    const { data } = response;
-
-    // Merge cookies from captcha response for session continuity
-    const mergedCookies = mergeCookies(cookies, response.cookies);
-
-    // Check for explicit rate-limit error FIRST (matches Python: code==1 && msg=="CAPTCHA GET TOO FREQUENT.")
-    // The API uses code=1 to signal an error; only treat as rate-limited when BOTH code and msg match.
-    const msgStr = typeof data.msg === 'string' ? data.msg : '';
-    const msgUpper = msgStr.toUpperCase().replace(/[.\s]+$/g, '');
-    if (data.code === 1 && msgUpper === 'CAPTCHA GET TOO FREQUENT') {
-        devLog(`Captcha fetch rate-limited (code=1) for FID ${fid}: ${data.msg}`);
-        return { error: 'CAPTCHA GET TOO FREQUENT', authError: false };
-    }
-
-    // Check for captcha image data regardless of msg value (matches Python: checks data.data.img existence)
-    if (data.data && typeof data.data.img === 'string') {
-        const base64String = data.data.img.startsWith('data:')
-            ? data.data.img.split(',')[1]
-            : data.data.img;
-
-        try {
-            return { buffer: Buffer.from(base64String, 'base64'), authError: false, cookies: mergedCookies };
-        } catch (error) {
-            return { error: 'DECODE_ERROR', authError: false };
-        }
-    }
-
-    // No image data found — check msg for known error statuses
-    // NOT LOGIN and SIGN ERROR are both mapped as captcha-retry types
-    devLog(`Captcha fetch no image data for FID ${fid}: msg=${data.msg}, code=${data.code}, err_code=${data.err_code}`);
-    const captchaFetchStatusConfig = getStatusConfig(data.msg);
-    const isAuthError = captchaFetchStatusConfig?.retry?.type === 'captcha';
-
-    return { error: data.msg || 'UNKNOWN_ERROR', authError: isAuthError };
-}
-
-/**
  * Pre-filters players who have already redeemed a gift code
  * Returns items to process and pre-filtered results
  * @param {Array} redeemItems - Items with status='redeem' and valid IDs
@@ -624,12 +256,19 @@ async function createRedeemProcess(redeemData, options = {}) {
             gameType: providedGameType
         } = options;
 
+        const adminId = providedAdminId || 'SYSTEM_AUTO_REDEEM';
+        const gameType = providedGameType || providedAllianceContext?.gameType || getDefaultGameType();
+        const storedAlliance = providedAllianceContext?.id != null
+            ? allianceQueries.getAllianceById(providedAllianceContext.id, gameType)
+            : null;
+
         const allianceContext = providedAllianceContext
             ? {
                 id: providedAllianceContext.id != null ? String(providedAllianceContext.id) : null,
                 name: providedAllianceContext.name || null,
                 channelId: providedAllianceContext.channelId || null,
-                guildId: providedAllianceContext.guildId || null
+                guildId: providedAllianceContext.guildId || null,
+                state: storedAlliance?.state || null
             }
             : null;
 
@@ -640,12 +279,18 @@ async function createRedeemProcess(redeemData, options = {}) {
             index
         }));
 
-        const adminId = providedAdminId || 'SYSTEM_AUTO_REDEEM';
-        const gameType = providedGameType || providedAllianceContext?.gameType || getDefaultGameType();
-
         // PRE-FILTER: Check who already redeemed this gift code BEFORE starting the process
         const giftCode = normalisedItems[0].giftCode;
         const redeemItems = normalisedItems.filter(item => item.status === 'redeem' && item.id);
+
+        if (redeemItems.length > 0 && (!Number.isSafeInteger(allianceContext?.state) || allianceContext.state <= 0)) {
+            return {
+                success: true,
+                skipped: true,
+                processId: null,
+                message: 'Alliance skipped because it has no valid state'
+            };
+        }
 
         const { itemsToProcess: filteredRedeemItems, preFilteredResults } =
             preFilterAlreadyRedeemed(redeemItems, giftCode, gameType);
@@ -861,6 +506,9 @@ async function handleVipTracking(playerId, giftCode, outcome, cachedGiftCodeData
  * @param {Object|null} [cachedGiftCodeData=null] - Pre-fetched gift code row (avoids repeated DB reads per player)
  */
 async function handlePostRedemption(playerId, giftCode, outcome, cachedGiftCodeData = null) {
+    // A corrected alliance state must allow this player to be retried later.
+    if (outcome.status === WRONG_STATE_STATUS) return;
+
     // Handle VIP tracking for VIP/Recharge codes
     await handleVipTracking(playerId, giftCode, outcome, cachedGiftCodeData);
 
@@ -880,7 +528,7 @@ async function handlePostRedemption(playerId, giftCode, outcome, cachedGiftCodeD
  * @param {Object} item - Redeem item with id, giftCode, status (validation/redeem)
  * @returns {Promise<Object>} Outcome with success, status, message, etc.
  */
-async function processSingleRedeemItem(item, gameType = getDefaultGameType()) {
+async function processSingleRedeemItem(item, gameType = getDefaultGameType(), state = null) {
     try {
         if (item.status === 'validation') {
             return await validateGiftCode(item.giftCode, gameType);
@@ -888,7 +536,7 @@ async function processSingleRedeemItem(item, gameType = getDefaultGameType()) {
             if (!item.id) {
                 throw new Error('Missing player ID for redeem operation');
             }
-            return await redeemGiftCodeForPlayer(item.id, item.giftCode, gameType);
+            return await redeemGiftCodeForPlayer(item.id, item.giftCode, gameType, state);
         } else {
             throw new Error(`Unknown operation status: ${item.status}`);
         }
@@ -1027,7 +675,7 @@ async function executeRedeemOperation(processId) {
             return current.pending.includes(identifier);
         });
 
-        // Retry queue system: rate-limited or captcha-exhausted players are set aside
+        // Retry queue system: rate-limited players are set aside
         // and other players continue processing. This mirrors the Python bot's approach
         // and avoids blocking the entire pipeline on a single 60s rate limit.
         const activeQueue = itemsToProcess.map(item => ({ item, cycle: 0 }));
@@ -1036,7 +684,6 @@ async function executeRedeemOperation(processId) {
         let processedCount = 0;
 
         // Initialize rate limit tracking for this operation
-        rateLimitState.captcha = RATE_LIMIT_PER_WINDOW;
         rateLimitState.redeem = RATE_LIMIT_PER_WINDOW;
         rateLimitState.windowStart = Date.now();
 
@@ -1090,7 +737,7 @@ async function executeRedeemOperation(processId) {
             }
 
             // Process this redeem item
-            const outcome = await processSingleRedeemItem(item, redeemContext.gameType);
+            const outcome = await processSingleRedeemItem(item, redeemContext.gameType, redeemContext.alliance?.state);
 
             // Rate-limited: put in retry queue and immediately process the next player
             // Rate limits don't increment cycle — they aren't the player's fault
@@ -1102,17 +749,6 @@ async function executeRedeemOperation(processId) {
                     item,
                     cycle,
                     retryAfter: Date.now() + retryDelay
-                });
-                continue;
-            }
-
-            // Captcha exhausted: retry with a cooldown (like Python's captcha cycle retry)
-            if (outcome.captchaExhausted && cycle < API_CONFIG.MAX_RETRY_CYCLES) {
-                pLog(`Player ${identifier} captcha exhausted — queued for retry cycle ${cycle + 1}/${API_CONFIG.MAX_RETRY_CYCLES} in ${(API_CONFIG.CAPTCHA_CYCLE_COOLDOWN/1000).toFixed(1)}s`);
-                retryQueue.push({
-                    item,
-                    cycle: cycle + 1,
-                    retryAfter: Date.now() + API_CONFIG.CAPTCHA_CYCLE_COOLDOWN
                 });
                 continue;
             }
@@ -1311,18 +947,17 @@ async function executeRedeemOperation(processId) {
             // Adaptive rate-limit-aware delay between players
             const hasMoreActive = activeQueue.length > 0;
             if (item.status === 'redeem' && hasMoreActive) {
-                const minRemaining = Math.min(rateLimitState.captcha, rateLimitState.redeem);
+                const minRemaining = rateLimitState.redeem;
 
                 if (minRemaining <= RATE_LIMIT_SAFE_MARGIN) {
                     // Budget is low — wait for the rate limit window to reset
                     const elapsed = Date.now() - rateLimitState.windowStart;
                     const windowRemaining = Math.max(0, RATE_LIMIT_WINDOW - elapsed + 1000); // +1s safety buffer
                     if (windowRemaining > 0) {
-                        pLog(`[RateLimit] Budget low (captcha: ${rateLimitState.captcha}, redeem: ${rateLimitState.redeem}) — pausing ${(windowRemaining/1000).toFixed(1)}s for window reset`);
+                        pLog(`[RateLimit] Redeem budget low (${rateLimitState.redeem}) — pausing ${(windowRemaining/1000).toFixed(1)}s for window reset`);
                         await wait(windowRemaining);
                     }
                     // Reset tracker for fresh window
-                    rateLimitState.captcha = RATE_LIMIT_PER_WINDOW;
                     rateLimitState.redeem = RATE_LIMIT_PER_WINDOW;
                     rateLimitState.windowStart = Date.now();
                 } else {
@@ -1405,9 +1040,6 @@ async function executeRedeemOperation(processId) {
 
         resolveProcessCompletion(processId, summary);
 
-        // Let the idle timer handle model unloading (2-min timeout in CaptchaSolver)
-        // No explicit unload — avoids costly reload when processing multiple alliances
-
         return summary;
 
     } catch (error) {
@@ -1430,27 +1062,30 @@ async function executeRedeemOperation(processId) {
  */
 async function validateGiftCode(giftCode, gameType = getDefaultGameType()) {
     try {
-        // Get test ID for validation
-        const testId = getTestIdForValidation(gameType);
+        // Validation uses a locally stored test player so its alliance supplies
+        // the state required by the new one-request API.
+        const testPlayer = getTestPlayerForValidation(gameType);
 
-        if (!testId) {
+        if (!testPlayer) {
             return {
                 success: false,
-                message: 'No test ID available for validation',
+                message: 'Set the test ID to an existing player in an alliance with a valid state',
                 is_vip: false
             };
         }
 
+        const { fid: testId, state } = testPlayer;
+
 
         // Make API call to validate gift code
-        const result = await makeGiftCodeAPIRequest(testId, giftCode, 'validation', { gameType });
+        const result = await makeGiftCodeAPIRequest(testId, giftCode, 'validation', { gameType, state });
 
         // Detect if this is a VIP code based on validation result
         const isVipCode = VIP_RESTRICTION_STATUSES.includes(result.status);
 
         // Track usage for test ID to prevent it from being redeemed again in auto-redeem
         // This marks the test ID as "already redeemed" for this gift code
-        if (result.status && result.status !== 'UNHANDLED_ERROR' && result.status !== 'ANALYSIS_ERROR') {
+        if (result.status && result.status !== WRONG_STATE_STATUS && result.status !== 'UNHANDLED_ERROR' && result.status !== 'ANALYSIS_ERROR') {
             try {
                 giftCodeUsageQueries.addUsage(testId, giftCode, result.status, gameType);
             } catch (usageError) {
@@ -1484,12 +1119,12 @@ async function validateGiftCode(giftCode, gameType = getDefaultGameType()) {
  * @param {string} giftCode - Gift code to redeem
  * @returns {Promise<Object>} Redeem result
  */
-async function redeemGiftCodeForPlayer(playerId, giftCode, gameType = getDefaultGameType()) {
+async function redeemGiftCodeForPlayer(playerId, giftCode, gameType = getDefaultGameType(), state = null) {
     try {
         devLog(`Redeeming code "${giftCode}" for player ${playerId}`);
 
         // Make API call to redeem gift code
-        const result = await makeGiftCodeAPIRequest(playerId, giftCode, 'redeem', { gameType });
+        const result = await makeGiftCodeAPIRequest(playerId, giftCode, 'redeem', { gameType, state });
         result.gameType = gameType;
 
         // Reset exist counter if player returned valid data (false positive detection)
@@ -1546,160 +1181,31 @@ async function redeemGiftCodeForPlayer(playerId, giftCode, gameType = getDefault
  */
 async function makeGiftCodeAPIRequest(fid, giftCode, operation, options = {}) {
     const apiConfig = resolveRedeemApiConfig(options.gameType);
-    // IMPORTANT: Authenticate player ONCE before captcha retry loop
-    // This prevents duplicate authentication calls on each captcha retry
-    let authInfo = await authenticatePlayer(fid, apiConfig);
-
-    // Capture session cookies from authentication for reuse
-    let sessionCookies = authInfo?.cookies || '';
-
-    if (!authInfo || authInfo.authFailed || authInfo.playerNotExist) {
-        // Check if this is a "player doesn't exist" case
-        if (authInfo?.playerNotExist) {
-            // Return proper response with playerNotExist flag to trigger exist counter tracking
-            return {
-                success: false,
-                status: 'ROLE NOT EXIST',
-                message: authInfo.message || 'Player does not exist',
-                giftCodeActive: true,
-                playerNotExist: true
-            };
-        }
-        // Generic auth failure
-        console.error(`Player authentication failed for FID: ${fid} - cannot proceed with ${operation}`);
-        return createErrorResult('PLAYER_AUTH_FAILED', `Player authentication failed for FID ${fid}`, false);
+    const state = Number(options.state);
+    if (!Number.isSafeInteger(state) || state <= 0) {
+        return createErrorResult('STATE_REQUIRED', 'A valid alliance state is required', false);
     }
 
-    let attempt = 0;
+    const maxAttempts = apiConfig.MAX_REDEEM_ATTEMPTS || apiConfig.MAX_RETRIES || 3;
     let lastResult = null;
-    let authRetryCount = 0;
-    const MAX_AUTH_RETRIES = 2; // Maximum auth retries to prevent infinite loops
 
-    while (attempt < apiConfig.MAX_CAPTCHA_ATTEMPTS) {
-        attempt++;
-
-        const captchaResult = apiConfig.HAS_CAPTCHA
-            ? await fetchCaptchaImage(fid, sessionCookies, apiConfig)
-            : { buffer: null, authError: false, cookies: sessionCookies };
-
-        // Update session cookies from captcha response
-        if (captchaResult?.cookies) {
-            sessionCookies = captchaResult.cookies;
-        }
-
-        // Handle captcha fetch failure
-        if (apiConfig.HAS_CAPTCHA && (!captchaResult || !captchaResult.buffer)) {
-            // Check if this is an authentication error (session expired)
-            if (captchaResult?.authError) {
-                authRetryCount++;
-                devLog(`Auth error on captcha fetch for FID ${fid} — re-authenticating (retry ${authRetryCount}/${MAX_AUTH_RETRIES})`);
-                if (authRetryCount > MAX_AUTH_RETRIES) {
-                    return createErrorResult('MAX_AUTH_RETRIES', `Authentication keeps failing for FID ${fid}`, false);
-                }
-
-                // Re-authenticate player and refresh session cookies
-                authInfo = await authenticatePlayer(fid, apiConfig);
-                sessionCookies = authInfo?.cookies || '';
-                if (!authInfo || authInfo.authFailed || authInfo.playerNotExist) {
-                    if (authInfo?.playerNotExist) {
-                        return {
-                            success: false,
-                            status: 'ROLE NOT EXIST',
-                            message: authInfo.message || 'Player does not exist',
-                            giftCodeActive: true,
-                            playerNotExist: true
-                        };
-                    }
-                    return createErrorResult('REAUTH_FAILED', `Re-authentication failed for FID ${fid}`, false);
-                }
-
-                // Retry captcha fetch immediately without incrementing attempt counter
-                attempt--;
-                continue;
-            }
-
-            // Use API_STATUS_MAP to determine how to handle captcha fetch errors
-            const errorMsg = captchaResult?.error || 'UNKNOWN_ERROR';
-            const statusConfig = getStatusConfig(errorMsg);
-
-            if (statusConfig?.retry?.type === 'rate') {
-                const adjustedDelay = statusConfig.retry.delay ?? apiConfig.RATE_LIMIT_DELAY;
-
-                // Return immediately so the outer loop can process other players
-                // instead of blocking everything for the full rate limit delay
-                return {
-                    success: false,
-                    status: errorMsg.toUpperCase().replace(/[.\s]+$/g, ''),
-                    message: errorMsg,
-                    giftCodeActive: statusConfig.giftCodeActive,
-                    rateLimited: true,
-                    retryDelay: adjustedDelay,
-                    attempts: attempt
-                };
-            }
-
-            // Other non-auth, non-rate-limit error, treat as normal retry
-            devLog(`Captcha fetch error for FID ${fid}: ${errorMsg} — retrying in ${(apiConfig.RETRY_DELAY/1000).toFixed(1)}s (attempt ${attempt}/${apiConfig.MAX_CAPTCHA_ATTEMPTS})`);
-            lastResult = createErrorResult('CAPTCHA_FETCH_FAILED', 'Unable to fetch captcha image', false);
-            await wait(apiConfig.RETRY_DELAY);
-            continue;
-        }
-
-        // Successfully got captcha image - reset auth retry counter
-        authRetryCount = 0;
-        let captchaImage = apiConfig.HAS_CAPTCHA ? captchaResult.buffer : null;
-
-        let solved = null;
-        if (apiConfig.HAS_CAPTCHA) {
-            try {
-                solved = await captchaSolver.solve(captchaImage);
-            } catch (error) {
-                console.error('Captcha solving failed:', error.message);
-                devLog(`Captcha solve FAILED for FID ${fid}: ${error.message}`);
-                lastResult = createErrorResult('CAPTCHA_SOLVE_FAILED', error.message, false);
-
-                // Clean up captcha buffer to free memory
-                captchaImage = null;
-
-                await wait(apiConfig.RETRY_DELAY);
-                continue;
-            }
-        }
-
-        // Clean up captcha buffer after solving to free memory
-        captchaImage = null;
-
-        const response = await postForm(
-            apiConfig.GIFT_CODE_URL,
-            apiConfig.HAS_CAPTCHA
-                ? {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const response = await postForm(
+                apiConfig.GIFT_CODE_URL,
+                {
                     fid: String(fid),
                     cdk: giftCode,
-                    captcha_code: solved.text,
-                    time: Date.now().toString()
-                }
-                : {
-                    fid: String(fid),
-                    cdk: giftCode,
-                    time: Date.now().toString()
+                    kid: String(state),
+                    time: Math.floor(Date.now() / 1000).toString()
                 },
-            'Gift code',
-            sessionCookies || undefined,
-            apiConfig
-        );
+                'Gift code',
+                apiConfig
+            );
 
-        // Log rate limit headers
-        if (response.rateLimit?.limit !== undefined) {
-            devLog(`[RateLimit] REDEEM FID ${fid}: ${response.rateLimit.remaining}/${response.rateLimit.limit} remaining`);
-        }
+            updateRateLimit('redeem', response.rateLimit?.remaining);
 
-        // Update rate limit tracker for adaptive throttling
-        updateRateLimit('redeem', response.rateLimit?.remaining);
-
-        if (!response.ok || !response.data) {
-            // HTTP 429: return immediately for retry queue instead of blocking
             if (response.status === 429) {
-                devLog(`Redeem HTTP 429 for FID ${fid} — returning to retry queue`);
                 return {
                     ...createErrorResult('HTTP_ERROR', 'HTTP 429 Too Many Requests', false),
                     rateLimited: true,
@@ -1708,58 +1214,30 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation, options = {}) {
                 };
             }
 
-            devLog(`Redeem HTTP error for FID ${fid}: status ${response.status} — retrying in ${(apiConfig.RETRY_DELAY/1000).toFixed(1)}s (attempt ${attempt}/${apiConfig.MAX_CAPTCHA_ATTEMPTS})`);
-            lastResult = createErrorResult('HTTP_ERROR', `HTTP ${response.status}`, false);
+            if (!response.ok || !response.data) {
+                lastResult = createErrorResult('HTTP_ERROR', `HTTP ${response.status}`, false);
+            } else {
+                const analysis = analyzeAPIResponse(response.data, operation);
+                const result = { ...analysis, attempts: attempt };
 
-            await wait(apiConfig.RETRY_DELAY);
-            continue;
+                if (analysis.retry?.type === 'rate') {
+                    return {
+                        ...result,
+                        rateLimited: true,
+                        retryDelay: analysis.retry.delay ?? apiConfig.RATE_LIMIT_DELAY
+                    };
+                }
+
+                return result;
+            }
+        } catch (error) {
+            lastResult = createErrorResult('NETWORK_ERROR', error.message, false);
         }
 
-        const analysis = analyzeAPIResponse(response.data, operation);
-        const result = {
-            ...analysis,
-            success: analysis.success,
-            captchaText: solved?.text || null,
-            captchaConfidence: solved?.confidence || null,
-            attempts: attempt
-        };
-
-        devLog(`API response — FID ${fid}, op: ${operation}, status: ${analysis.status}, success: ${analysis.success}, attempt: ${attempt}/${apiConfig.MAX_CAPTCHA_ATTEMPTS}`);
-
-        // Clean up solved captcha data
-        solved = null;
-
-        if (apiConfig.HAS_CAPTCHA && analysis.retry?.type === 'captcha') {
-            devLog(`Captcha rejected for FID ${fid}: ${analysis.status} — re-solving (attempt ${attempt}/${apiConfig.MAX_CAPTCHA_ATTEMPTS})`);
-            lastResult = result;
-            await wait(apiConfig.RETRY_DELAY);
-            continue;
-        }
-
-        if (analysis.retry?.type === 'rate') {
-            devLog(`Redeem rate-limited for FID ${fid}: ${analysis.status} — returning to retry queue`);
-            // Return immediately for retry queue instead of blocking
-            return {
-                ...result,
-                rateLimited: true,
-                retryDelay: analysis.retry.delay ?? apiConfig.RATE_LIMIT_DELAY
-            };
-        }
-
-        return result;
+        if (attempt < maxAttempts) await wait(apiConfig.RETRY_DELAY);
     }
 
-    // Clean up resources before returning
-    authInfo = null;
-
-    const finalResult = lastResult || createErrorResult('MAX_ATTEMPTS_EXCEEDED', apiConfig.HAS_CAPTCHA ? 'Maximum captcha attempts exceeded' : 'Maximum redeem attempts exceeded', false);
-    finalResult.captchaExhausted = apiConfig.HAS_CAPTCHA;
-    finalResult.attempts = attempt;
-    devLog(`All ${apiConfig.MAX_CAPTCHA_ATTEMPTS} attempts exhausted for FID ${fid} — last status: ${finalResult.status}`);
-
-    // Idle timer in CaptchaSolver handles cleanup — no explicit unload needed
-
-    return finalResult;
+    return { ...lastResult, attempts: maxAttempts };
 }
 
 /**
@@ -1900,9 +1378,14 @@ function computeRedeemStats(redeemContext, results, current) {
 
     const restricted = vipRestricted + levelRestricted + vipSkippedCount;
 
-    // Failed includes actual failures (excluding VIP-skipped — those are counted as restricted)
+    const wrongStateIds = [...new Set(processedResults
+        .filter((entry) => !entry.preFiltered && entry.status === WRONG_STATE_STATUS)
+        .map((entry) => String(entry.playerId || entry.identifier || ''))
+        .filter(Boolean))];
+
+    // Failed excludes outcomes that have their own dedicated result group.
     const failed = processedResults.filter((entry) =>
-        !entry.preFiltered && entry.success === false && !entry.vipSkipped
+        !entry.preFiltered && entry.success === false && !entry.vipSkipped && entry.status !== WRONG_STATE_STATUS
     ).length;
 
     // Total pending = items that still need processing (NOT pre-filtered, NOT processed yet)
@@ -1919,6 +1402,7 @@ function computeRedeemStats(redeemContext, results, current) {
         success,
         alreadyRedeemed,
         restricted,
+        wrongStateIds,
         failed,
         percent
     };
@@ -1979,6 +1463,25 @@ async function updateRedeemProgressEmbed(processId, embedState, stats, context, 
 
         await publishEmbed();
 
+        if (force && stats.wrongStateIds?.length && !embedState.wrongStateReportSent) {
+            const configuredState = context?.alliance?.state;
+            const heading = `**${WRONG_STATE_STATUS}** — ${stats.wrongStateIds.length} ID(s) do not match${configuredState ? ` state ${configuredState}` : ' the configured alliance state'}.`;
+            const idList = stats.wrongStateIds.join('\n');
+
+            if (heading.length + idList.length + 1 <= 2000) {
+                await channel.send({ content: `${heading}\n${idList}` });
+            } else {
+                await channel.send({
+                    content: heading,
+                    files: [{
+                        attachment: Buffer.from(`${idList}\n`, 'utf8'),
+                        name: `wrong-state-fids-${processId}.txt`
+                    }]
+                });
+            }
+            embedState.wrongStateReportSent = true;
+        }
+
         embedState.lastUpdateCount = stats.processed;
         embedState.lastState = context.state;
 
@@ -2013,16 +1516,26 @@ function buildRedeemProgressEmbed(stats, context) {
         color = PROGRESS_EMBED_COLOR_FAILED;
     }
 
+    const fields = [
+        { name: 'Success', value: String(stats.success), inline: true },
+        { name: 'Already Redeemed', value: String(stats.alreadyRedeemed), inline: true },
+        { name: 'Poor/Weak', value: String(stats.restricted || 0), inline: true },
+        { name: 'Failed', value: String(stats.failed), inline: true }
+    ];
+
+    if (stats.wrongStateIds?.length) {
+        const ids = stats.wrongStateIds.join(', ');
+        fields.push({
+            name: `Wrong State • ${WRONG_STATE_STATUS} (${stats.wrongStateIds.length})`,
+            value: ids.length > 1024 ? `${ids.slice(0, 1020)}...` : ids
+        });
+    }
+
     return new EmbedBuilder()
         .setTitle(`Redeem Progress • ${allianceName}`)
         .setDescription(descriptionParts.join('\n'))
         .setColor(color)
-        .addFields(
-            { name: 'Success', value: String(stats.success), inline: true },
-            { name: 'Already Redeemed', value: String(stats.alreadyRedeemed), inline: true },
-            { name: 'Poor/Weak', value: String(stats.restricted || 0), inline: true },
-            { name: 'Failed', value: String(stats.failed), inline: true }
-        )
+        .addFields(...fields)
         .setTimestamp(new Date());
 }
 
@@ -2108,6 +1621,6 @@ module.exports = {
     redeemGiftCodeForPlayer,
     makeGiftCodeAPIRequest,
     analyzeAPIResponse,
-    handleVipTracking,
-    cleanupNativeResources
+    computeRedeemStats,
+    handleVipTracking
 };

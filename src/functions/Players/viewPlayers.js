@@ -11,7 +11,6 @@ const {
 const { allianceQueries, playerQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
-const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
 const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, createAllianceSelectionComponents, createGameSelectionComponents, getAlliancesForUserByGame } = require('../utility/commonFunctions');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
@@ -89,25 +88,18 @@ function createAllianceSelectionContainer(interaction, alliances, lang, playerCo
  * @returns {{ components: Array }}
  */
 function createPlayerListContainer(interaction, players, lang, alliance, page = 0) {
-    // Sort players by furnace level (highest first) then paginate
+    // FID is now the only profile identity returned by the redemption service.
     const sortedPlayers = Array.isArray(players)
-        ? [...players].sort((a, b) => (b.furnace_level || 0) - (a.furnace_level || 0))
+        ? [...players].sort((a, b) => Number(a.fid) - Number(b.fid))
         : [];
 
     const totalPages = Math.max(1, Math.ceil(sortedPlayers.length / PLAYERS_PER_PAGE));
     const startIndex = page * PLAYERS_PER_PAGE;
     const currentPagePlayers = sortedPlayers.slice(startIndex, startIndex + PLAYERS_PER_PAGE);
-    const settlementName = getSettlementName(alliance.game_type, lang);
-    const defaultSettlementName = getSettlementName('wos', lang);
-
     // Build player list text
     const playerLines = currentPagePlayers.map(player =>
         lang.players.viewPlayers.content.playerField.value
-            .replace('{nickname}', player.nickname || `Player ${player.fid}`)
             .replace('{fid}', player.fid)
-            .replace('Furnace', settlementName)
-            .replace(defaultSettlementName, settlementName)
-            .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang, alliance.game_type) || 'Unknown')
             .replace('{state}', player.state || 'Unknown')
     );
 

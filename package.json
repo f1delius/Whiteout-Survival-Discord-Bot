@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node --expose-gc --max-old-space-size=256 starter.js",
     "start:basic": "node starter.js",
-    "dev": "node --expose-gc --max-old-space-size=256 starter.js"
+    "dev": "node --expose-gc --max-old-space-size=256 starter.js",
+    "test": "node --test test/giftCodeAndAutoSort.test.js"
   },
   "dependencies": {
     "7zip-bin": "^5.2.0",
@@ -19,9 +20,7 @@
     "https-proxy-agent": "^7.0.6",
     "node-7z": "^3.0.0",
     "node-cron": "^3.0.3",
-    "node-fetch": "^2.7.0",
-    "onnxruntime-node": "^1.23.2",
-    "sharp": "^0.32.0"
+    "node-fetch": "^2.7.0"
   },
   "keywords": [
     "discord",

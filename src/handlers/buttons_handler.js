@@ -38,7 +38,6 @@ const removePlayers = require('../functions/Players/removePlayers');
 const viewPlayers = require('../functions/Players/viewPlayers');
 const idChannel = require('../functions/Players/idChannel');
 const exportPlayers = require('../functions/Players/export');
-const history = require('../functions/Players/history');
 
 const createAlliance = require('../functions/Alliance/createAlliance');
 const editAlliance = require('../functions/Alliance/editAlliance');
@@ -46,7 +45,7 @@ const deleteAlliance = require('../functions/Alliance/deleteAlliance');
 const viewAlliances = require('../functions/Alliance/viewAlliances');
 const editPriority = require('../functions/Alliance/editPriority');
 const assignAlliance = require('../functions/Alliance/assignAlliance');
-const triggerRefresh = require('../functions/Alliance/triggerRefresh');
+const autoSort = require('../functions/Alliance/autoSort');
 
 const admin = require('../functions/Settings/admin');
 const giftCode = require('../functions/GiftCode/giftCode');
@@ -87,7 +86,6 @@ const buttonHandlers = [
     { pattern: /^settings_cat_/, fn: settings.handleSettingsCategoryButton },
     { pattern: /^settings_/, fn: settings.handleSettingsButton },
     { pattern: /^toggle_auto_delete_/, fn: autoClean.handleToggleAutoDelete },
-    { pattern: /^toggle_auto_remove_transferred_/, fn: autoClean.handleToggleAutoRemoveTransferredPlayers },
     { pattern: /^feature_access_feat_/, fn: featureAccess.handleFeatureAccessFeatureButton },
     { pattern: /^feature_access_set_/, fn: featureAccess.handleSetFeatureAccess },
     { pattern: /^feature_access_privateNotifications_(confirm|cancel)_/, fn: featureAccess.handlePrivateNotificationsConfirmCancel },
@@ -178,8 +176,10 @@ const buttonHandlers = [
     { pattern: /^(assign_admin_prev_|assign_admin_next_)/, fn: assignAlliance.handleAssignAdminPagination },
     { pattern: /^(assign_alliances_prev_|assign_alliances_next_)/, fn: assignAlliance.handleAssignAlliancesPagination },
     { pattern: /^assign_alliance_/, fn: assignAlliance.handleAssignAllianceButton },
-    { pattern: /^(trigger_refresh_prev_|trigger_refresh_next_)/, fn: triggerRefresh.handleTriggerRefreshPagination },
-    { pattern: /^trigger_refresh_(?!prev_|next_)/, fn: triggerRefresh.handleTriggerRefreshButton },
+    { pattern: /^auto_sort_preview_/, fn: autoSort.handleAutoSortPreview },
+    { pattern: /^auto_sort_confirm_/, fn: autoSort.handleAutoSortConfirm },
+    { pattern: /^auto_sort_cancel_/, fn: autoSort.handleAutoSortCancel },
+    { pattern: /^auto_sort_/, fn: autoSort.handleAutoSortButton },
 
     // Gift Code management
     { pattern: /^gift_code_management_/, fn: giftCode.handleGiftCodeManagementButton },
@@ -244,20 +244,9 @@ const buttonHandlers = [
     { pattern: /^export_panel_/, fn: exportPlayers.showExportPanel },
     { pattern: /^export_filter_state_/, fn: exportPlayers.handleStateFilterButton },
     { pattern: /^export_filter_alliance_/, fn: exportPlayers.handleAllianceFilterButton },
-    { pattern: /^export_filter_furnace_/, fn: exportPlayers.handleFurnaceFilterButton },
     { pattern: /^export_generate_/, fn: exportPlayers.handleGenerate },
     { pattern: /^(export_state_prev_|export_state_next_)/, fn: exportPlayers.handleStatePagination },
     { pattern: /^(export_alliance_prev_|export_alliance_next_)/, fn: exportPlayers.handleAlliancePagination },
-    { pattern: /^(export_furnace_prev_|export_furnace_next_)/, fn: exportPlayers.handleFurnacePagination },
-
-    // Player history
-    { pattern: /^history_type_/, fn: history.handleHistoryTypeButton },
-    { pattern: /^history_byid_/, fn: history.handleHistoryByIdButton },
-    { pattern: /^history_search_(?!modal_)/, fn: history.handleHistorySearchButton },
-    { pattern: /^(history_furnace_alliance_prev_|history_furnace_alliance_next_|history_nickname_alliance_prev_|history_nickname_alliance_next_)/, fn: history.handleHistoryAlliancePagination },
-    { pattern: /^(history_furnace_changes_prev_|history_furnace_changes_next_|history_nickname_changes_prev_|history_nickname_changes_next_)/, fn: history.handleHistoryChangesPagination },
-    { pattern: /^(history_furnace_player_prev_|history_furnace_player_next_|history_nickname_player_prev_|history_nickname_player_next_)/, fn: history.handleHistoryPlayerPagination },
-    { pattern: /^history_(?!type_|search_|furnace_|nickname_|byid_)/, fn: history.handleHistoryButton },
 
     // Admin management
     { pattern: /^manage_admins_/, fn: admin.handleManageAdminsButton },

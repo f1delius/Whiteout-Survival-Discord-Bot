@@ -29,15 +29,6 @@ const getProcessRecovery = () => {
     return processRecovery;
 };
 
-// Import auto-refresh manager (lazy loading)
-let autoRefreshManager = null;
-const getAutoRefreshManager = () => {
-    if (!autoRefreshManager) {
-        autoRefreshManager = require('../Alliance/refreshAlliance').autoRefreshManager;
-    }
-    return autoRefreshManager;
-};
-
 /**
  * SQLite-based priority queue management for process execution
  */
@@ -283,34 +274,6 @@ class QueueManager {
 
             // Mark process as completed
             await updateProcessStatus(processId, PROCESS_STATUS.COMPLETED);
-
-            // Check if this was an addplayer process - enable auto-refresh if needed
-            if (processData && processData.action === 'addplayer') {
-                const allianceId = parseInt(processData.target, 10); // Parse to integer for comparison
-                try {
-                    const refreshManager = getAutoRefreshManager();
-
-                    // Check if there's already an auto-refresh for this alliance (queued or active)
-                    const existingProcesses = await getProcessesByActionAndTarget('auto_refresh', processData.target);
-                    const existingAutoRefresh = existingProcesses.length > 0;
-
-                    if (!existingAutoRefresh && !refreshManager.scheduledRefreshes.has(allianceId)) {
-                        // Schedule auto-refresh (only schedules, doesn't create process immediately)
-                        await refreshManager.enableAutoRefreshAfterAddingPlayers(allianceId);
-                    }
-                } catch (autoRefreshError) {
-                    systemLogQueries.addLog(
-                        'error',
-                        'Error enabling auto-refresh after adding players',
-                        JSON.stringify({
-                            allianceId,
-                            error: autoRefreshError.message,
-                            stack: autoRefreshError.stack,
-                            function: 'completeProcess'
-                        })
-                    );
-                }
-            }
 
             // Start the next process in queue naturally
             // Preempted processes will be resumed when their turn comes

@@ -18,7 +18,6 @@ const { allianceQueries, playerQueries, adminLogQueries } = require('../utility/
 const { LOG_CODES } = require('../utility/AdminLogs');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
-const { getFurnaceReadable, getSettlementName } = require('./furnaceReadable');
 const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator, createAllianceSelectionComponents, createGameSelectionComponents, getAlliancesForUserByGame } = require('../utility/commonFunctions');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
@@ -201,8 +200,6 @@ function createPlayerSelectionEmbed(interaction, players, lang, alliance, page =
     const startIndex = page * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     const currentPagePlayers = players.slice(startIndex, endIndex);
-    const settlementName = getSettlementName(alliance.game_type, lang);
-
     const components = [];
 
     // Create "Remove by ID" button
@@ -232,18 +229,13 @@ function createPlayerSelectionEmbed(interaction, players, lang, alliance, page =
         components.push(new ActionRowBuilder().addComponents(removeByIdButton));
     }
 
-    const defaultSettlementName = getSettlementName('wos', lang);
-
     // Third row: Select menu (if there are players)
     if (currentPagePlayers.length > 0) {
         const options = currentPagePlayers.map(player => ({
-            label: player.nickname || `Player ${player.fid}`,
+            label: `ID ${player.fid}`,
             value: player.fid.toString(),
             description: (lang.players.removePlayer.selectMenu.playerSelect.description)
                 .replace('{id}', player.fid)
-                .replace('Furnace', settlementName)
-                .replace(defaultSettlementName, settlementName)
-                .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang, alliance.game_type) || "Unknown")
                 .replace('{state}', player.state || "Unknown"),
             emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1026')
         }));
@@ -287,14 +279,8 @@ function createPlayerSelectionEmbed(interaction, players, lang, alliance, page =
  * @returns {Object} Embed and components
  */
 function createRemovalConfirmationEmbed(players, alliance, interaction, lang) {
-    const settlementName = getSettlementName(alliance.game_type, lang);
-    const defaultSettlementName = getSettlementName('wos', lang);
     const playerList = players.map(player => lang.players.removePlayer.content.playersToRemoveField.value
-        .replace('{nickname}', player.nickname || `Player ${player.fid}`)
         .replace('{id}', player.fid)
-        .replace('Furnace', settlementName)
-        .replace(defaultSettlementName, settlementName)
-        .replace('{furnace}', getFurnaceReadable(player.furnace_level, lang, alliance.game_type) || "Unknown")
         .replace('{state}', player.state || "Unknown")
     ).join('\n');
 

@@ -71,10 +71,6 @@ function isMultiGameModeEnabled() {
     return getRuntimeGameMode() === 'both';
 }
 
-function shouldUseOnnx() {
-    return getActiveGameTypes().some((gameType) => getGameProfile(gameType).requiresOnnx);
-}
-
 module.exports = {
     getActiveGameTypes,
     getDefaultGameProfile,
@@ -83,6 +79,5 @@ module.exports = {
     getRuntimeGameState,
     isGameEnabled,
     isMultiGameModeEnabled,
-    parseGameTypeArg,
-    shouldUseOnnx
+    parseGameTypeArg
 };

@@ -1,7 +1,6 @@
 const { getProcessById, resolveProcessGameType, updateProcessStatus, updateProcessProgress, PROCESS_STATUS } = require('./createProcesses');
 const { queueManager } = require('./queueManager');
 const { systemLogQueries } = require('../utility/database');
-const { executeAutoRefresh: executeAutoRefreshFunction } = require('../Alliance/refreshAlliance');
 const { handleError } = require('../utility/commonFunctions');
 
 const MAX_REQUEUE_ATTEMPTS = 3;
@@ -156,7 +155,8 @@ class ProcessExecutor {
                 break;
 
             case 'refresh':
-                await this.executeRefresh(processId);
+                // Drain refresh jobs queued by versions that still supported player profiles.
+                await updateProcessStatus(processId, PROCESS_STATUS.COMPLETED);
                 break;
 
             case 'redeem_giftcode':
@@ -164,7 +164,8 @@ class ProcessExecutor {
                 break;
 
             case 'auto_refresh':
-                await this.executeAutoRefresh(processId);
+                // Drain auto-refresh jobs queued before the profile API was removed.
+                await updateProcessStatus(processId, PROCESS_STATUS.COMPLETED);
                 break;
 
             default:
@@ -271,24 +272,6 @@ class ProcessExecutor {
     async executeAddPlayer(processId) {
         const { processPlayerData } = require('../Players/fetchPlayerData');
         await this.executeWithErrorHandling(processId, processPlayerData, 'executeAddPlayer');
-    }
-
-    /**
-     * Executes refresh process (manual refresh uses the same logic as auto-refresh)
-     * @param {number} processId - Process ID
-     * @returns {Promise<void>}
-     */
-    async executeRefresh(processId) {
-        await this.executeWithErrorHandling(processId, executeAutoRefreshFunction, 'executeRefresh');
-    }
-
-    /**
-     * Executes auto refresh process
-     * @param {number} processId - Process ID
-     * @returns {Promise<void>}
-     */
-    async executeAutoRefresh(processId) {
-        await this.executeWithErrorHandling(processId, executeAutoRefreshFunction, 'executeAutoRefresh');
     }
 
     /**

@@ -1,72 +1,14 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder, ContainerBuilder, TextDisplayBuilder, FileBuilder, SeparatorBuilder, SeparatorSpacingSize, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
 const { playerQueries, allianceQueries, adminQueries } = require('../utility/database');
 const { getUserInfo, assertUserMatches, handleError, updateComponentsV2AfterSeparator, encodeExportSelection, decodeExportSelection, checkCustomIdLength, hasPermission, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { formatAllianceStateDescription } = require('../Alliance/allianceStateDescription');
 const { getComponentEmoji, getEmojiMapForUser } = require('../utility/emojis');
-const { getFurnaceReadable, FURNACE_LEVEL_MAPPING, getSettlementName, getSettlementLevelLabel } = require('./furnaceReadable');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
 const fs = require('fs');
 const path = require('path');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
-
-function getExportGameType(selection = {}) {
-    return normalizeGameType(selection.gameType, getDefaultGameType());
-}
-
-function getExportSettlementName(lang, selection = {}) {
-    return getSettlementName(getExportGameType(selection), lang);
-}
-
-function getExportSettlementLevelLabel(lang, selection = {}) {
-    return getSettlementLevelLabel(getExportGameType(selection), lang);
-}
-
-function getExportFurnaceTitle(lang, selection = {}) {
-    const defaultSettlementName = getSettlementName('wos', lang);
-    return (lang.players.export.content.title.selectFurnace || 'Select Furnace Levels')
-        .replace(/Furnace/gi, getExportSettlementName(lang, selection))
-        .replace(defaultSettlementName, getExportSettlementName(lang, selection));
-}
-
-function getExportFurnaceDescription(lang, selection = {}) {
-    const settlementName = getExportSettlementName(lang, selection);
-    const defaultSettlementName = getSettlementName('wos', lang);
-    const crystalPrefix = getExportGameType(selection) === 'ks'
-        ? (lang.common.townCenterGold || 'TG')
-        : (lang.common.furnaceCrystal || 'FC');
-
-    return (lang.players.export.content.description.selectFurnace || 'Pick furnace levels to filter by.')
-        .replace(/furnace/gi, settlementName)
-        .replace(defaultSettlementName, settlementName)
-        .replace(/FC/g, crystalPrefix);
-}
-
-function getExportFurnaceButtonLabel(lang, selection = {}) {
-    const defaultSettlementName = getSettlementName('wos', lang);
-    const defaultSettlementLevelLabel = getSettlementLevelLabel('wos', lang);
-    return lang.players.export.buttons.furnace
-        .replace(/Furnace/gi, getExportSettlementLevelLabel(lang, selection))
-        .replace(defaultSettlementLevelLabel, getExportSettlementLevelLabel(lang, selection))
-        .replace(defaultSettlementName, getExportSettlementName(lang, selection));
-}
-
-function getExportFurnacePlaceholder(lang, selection = {}) {
-    const defaultSettlementName = getSettlementName('wos', lang);
-    return lang.players.export.selectMenu.furnaceFilter.placeholder
-        .replace(/furnace/gi, getExportSettlementName(lang, selection))
-        .replace(defaultSettlementName, getExportSettlementName(lang, selection));
-}
-
-function getExportFurnaceAllLabel(lang, selection = {}) {
-    const defaultSettlementName = getSettlementName('wos', lang);
-    const defaultSettlementLevelLabel = getSettlementLevelLabel('wos', lang);
-    return lang.players.export.selectMenu.furnaceFilter.all
-        .replace(/Furnace Level/gi, getExportSettlementLevelLabel(lang, selection))
-        .replace(defaultSettlementLevelLabel, getExportSettlementLevelLabel(lang, selection))
-        .replace(/Furnace/gi, getExportSettlementName(lang, selection))
-        .replace(defaultSettlementName, getExportSettlementName(lang, selection));
-}
 
 /**
  * Creates an export button
@@ -88,21 +30,17 @@ function createExportButton(userId, lang = {}) {
  * @param {string} encodedSelection - The current encoded filter selection
  * @param {string} stateDisplay - Pre-rendered display string for the current state filter (e.g., "State 1, State 2" or "All")
  * @param {string} allianceDisplay - Pre-rendered display string for the current alliance filter (e.g., "Alliance 1, Alliance 2" or "All")
- * @param {string} furnaceDisplay - Pre-rendered display string for the current furnace filter (e.g., "Furnace 1, Furnace 2" or "All")
  * @param {number} count - The number of players matching the current filters
  * @param {string} headerTitle - Optional title to override the main panel title
  * @param {string} headerDesc - Optional description to override the main panel description
  * @param {Array<ActionRowBuilder>} extraActionRows - Optional extra action rows to append to the container (e.g., for select menus or pagination buttons)
  * Returns a ContainerBuilder ready to be added to interaction.update()
  */
-function buildExportContainer(interaction, lang, encodedSelection, stateDisplay, allianceDisplay, furnaceDisplay, count, headerTitle = null, headerDesc = null, extraActionRows = []) {
+function buildExportContainer(interaction, lang, encodedSelection, stateDisplay, allianceDisplay, count, headerTitle = null, headerDesc = null, extraActionRows = []) {
     const userId = interaction.user.id;
-    const currentSelection = decodeExportSelection(encodedSelection);
-    const furnaceFieldLabel = getExportSettlementLevelLabel(lang, currentSelection);
 
     const stateLabel = stateDisplay || (lang.players.export.content.all);
     const allianceLabel = allianceDisplay || (lang.players.export.content.all);
-    const furnaceLabel = furnaceDisplay || (lang.players.export.content.all);
 
     const filterRow = createFilterButtonRow(userId, encodedSelection, lang, count);
 
@@ -118,10 +56,7 @@ function buildExportContainer(interaction, lang, encodedSelection, stateDisplay,
                 `${lang.players.export.content.filtersField.name}\n` +
                 `${lang.players.export.content.filtersField.value
                     .replace('{state}', stateLabel)
-                    .replace('{alliance}', allianceLabel)
-                    .replace('Furnace Level', furnaceFieldLabel)
-                    .replace('Niveau de fournaise', furnaceFieldLabel)
-                    .replace('{furnace}', furnaceLabel)}\n` +
+                    .replace('{alliance}', allianceLabel)}\n` +
                 `${lang.players.export?.content?.count?.replace('{playerCount}', count)}`
             )
         )
@@ -176,7 +111,7 @@ async function showExportPanel(interaction) {
         }
 
         // Create initial encoded selection
-        const initialSelection = { states: [], allianceIds: [], furnaceLevels: [], gameType: getDefaultGameType() };
+        const initialSelection = { states: [], allianceIds: [], gameType: getDefaultGameType() };
         const encoded = encodeExportSelection(initialSelection);
 
         // Determine initial matching players count scoped to admin access
@@ -195,7 +130,6 @@ async function showExportPanel(interaction) {
             interaction,
             lang,
             encoded,
-            allLabel,
             allLabel,
             allLabel,
             initialCount
@@ -226,7 +160,7 @@ async function handleExportGameSelection(interaction) {
             });
         }
 
-        const initialSelection = { states: [], allianceIds: [], furnaceLevels: [], gameType: selectedGameType };
+        const initialSelection = { states: [], allianceIds: [], gameType: selectedGameType };
         const encoded = encodeExportSelection(initialSelection);
         const initialAllianceFilter = getAccessibleAllianceIds(adminData, selectedGameType);
 
@@ -243,7 +177,6 @@ async function handleExportGameSelection(interaction) {
             interaction,
             lang,
             encoded,
-            allLabel,
             allLabel,
             allLabel,
             initialCount
@@ -304,7 +237,6 @@ async function handleStateFilterButton(interaction) {
             encodedSelection,
             displayLabels.stateDisplay,
             displayLabels.allianceDisplay,
-            displayLabels.furnaceDisplay,
             playerCount,
             lang.players.export.content.title.selectState,
             lang.players.export.content.description.selectState,
@@ -354,7 +286,6 @@ async function handleStateSelection(interaction) {
             newEncoded,
             displayLabels.stateDisplay,
             displayLabels.allianceDisplay,
-            displayLabels.furnaceDisplay,
             playerCount
         );
 
@@ -394,6 +325,7 @@ async function handleAllianceFilterButton(interaction) {
             lang: lang,
             labelFn: (alliance) => alliance.name,
             valueFn: (alliance) => alliance.id.toString(),
+            descriptionFn: (alliance) => formatAllianceStateDescription(alliance, lang),
             selectedValues: (currentSelection.allianceIds || []).map(id => id.toString()),
             allOption: {
                 label: lang.players.export.selectMenu.allianceFilter.all,
@@ -412,7 +344,6 @@ async function handleAllianceFilterButton(interaction) {
             encodedSelection,
             displayLabels.stateDisplay,
             displayLabels.allianceDisplay,
-            displayLabels.furnaceDisplay,
             playerCount,
             lang.players.export.content.title.selectAlliance,
             lang.players.export.content.description.selectAlliance,
@@ -461,7 +392,6 @@ async function handleAllianceSelection(interaction) {
             newEncoded,
             displayLabels.stateDisplay,
             displayLabels.allianceDisplay,
-            displayLabels.furnaceDisplay,
             playerCount
         );
 
@@ -472,115 +402,6 @@ async function handleAllianceSelection(interaction) {
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleAllianceSelection');
-    }
-}
-
-/**
- * Handle furnace filter button click
- */
-async function handleFurnaceFilterButton(interaction) {
-    const { lang, adminData } = getUserInfo(interaction.user.id);
-
-    try {
-        const parts = interaction.customId.split('_');
-        const userId = parts[3];
-        const encodedSelection = parts[4];
-
-        if (!(await assertUserMatches(interaction, userId, lang))) return;
-
-        const currentSelection = decodeExportSelection(encodedSelection);
-
-        const uniqueFurnaceLevels = getUniqueFurnaceLevels(adminData, currentSelection);
-        const fcMainLevels = getMainFurnaceLevels(uniqueFurnaceLevels);
-
-        const selectMenuComponents = createPaginatedSelectMenu({
-            items: fcMainLevels,
-            itemsPerPage: 24,
-            currentPage: 0,
-            customIdBase: 'export_furnace_select',
-            userId: userId,
-            encodedSelection: encodedSelection,
-            lang: lang,
-            labelFn: (level) => getFurnaceReadable(level, lang, currentSelection.gameType),
-            valueFn: (level) => level.toString(),
-            selectedValues: (currentSelection.furnaceLevels || []).map(l => l.toString()),
-            allOption: {
-                label: getExportFurnaceAllLabel(lang, currentSelection),
-                value: 'all'
-            },
-            feature: 'export_furnace',
-            placeholder: getExportFurnacePlaceholder(lang, currentSelection)
-        });
-
-        const playerCount = getFilteredPlayerCount(currentSelection, adminData);
-        const displayLabels = generateFilterDisplayLabels(currentSelection, lang);
-
-        const container = buildExportContainer(
-            interaction,
-            lang,
-            encodedSelection,
-            displayLabels.stateDisplay,
-            displayLabels.allianceDisplay,
-            displayLabels.furnaceDisplay,
-            playerCount,
-            getExportFurnaceTitle(lang, currentSelection),
-            getExportFurnaceDescription(lang, currentSelection),
-            selectMenuComponents
-        );
-
-        await interaction.update({
-            components: updateComponentsV2AfterSeparator(interaction, [container]),
-            flags: MessageFlags.IsComponentsV2
-        });
-
-    } catch (error) {
-        await handleError(interaction, lang, error, 'handleFurnaceFilterButton');
-    }
-}
-
-/**
- * Handle furnace selection from menu
- */
-async function handleFurnaceSelection(interaction) {
-    const { lang, adminData } = getUserInfo(interaction.user.id);
-
-    try {
-        const parts = interaction.customId.split('_');
-        const userId = parts[3];
-        const encodedSelection = parts[4];
-
-        if (!(await assertUserMatches(interaction, userId, lang))) return;
-
-        const currentSelection = decodeExportSelection(encodedSelection);
-        const selectedValues = interaction.values;
-
-        if (selectedValues.includes('all')) {
-            currentSelection.furnaceLevels = [];
-        } else {
-            currentSelection.furnaceLevels = selectedValues.map(v => parseInt(v, 10));
-        }
-
-        const newEncoded = encodeExportSelection(currentSelection);
-        const playerCount = getFilteredPlayerCount(currentSelection, adminData);
-        const displayLabels = generateFilterDisplayLabels(currentSelection, lang);
-
-        const container = buildExportContainer(
-            interaction,
-            lang,
-            newEncoded,
-            displayLabels.stateDisplay,
-            displayLabels.allianceDisplay,
-            displayLabels.furnaceDisplay,
-            playerCount
-        );
-
-        await interaction.update({
-            components: updateComponentsV2AfterSeparator(interaction, [container]),
-            flags: MessageFlags.IsComponentsV2
-        });
-
-    } catch (error) {
-        await handleError(interaction, lang, error, 'handleFurnaceSelection');
     }
 }
 
@@ -611,12 +432,10 @@ async function handleGenerate(interaction) {
         }
 
         // Generate CSV
-        const headers = ['Player ID', 'Alliance Name', 'Player Name', getExportSettlementLevelLabel(lang, currentSelection), 'State'];
+        const headers = ['Player ID', 'Alliance Name', 'Assigned State'];
         const rows = players.map(p => [
             p.fid,
             p.alliance_name || '',
-            p.nickname || '',
-            getFurnaceReadable(p.furnace_level, lang, currentSelection.gameType) || 0,
             p.state,
         ]);
 
@@ -716,6 +535,7 @@ async function handleAlliancePagination(interaction) {
         customIdBase: 'export_alliance_select',
         labelFn: (alliance) => alliance.name,
         valueFn: (alliance) => alliance.id.toString(),
+        descriptionFn: (alliance, selection, lang) => formatAllianceStateDescription(alliance, lang),
         getSelectedValues: (selection) => (selection.allianceIds || []).map(id => id.toString()),
         allOption: (lang) => ({
             label: lang.players.export.selectMenu.allianceFilter.all,
@@ -726,34 +546,6 @@ async function handleAlliancePagination(interaction) {
         headerTitle: (lang) => lang.players.export.content.title.selectAlliances,
         headerDesc: (lang) => lang.players.export.content.description.selectAlliances,
         errorContext: 'handleAlliancePagination'
-    };
-
-    await handleGenericPagination(interaction, paginationConfig);
-}
-
-/**
- * Handle pagination for furnace selection
- */
-async function handleFurnacePagination(interaction) {
-    const paginationConfig = {
-        getItems: (adminData, currentSelection) => {
-            const uniqueLevels = getUniqueFurnaceLevels(adminData, currentSelection);
-            return getMainFurnaceLevels(uniqueLevels);
-        },
-        itemsPerPage: 24,
-        customIdBase: 'export_furnace_select',
-        labelFn: (level, currentSelection, lang) => getFurnaceReadable(level, lang, currentSelection.gameType),
-        valueFn: (level) => level.toString(),
-        getSelectedValues: (selection) => (selection.furnaceLevels || []).map(l => l.toString()),
-        allOption: (lang, currentSelection) => ({
-            label: getExportFurnaceAllLabel(lang, currentSelection),
-            value: 'all'
-        }),
-        feature: 'export_furnace',
-        placeholder: (lang, currentSelection) => getExportFurnacePlaceholder(lang, currentSelection),
-        headerTitle: (lang, currentSelection) => getExportFurnaceTitle(lang, currentSelection),
-        headerDesc: (lang, currentSelection) => getExportFurnaceDescription(lang, currentSelection),
-        errorContext: 'handleFurnacePagination'
     };
 
     await handleGenericPagination(interaction, paginationConfig);
@@ -809,8 +601,7 @@ function getPlayersForExportSelection(currentSelection, adminData) {
     for (const [gameType, allianceIds] of groupedAllianceIds.entries()) {
         players.push(...playerQueries.getPlayersForExport({
             states: currentSelection.states && currentSelection.states.length > 0 ? currentSelection.states : undefined,
-            allianceIds,
-            furnaceLevels: currentSelection.furnaceLevels && currentSelection.furnaceLevels.length > 0 ? currentSelection.furnaceLevels : undefined
+            allianceIds
         }, gameType));
     }
 
@@ -850,7 +641,7 @@ function getFilteredPlayerCount(currentSelection, adminData) {
 
 /**
  * Create a single filter button
- * @param {string} filterType - Type of filter (state, alliance, furnace, generate)
+ * @param {string} filterType - Type of filter (state, alliance, generate)
  * @param {string} userId - User ID
  * @param {string} encodedSelection - Encoded selection string
  * @param {Object} lang - Language object
@@ -870,12 +661,6 @@ function createFilterButton(filterType, userId, encodedSelection, lang, disabled
             label: lang.players.export.buttons.alliance,
             style: ButtonStyle.Secondary,
             emoji: getComponentEmoji(getEmojiMapForUser(userId), '1001')
-        },
-        furnace: {
-            customId: `export_filter_furnace_${userId}_${encodedSelection}`,
-            label: getExportFurnaceButtonLabel(lang, decodeExportSelection(encodedSelection)),
-            style: ButtonStyle.Secondary,
-            emoji: getComponentEmoji(getEmojiMapForUser(userId), '1012')
         },
         generate: {
             customId: `export_generate_${userId}_${encodedSelection}`,
@@ -913,7 +698,6 @@ function createFilterButtons(userId, encodedSelection, lang, playerCount = 1) {
     return {
         state: createFilterButton('state', userId, encodedSelection, lang),
         alliance: createFilterButton('alliance', userId, encodedSelection, lang),
-        furnace: createFilterButton('furnace', userId, encodedSelection, lang),
         generate: createFilterButton('generate', userId, encodedSelection, lang, playerCount === 0)
     };
 }
@@ -931,7 +715,6 @@ function createFilterButtonRow(userId, encodedSelection, lang, playerCount = 1) 
     return new ActionRowBuilder().addComponents(
         buttons.state,
         buttons.alliance,
-        buttons.furnace,
         buttons.generate
     );
 }
@@ -940,7 +723,7 @@ function createFilterButtonRow(userId, encodedSelection, lang, playerCount = 1) 
  * Generate display labels for current filters
  * @param {Object} currentSelection - Current filter selection
  * @param {Object} lang - Language object
- * @returns {Object} Object with stateDisplay, allianceDisplay, furnaceDisplay
+ * @returns {Object} Object with stateDisplay and allianceDisplay
  */
 function generateFilterDisplayLabels(currentSelection, lang) {
     const allLabel = lang.players.export.content.all;
@@ -958,42 +741,7 @@ function generateFilterDisplayLabels(currentSelection, lang) {
             .join(', ')
         : allLabel;
 
-    // Furnace display
-    const furnaceDisplay = currentSelection.furnaceLevels && currentSelection.furnaceLevels.length > 0
-        ? (() => {
-            const rawLabels = currentSelection.furnaceLevels.map(l => getFurnaceReadable(l, lang, currentSelection.gameType));
-            const mainLabels = rawLabels.map(lbl => {
-                if (typeof lbl !== 'string') return String(lbl);
-                if (lbl.includes('-')) return lbl.split('-')[0].trim();
-                return lbl;
-            });
-            return [...new Set(mainLabels)].join(', ');
-        })()
-        : allLabel;
-
-    return { stateDisplay, allianceDisplay, furnaceDisplay };
-}
-
-/**
- * Get unique furnace levels available to the admin
- * @param {Object} adminData - Admin data
- * @returns {Array} Sorted array of unique furnace levels
- */
-function getUniqueFurnaceLevels(adminData, currentSelection = {}) {
-    const alliances = getFilteredAlliances(adminData, currentSelection.gameType);
-    const groupedAllianceIds = new Map();
-    for (const alliance of alliances) {
-        const existing = groupedAllianceIds.get(alliance.game_type) || [];
-        existing.push(alliance.id);
-        groupedAllianceIds.set(alliance.game_type, existing);
-    }
-
-    const furnaceLevels = new Set();
-    for (const [gameType, allianceIds] of groupedAllianceIds.entries()) {
-        playerQueries.getDistinctFurnaceLevels(allianceIds, gameType).forEach(level => furnaceLevels.add(level));
-    }
-
-    return [...furnaceLevels].sort((a, b) => a - b);
+    return { stateDisplay, allianceDisplay };
 }
 
 /**
@@ -1019,19 +767,6 @@ function getUniqueStates(adminData, currentSelection = {}) {
 }
 
 /**
- * Filter furnace levels to only main FC levels (FC 1, FC 2, etc.)
- * @param {Array} furnaceLevels - Array of furnace levels
- * @returns {Array} Filtered array of main FC levels
- */
-function getMainFurnaceLevels(furnaceLevels) {
-    return furnaceLevels.filter(level => {
-        if (!FURNACE_LEVEL_MAPPING[level]) return true; // include unmapped (includes 30)
-        const readable = FURNACE_LEVEL_MAPPING[level];
-        return (/^FC \d+$/.test(readable));
-    });
-}
-
-/**
  * Create select menu options for a list of items
  * @param {Array} items - Items to create options for
  * @param {Function} labelFn - Function to get label from item
@@ -1040,10 +775,11 @@ function getMainFurnaceLevels(furnaceLevels) {
  * @param {Object} allOption - Optional "All" option configuration
  * @returns {Array} Array of select menu options
  */
-function createSelectOptions(items, labelFn, valueFn, selectedValues = [], allOption = null) {
+function createSelectOptions(items, labelFn, valueFn, descriptionFn = null, selectedValues = [], allOption = null) {
     const options = items.map(item => ({
         label: labelFn(item),
         value: valueFn(item),
+        ...(descriptionFn ? { description: descriptionFn(item) } : {}),
         default: selectedValues.includes(valueFn(item))
     }));
 
@@ -1074,6 +810,7 @@ function createPaginatedSelectMenu(config) {
         lang,
         labelFn,
         valueFn,
+        descriptionFn,
         selectedValues,
         allOption,
         feature,
@@ -1085,7 +822,7 @@ function createPaginatedSelectMenu(config) {
     const endIndex = startIndex + itemsPerPage;
     const pageItems = items.slice(startIndex, endIndex);
 
-    const selectOptions = createSelectOptions(pageItems, labelFn, valueFn, selectedValues, allOption);
+    const selectOptions = createSelectOptions(pageItems, labelFn, valueFn, descriptionFn, selectedValues, allOption);
 
     const selectMenu = new StringSelectMenuBuilder()
         .setCustomId(`${customIdBase}_${userId}_${encodedSelection}_${currentPage}`)
@@ -1139,6 +876,9 @@ async function handleGenericPagination(interaction, config) {
             lang: lang,
             labelFn: (item) => config.labelFn(item, currentSelection, lang),
             valueFn: config.valueFn,
+            descriptionFn: config.descriptionFn
+                ? (item) => config.descriptionFn(item, currentSelection, lang)
+                : null,
             selectedValues: config.getSelectedValues(currentSelection),
             allOption: config.allOption(lang, currentSelection),
             feature: config.feature,
@@ -1156,7 +896,6 @@ async function handleGenericPagination(interaction, config) {
             encodedSelection,
             displayLabels.stateDisplay,
             displayLabels.allianceDisplay,
-            displayLabels.furnaceDisplay,
             playerCount,
             config.headerTitle(lang, currentSelection),
             config.headerDesc(lang, currentSelection),
@@ -1181,10 +920,7 @@ module.exports = {
     handleStateSelection,
     handleAllianceFilterButton,
     handleAllianceSelection,
-    handleFurnaceFilterButton,
-    handleFurnaceSelection,
     handleGenerate,
     handleStatePagination,
-    handleAlliancePagination,
-    handleFurnacePagination
+    handleAlliancePagination
 };

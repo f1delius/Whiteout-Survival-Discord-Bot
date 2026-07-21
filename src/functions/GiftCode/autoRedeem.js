@@ -3,6 +3,7 @@ const { allianceQueries } = require('../utility/database');
 const { parsePaginationCustomId, createUniversalPaginationButtons } = require('../Pagination/universalPagination');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator, getAlliancesForUserByGame, createGameSelectionComponents } = require('../utility/commonFunctions');
+const { formatAllianceStateDescription } = require('../Alliance/allianceStateDescription');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
@@ -154,7 +155,7 @@ async function displayToggleAutoRedeemPage(interaction, allAlliances, page, lang
     // Custom option mapper to show auto-redeem status
     const optionMapper = (alliance) => ({
         label: alliance.name,
-        description: lang.giftCode.autoRedeem.selectMenu.selectAlliances.description.replace('{priority}', alliance.priority).replace('{autoRedeemStatus}', alliance.auto_redeem ? lang.giftCode.autoRedeem.selectMenu.selectAlliances.enabled : lang.giftCode.autoRedeem.selectMenu.selectAlliances.disabled),
+        description: formatAllianceStateDescription(alliance, lang, lang.giftCode.autoRedeem.selectMenu.selectAlliances.description.replace('{priority}', alliance.priority).replace('{autoRedeemStatus}', alliance.auto_redeem ? lang.giftCode.autoRedeem.selectMenu.selectAlliances.enabled : lang.giftCode.autoRedeem.selectMenu.selectAlliances.disabled)),
         value: alliance.id.toString(),
         emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1001') // shield emoji
     });
