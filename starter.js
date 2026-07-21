@@ -301,6 +301,9 @@ function areNativeBinariesPresent(cwd) {
  * @returns {boolean} True if all dependencies are present
  */
 async function checkDependencies() {
+    removeObsoleteFiles(__dirname);
+    ensureNpmrc(__dirname);
+
     const packageJsonPath = path.join(__dirname, 'package.json');
     if (!fs.existsSync(packageJsonPath)) {
         console.error('[PREFLIGHT] package.json not found!');
@@ -1163,6 +1166,30 @@ function npmHeapMb() {
     return Math.max(64, Math.min(calculatedHeapMb, configuredCapMb));
 }
 
+const OBSOLETE_FILES = [
+    'src/commands/inspect.js',
+    'src/functions/Alliance/refreshAlliance.js',
+    'src/functions/Alliance/triggerRefresh.js',
+    'src/functions/Players/history.js',
+    'src/functions/Players/inspect.js',
+    'src/model/captcha_model.onnx',
+    'src/model/captcha_model_metadata.json'
+];
+
+function removeObsoleteFiles(rootDir) {
+    for (const relativePath of OBSOLETE_FILES) {
+        const filePath = path.join(rootDir, relativePath);
+        if (!fs.existsSync(filePath)) continue;
+
+        try {
+            fs.unlinkSync(filePath);
+            console.log(`[PREFLIGHT] Removed obsolete file: ${relativePath}`);
+        } catch (error) {
+            console.warn(`[PREFLIGHT] Could not remove obsolete file ${relativePath}: ${error.message}`);
+        }
+    }
+}
+
 /**
  * Returns true when the machine is memory-constrained (< 1 GB total).
  * Used to show an informational log message during install.
@@ -1202,9 +1229,14 @@ const REQUIRED_NPMRC_ENTRIES = {
     'fund': 'false',
     'progress': 'false',
     'prefer-offline': 'true',
-    'jobs': '1',
     'maxsockets': '1',
 };
+
+const OBSOLETE_NPMRC_KEYS = [
+    'onnxruntime-node-install',
+    'onnxruntime-node-install-cuda',
+    'jobs'
+];
 
 /**
  * Writes REQUIRED_NPMRC_ENTRIES into an .npmrc file, preserving existing keys.
@@ -1215,6 +1247,7 @@ function writeNpmrcEntries(npmrcPath) {
     if (fs.existsSync(npmrcPath)) {
         try { lines = fs.readFileSync(npmrcPath, 'utf8').split(/\r?\n/); } catch { /* ignore */ }
     }
+    lines = lines.filter(line => !OBSOLETE_NPMRC_KEYS.some(key => new RegExp(`^\\s*${key}\\s*=`, 'i').test(line)));
     for (const [key, value] of Object.entries(REQUIRED_NPMRC_ENTRIES)) {
         const pattern = new RegExp(`^\\s*${key}\\s*=`, 'i');
         const entry = `${key}=${value}`;
@@ -1295,7 +1328,6 @@ async function robustNpmInstall(cwd, context, { preferCleanInstall = false, isUp
     const npmEnv = {
         ...process.env,
         NODE_OPTIONS: `--max-old-space-size=${heapMb}`,
-        npm_config_jobs: '1',
         npm_config_maxsockets: '1',
         npm_config_progress: 'false',
         npm_config_fund: 'false',
@@ -1331,7 +1363,7 @@ async function robustNpmInstall(cwd, context, { preferCleanInstall = false, isUp
     }
 
     if (isLowMemoryEnvironment()) {
-        console.log(`${context} Low-memory machine detected (${totalMb} MB total, ${freeMb} MB free, npm heap: ${heapMb} MB, npm jobs: 1). Install may take longer, but it should use less RAM.`);
+        console.log(`${context} Low-memory machine detected (${totalMb} MB total, ${freeMb} MB free, npm heap: ${heapMb} MB). Install may take longer, but it should use less RAM.`);
     }
 
     // Track current command and flags — may switch from ci -> install on first failure
@@ -1342,7 +1374,7 @@ async function robustNpmInstall(cwd, context, { preferCleanInstall = false, isUp
     let installSucceeded = false;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            console.log(`${context} Running npm ${currentCommand} (attempt ${attempt}/${MAX_RETRIES}, heap: ${heapMb} MB, jobs: 1, maxsockets: 1)...`);
+            console.log(`${context} Running npm ${currentCommand} (attempt ${attempt}/${MAX_RETRIES}, heap: ${heapMb} MB, maxsockets: 1)...`);
             await spawnAsync('npm', currentFlags, { cwd, stdio: 'inherit', env: npmEnv });
             console.log(`${context} Dependencies installed successfully.`);
             installSucceeded = true;
