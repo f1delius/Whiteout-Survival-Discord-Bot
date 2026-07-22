@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Module = require('node:module');
 const { encodeData } = require('../src/functions/utility/apiClient');
-const { buildAutoSortPlan } = require('../src/functions/Alliance/autoSortPlan');
+const { buildAutoSortPlan, getMajority } = require('../src/functions/Alliance/autoSortPlan');
 const { formatAllianceStateDescription } = require('../src/functions/Alliance/allianceStateDescription');
 
 function loadRedeemFunctions() {
@@ -25,6 +25,49 @@ function loadRedeemFunctions() {
                 '../utility/apiConfig': { API_CONFIG: { RATE_LIMIT_DELAY: 60000, MAX_RETRY_CYCLES: 10 }, getApiConfig: () => ({}) },
                 '../utility/gameRuntime': { getDefaultGameType: () => 'wos' },
                 '../utility/apiClient': { nativePost: async () => ({}) }
+            };
+            if (Object.hasOwn(mocks, request)) return mocks[request];
+        }
+        return originalLoad.call(this, request, parent, isMain);
+    };
+
+    delete require.cache[modulePath];
+    try {
+        return require(modulePath);
+    } finally {
+        Module._load = originalLoad;
+        delete require.cache[modulePath];
+    }
+}
+
+function loadMigrationFunctions(users, calls) {
+    const modulePath = require.resolve('../src/functions/Settings/migration');
+    const originalLoad = Module._load;
+
+    class FakeDatabase {
+        prepare() {
+            return { all: () => users };
+        }
+
+        close() {
+            calls.closed = true;
+        }
+    }
+
+    Module._load = function loadMock(request, parent, isMain) {
+        if (parent?.filename === modulePath) {
+            const mocks = {
+                'discord.js': {},
+                'better-sqlite3': FakeDatabase,
+                '../utility/commonFunctions': {},
+                '../utility/emojis': {},
+                '../utility/database': {
+                    playerQueries: { addPlayer: (...args) => calls.players.push(args) },
+                    allianceQueries: { setAllianceState: (...args) => calls.states.push(args) }
+                },
+                '../Players/furnaceReadable': {},
+                '../utility/gameRuntime': { getDefaultGameType: () => 'wos' },
+                '../utility/gameProfiles': {}
             };
             if (Object.hasOwn(mocks, request)) return mocks[request];
         }
@@ -97,6 +140,17 @@ test('USER INFO ERROR reports wrong-state FIDs separately', () => {
     assert.equal(stats.failed, 1);
 });
 
+test('gift code validation only removes codes after a definitive inactive response', () => {
+    const { classifyGiftCodeValidationResult } = loadRedeemFunctions();
+
+    assert.equal(classifyGiftCodeValidationResult({ success: true, giftCodeActive: true }), 'active');
+    assert.equal(classifyGiftCodeValidationResult({ success: false, giftCodeActive: true, rateLimited: true }), 'retry');
+    assert.equal(classifyGiftCodeValidationResult({ success: false, giftCodeActive: true, wrongState: true }), 'retry');
+    assert.equal(classifyGiftCodeValidationResult({ success: false, giftCodeActive: false, status: 'NETWORK_ERROR' }), 'retry');
+    assert.equal(classifyGiftCodeValidationResult({ success: true, giftCodeActive: false, status: 'TIME ERROR' }), 'invalid');
+    assert.equal(classifyGiftCodeValidationResult(null), 'retry');
+});
+
 test('redeem creation silently skips an alliance without a valid state', async () => {
     const { createRedeemProcess } = loadRedeemFunctions();
     const result = await createRedeemProcess([
@@ -150,4 +204,33 @@ test('auto-sort moves minorities and creates numeric alliances for states with n
     assert.equal(plan.moves.find(move => move.player.fid === 3).targetAllianceId, 2);
     assert.equal(plan.moves.find(move => move.player.fid === 6).targetAllianceId, 1);
     assert.equal(plan.skipped.length, 1);
+});
+
+test('migration majority requires more than half of the imported player states', () => {
+    assert.deepEqual(
+        getMajority({ state: null }, [{ state: 437 }, { state: 437 }, { state: 12 }]),
+        { state: 437, count: 2, total: 3 }
+    );
+    assert.equal(getMajority({ state: null }, [{ state: 437 }, { state: 12 }]), null);
+});
+
+test('Python player migration imports kid as state and assigns only strict alliance majorities', async () => {
+    const calls = { players: [], states: [], closed: false };
+    const users = [
+        { fid: '1', kid: '437', alliance: '10' },
+        { fid: '2', kid: '437', alliance: '10' },
+        { fid: '3', kid: '12', alliance: '10' },
+        { fid: '4', kid: '20', alliance: '20' },
+        { fid: '5', kid: '21', alliance: '20' },
+        { fid: 'bad', kid: '437', alliance: '10' },
+        { fid: '6', kid: '437', alliance: '99' }
+    ];
+    const { migratePlayers } = loadMigrationFunctions(users, calls);
+
+    const count = await migratePlayers('users.sqlite', new Map([[10, 100], [20, 200]]), 'owner', 'ks');
+
+    assert.equal(count, 5);
+    assert.deepEqual(calls.players[0], [1, 437, 100, 'owner', 'ks']);
+    assert.deepEqual(calls.states, [[100, 437, 'ks']]);
+    assert.equal(calls.closed, true);
 });

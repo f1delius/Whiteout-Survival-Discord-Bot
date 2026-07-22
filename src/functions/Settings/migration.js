@@ -35,6 +35,7 @@ const {
 	db
 } = require('../utility/database');
 const { getSettlementName } = require('../Players/furnaceReadable');
+const { getMajority } = require('../Alliance/autoSortPlan');
 const { getActiveGameTypes, getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
 
@@ -1161,12 +1162,13 @@ async function migratePlayers(usersPath, allianceIdMap, ownerId, gameType = getD
 	const oldDb = new Database(usersPath, { readonly: true });
 
 	try {
-		const users = oldDb.prepare('SELECT * FROM users').all();
+		const users = oldDb.prepare('SELECT CAST(fid AS TEXT) AS fid, CAST(kid AS TEXT) AS kid, alliance FROM users').all();
+		const playersByAlliance = new Map();
 		let count = 0;
 
 		for (const old of users) {
 			// Parse alliance ID (stored as string in old DB)
-			const oldAllianceId = parseInt(old.alliance);
+			const oldAllianceId = Number(old.alliance);
 			const newAllianceId = allianceIdMap.get(oldAllianceId);
 
 			// Skip if alliance doesn't exist in new DB
@@ -1175,19 +1177,36 @@ async function migratePlayers(usersPath, allianceIdMap, ownerId, gameType = getD
 				continue;
 			}
 
+			const fid = Number(old.fid);
+			const state = Number(old.kid);
+			if (!Number.isSafeInteger(fid) || fid <= 0 || !Number.isSafeInteger(state) || state <= 0) {
+				console.warn(`Skipping player ${old.fid}: invalid ID or state`);
+				continue;
+			}
+
 			try {
 				playerQueries.addPlayer(
-					old.fid,
-					old.kid,
+					fid,
+					state,
 					newAllianceId,
 					ownerId,
 					gameType
 				);
+				if (!playersByAlliance.has(newAllianceId)) playersByAlliance.set(newAllianceId, []);
+				playersByAlliance.get(newAllianceId).push({ state });
 				count++;
 			} catch (e) {
-				// Player might already exist, skip
-				console.warn(`Skipping duplicate player ${old.fid}`);
+				if (e.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+					console.warn(`Skipping duplicate player ${fid}`);
+					continue;
+				}
+				throw new Error(`Failed to migrate player ${fid}: ${e.message}`, { cause: e });
 			}
+		}
+
+		for (const [allianceId, players] of playersByAlliance) {
+			const majority = getMajority({ state: null }, players);
+			if (majority) allianceQueries.setAllianceState(allianceId, majority.state, gameType);
 		}
 
 		return count;
@@ -1636,5 +1655,6 @@ module.exports = {
 	handleDBMigrationConfirm,
 	handleDBMigrationCancel,
 	handleDBMigrationSelect,
-	handleDBMigrationGameSelect
+	handleDBMigrationGameSelect,
+	migratePlayers
 };

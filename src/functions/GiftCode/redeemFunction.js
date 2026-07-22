@@ -187,6 +187,13 @@ function resolveRedeemApiConfig(gameType = getDefaultGameType()) {
     return getApiConfig(gameType);
 }
 
+function classifyGiftCodeValidationResult(result) {
+    if (!result || result.rateLimited || result.retry || result.wrongState || result.playerNotExist) return 'retry';
+    if (result.giftCodeActive === true) return 'active';
+    if (result.success === true && result.giftCodeActive === false) return 'invalid';
+    return 'retry';
+}
+
 /**
  * Pre-filters players who have already redeemed a gift code
  * Returns items to process and pre-filtered results
@@ -932,15 +939,6 @@ async function executeRedeemOperation(processId) {
             if (item.status === 'redeem' && ABORTABLE_STATUSES.has(outcome.status)) {
                 abortReason = outcome.status;
                 console.warn(`Stopping redeem process ${processId} due to status "${outcome.status}"`);
-
-                if (outcome.status === 'USED' || outcome.status === 'TIME ERROR' || outcome.status === 'CDK NOT FOUND') {
-                    try {
-                        giftCodeQueries.removeGiftCode(item.giftCode, redeemContext.gameType);
-                    } catch (updateError) {
-                        await handleError(null, null, updateError, 'removeInvalidGiftCode', false);
-                    }
-                }
-
                 break;
             }
 
@@ -1621,6 +1619,7 @@ module.exports = {
     redeemGiftCodeForPlayer,
     makeGiftCodeAPIRequest,
     analyzeAPIResponse,
+    classifyGiftCodeValidationResult,
     computeRedeemStats,
     handleVipTracking
 };

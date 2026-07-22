@@ -151,7 +151,7 @@ async function handleTypeSelection(interaction) {
         }
 
         // Show notification selection with pagination
-        await showNotificationSelection(interaction, notifications, 1, type, lang);
+        await showNotificationSelection(interaction, notifications, 0, type, lang);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleTypeSelection');
@@ -163,7 +163,7 @@ async function handleTypeSelection(interaction) {
  */
 async function showNotificationSelection(interaction, notifications, page, type, lang) {
     const totalPages = Math.ceil(notifications.length / ITEMS_PER_PAGE);
-    const startIndex = (page - 1) * ITEMS_PER_PAGE;
+    const startIndex = page * ITEMS_PER_PAGE;
     const endIndex = startIndex + ITEMS_PER_PAGE;
     const pageNotifications = notifications.slice(startIndex, endIndex);
 

@@ -72,4 +72,4 @@ function buildAutoSortPlan(alliances, players) {
     };
 }
 
-module.exports = { buildAutoSortPlan };
+module.exports = { buildAutoSortPlan, getMajority };

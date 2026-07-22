@@ -2,7 +2,7 @@ const fetch = require('node-fetch');
 const http = require('http');
 const { EmbedBuilder } = require('discord.js');
 const { giftCodeQueries, giftCodeChannelQueries, adminQueries, allianceQueries, playerQueries, systemLogQueries } = require('../utility/database');
-const { createRedeemProcess } = require('./redeemFunction');
+const { createRedeemProcess, classifyGiftCodeValidationResult } = require('./redeemFunction');
 const languages = require('../../i18n');
 const { getUserInfo, handleError } = require('../utility/commonFunctions');
 const { replaceEmojiPlaceholders, getGlobalEmojiMap } = require('../utility/emojis');
@@ -225,26 +225,23 @@ class GiftCodeAPI {
                         gameType: this.gameType
                     });
 
-                    // Check giftCodeActive instead of success
-                    // success=true just means we got a definitive answer (including TIME ERROR, USED, etc.)
-                    // giftCodeActive=false means the code is expired/invalid and cannot be redeemed
-                    if (validationResult?.success && validationResult.results?.[0]?.giftCodeActive === true) {
+                    const result = validationResult?.results?.[0];
+                    const disposition = classifyGiftCodeValidationResult(result);
+
+                    if (disposition === 'active') {
                         // Code is still valid and can be used - update last_validated timestamp
                         giftCodeQueries.updateLastValidated(codeData.gift_code, this.gameType);
-                    } else {
-                        // Code is now invalid/expired/used - delete it and its usage history, then remove from API
-                        // This allows the code to be re-added and users to redeem it again if it becomes active
-                        const message = validationResult?.message || validationResult?.results?.[0]?.message || 'Unknown error';
-                        const status = validationResult?.results?.[0]?.status || 'UNKNOWN';
-                        giftCodeQueries.removeGiftCode(codeData.gift_code, this.gameType);
-
-                        // Remove from API
-                        try {
-                            await this.removeGiftcode(codeData.gift_code, true);
-                        } catch (removeError) {
-                            console.error(`Failed to remove invalid code ${codeData.gift_code} from API:`, removeError);
+                    } else if (disposition === 'invalid') {
+                        // Keep the local row until central removal succeeds. Otherwise the next
+                        // sync rediscovers it as new and sends duplicate notifications.
+                        const removedFromApi = await this.removeGiftcode(codeData.gift_code, true);
+                        if (removedFromApi) {
+                            giftCodeQueries.removeGiftCode(codeData.gift_code, this.gameType);
+                        } else {
+                            console.warn(`Keeping invalid code ${codeData.gift_code} locally because API removal failed`);
                         }
-
+                    } else if (isDevMode) {
+                        console.warn(`Validation for ${codeData.gift_code} was inconclusive; keeping it for retry`);
                     }
                 } catch (error) {
                     await handleError(null, null, error, 'validateExistingCodes', false);
@@ -382,7 +379,7 @@ class GiftCodeAPI {
                         }
                     }
 
-                    // Add new codes directly to database (validation happens during 24h revalidation and redeem)
+                    // Validate API codes before they can be stored, announced, or auto-redeemed.
                     if (newCodesToValidate.length > 0) {
                         const newCodesForAutoRedeem = [];
 
@@ -392,11 +389,33 @@ class GiftCodeAPI {
                                 const existing = giftCodeQueries.getGiftCode(code, this.gameType);
                                 if (existing) continue;
 
+                                const validationResult = await createRedeemProcess([
+                                    {
+                                        id: null,
+                                        giftCode: code,
+                                        status: 'validation'
+                                    }
+                                ], {
+                                    adminId: 'SYSTEM_API_VALIDATION',
+                                    gameType: this.gameType
+                                });
+                                const result = validationResult?.results?.[0];
+                                const disposition = classifyGiftCodeValidationResult(result);
+
+                                if (disposition === 'invalid') {
+                                    if (await this.removeGiftcode(code, true)) {
+                                        giftCodeQueries.removeGiftCode(code, this.gameType);
+                                    }
+                                    continue;
+                                }
+                                if (disposition !== 'active') continue;
+
+                                const isVipCode = result?.is_vip || false;
                                 // addGiftCode(giftCode, status, addedBy, source, apiPushed, isVip)
-                                giftCodeQueries.addGiftCode(code, 'active', 'system', 'api', true, false, this.gameType);
-                                newCodesForAutoRedeem.push({ code, date, isVipCode: false });
-                            } catch (dbError) {
-                                // UNIQUE constraint or other DB error — skip silently
+                                giftCodeQueries.addGiftCode(code, 'active', 'system', 'api', true, isVipCode, this.gameType);
+                                newCodesForAutoRedeem.push({ code, date, isVipCode });
+                            } catch (error) {
+                                await handleError(null, null, error, `validateApiGiftCode_${code}`, false);
                                 continue;
                             }
                         }
@@ -593,13 +612,6 @@ class GiftCodeAPI {
                 return false;
             }
 
-            // Check if code exists in API
-            const existsInAPI = await this.checkGiftcode(giftcode);
-            if (!existsInAPI) {
-                giftCodeQueries.updateGiftCodeStatus('invalid', giftcode, this.gameType);
-                return true;
-            }
-
             const headers = {
                 'Content-Type': 'application/json',
                 'X-API-Key': this.apiKey
@@ -616,6 +628,11 @@ class GiftCodeAPI {
                 });
 
                 const responseText = await response.text();
+
+                if (response.status === 404) {
+                    giftCodeQueries.updateGiftCodeStatus('invalid', giftcode, this.gameType);
+                    return true;
+                }
 
                 if (response.status === 200) {
                     try {
