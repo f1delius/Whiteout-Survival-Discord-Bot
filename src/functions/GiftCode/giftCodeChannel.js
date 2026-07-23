@@ -12,7 +12,7 @@ const {
     SeparatorSpacingSize
 } = require('discord.js');
 const { giftCodeChannelQueries, giftCodeQueries, allianceQueries, playerQueries, systemLogQueries, idChannelQueries } = require('../utility/database');
-const { createRedeemProcess } = require('./redeemFunction');
+const { createRedeemProcess, classifyGiftCodeValidationResult } = require('./redeemFunction');
 const { parseGameScopedGiftCode } = require('./gameScopedGiftCode');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator, createGameSelectionComponents } = require('../utility/commonFunctions');
@@ -644,10 +644,14 @@ async function handleGiftCodeChannelMessage(message) {
             gameType
         });
 
-        if (!validationOutcome?.success) {
+        const validationDisposition = classifyGiftCodeValidationResult(validationOutcome?.results?.[0]);
+        if (validationDisposition !== 'active') {
             await message.reactions.cache.filter(r => r.me).first()?.remove();
             await message.react(emojiMap['1051'] || '❌');
-            await message.reply(lang.giftCode.giftCodeChannel.messages.invalid.replace('{giftCode}', `\`${giftCode}\``));
+            const validationMessage = validationDisposition === 'invalid'
+                ? lang.giftCode.giftCodeChannel.messages.invalid.replace('{giftCode}', `\`${giftCode}\``)
+                : lang.giftCode.giftCodeChannel.messages.validationUnavailable;
+            await message.reply(validationMessage);
             return;
         }
 

@@ -770,7 +770,8 @@
                 "noAvailableAlliancesForGame": "{emoji.1050} Aucune alliance avec des joueurs trouvée pour ce jeu.",
                 "invalidPlayerIds": "{emoji.1050} IDs de joueurs invalides. Entrez uniquement des IDs numériques séparés par des virgules.",
                 "noPlayersInAlliance": "{emoji.1050} L'alliance sélectionnée n'a pas de joueurs à supprimer.",
-                "playersNotFound": "{emoji.1050} Joueur(s) soumis introuvable(s) dans la base de données des joueurs."
+                "playersNotFound": "{emoji.1050} Joueur(s) soumis introuvable(s) dans la base de données des joueurs.",
+                "sessionExpired": "{emoji.1050} Cette session de suppression a expiré. Recommencez la suppression."
             }
         },
         "export": {
@@ -887,7 +888,8 @@
                 "invalidGiftCode": "{emoji.1050} Code cadeau invalide. Entrez un code valide.",
                 "giftCodeExists": "{emoji.1050} Ce code cadeau existe déjà.",
                 "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
-                "gameTypeMismatch": "{emoji.1050} Le jeu sélectionné ne correspond pas au préfixe du code cadeau."
+                "gameTypeMismatch": "{emoji.1050} Le jeu sélectionné ne correspond pas au préfixe du code cadeau.",
+                "validationUnavailable": "{emoji.1050} La validation du code cadeau n'a pas pu être effectuée. Définissez un ID de test valide avec le bon État, puis réessayez."
             }
         },
         "giftSetTestId": {
@@ -898,7 +900,7 @@
                     "name": "- {emoji.1026} **Infos Joueur**",
                     "value": "  - **ID :** {playerId}\n  - **État assigné :** {state}"
                 },
-                "processingMessage": "Vérification de l'ID enregistré et de l'état de l'alliance..."
+                "processingMessage": "Enregistrement de l'ID de test et de l'État..."
             },
             "buttons": {
                 "setTestId": "Définir ID"
@@ -911,10 +913,15 @@
                 "testIdInput": {
                     "label": "ID du joueur",
                     "placeholder": "Entrez l'ID du joueur à définir comme ID de test"
+                },
+                "stateInput": {
+                    "label": "État",
+                    "placeholder": "Entrez l'État du joueur"
                 }
             },
             "errors": {
                 "invalidTestId": "{emoji.1050} ID de test invalide. Entrez un ID valide.",
+                "invalidState": "{emoji.1050} État invalide. Entrez un nombre entier positif.",
                 "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide."
             }
         },
@@ -1100,6 +1107,7 @@
                 "added": "{emoji.1004} Le code cadeau **{giftCode}** a été validé et ajouté !",
                 "alreadyExists": "{emoji.1017} Le code cadeau **{giftCode}** existe déjà dans la base de données.",
                 "invalid": "{emoji.1050} Le code cadeau **{giftCode}** est invalide ou expiré.",
+                "validationUnavailable": "{emoji.1050} La validation du code cadeau n'a pas pu être effectuée. Un administrateur doit définir un ID de test valide avec le bon État.",
                 "redeemFailed": "{emoji.1050} Code cadeau ajouté, mais le remboursement automatique a échoué. Vérifiez les processus."
             },
             "errors": {

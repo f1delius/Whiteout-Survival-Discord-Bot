@@ -770,7 +770,8 @@
                 "noAvailableAlliancesForGame": "{emoji.1050} No alliances with players found for that game.",
                 "invalidPlayerIds": "{emoji.1050} Invalid IDs. Enter only numeric IDs separated by commas.",
                 "noPlayersInAlliance": "{emoji.1050} No players in this alliance to remove.",
-                "playersNotFound": "{emoji.1050} Player(s) not found in the database."
+                "playersNotFound": "{emoji.1050} Player(s) not found in the database.",
+                "sessionExpired": "{emoji.1050} This removal session expired. Start the removal again."
             }
         },
         "export": {
@@ -887,7 +888,8 @@
                 "invalidGiftCode": "{emoji.1050} Invalid gift code. Try a different one.",
                 "giftCodeExists": "{emoji.1050} This gift code already exists.",
                 "invalidGameType": "{emoji.1050} Pick a valid game first.",
-                "gameTypeMismatch": "{emoji.1050} The selected game does not match the gift code prefix."
+                "gameTypeMismatch": "{emoji.1050} The selected game does not match the gift code prefix.",
+                "validationUnavailable": "{emoji.1050} Gift code validation could not be completed. Set a valid test ID with the correct state, then try again."
             }
         },
         "giftSetTestId": {
@@ -898,7 +900,7 @@
                     "name": "- {emoji.1026} **Player Info**",
                     "value": "  - **ID:** {playerId}\n  - **Assigned State:** {state}"
                 },
-                "processingMessage": "Checking the saved ID and alliance state..."
+                "processingMessage": "Saving the test ID and state..."
             },
             "buttons": {
                 "setTestId": "Set Test ID"
@@ -911,10 +913,15 @@
                 "testIdInput": {
                     "label": "Player ID",
                     "placeholder": "Enter the player ID to set as test ID"
+                },
+                "stateInput": {
+                    "label": "State",
+                    "placeholder": "Enter the player's state"
                 }
             },
             "errors": {
                 "invalidTestId": "{emoji.1050} Invalid Test ID. Enter a valid player ID.",
+                "invalidState": "{emoji.1050} Invalid state. Enter a positive whole number.",
                 "invalidGameType": "{emoji.1050} Pick a valid game first."
             }
         },
@@ -1100,6 +1107,7 @@
                 "added": "{emoji.1004} Gift code **{giftCode}** validated and added!",
                 "alreadyExists": "{emoji.1017} Gift code **{giftCode}** already exists.",
                 "invalid": "{emoji.1050} Gift code **{giftCode}** is invalid or expired.",
+                "validationUnavailable": "{emoji.1050} Gift code validation could not be completed. An administrator must set a valid test ID with the correct state.",
                 "redeemFailed": "{emoji.1050} Code added, but auto-redeem failed. Check processes."
             },
             "errors": {

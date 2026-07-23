@@ -71,7 +71,7 @@ async function handleToggleAutoRedeemButton(interaction) {
 
         if (!allAlliances || allAlliances.length === 0) {
             return await interaction.reply({
-                content: lang.alliance.errors.noAlliances,
+                content: lang.giftCode.autoRedeem.errors.noAlliances,
                 ephemeral: true
             });
         }

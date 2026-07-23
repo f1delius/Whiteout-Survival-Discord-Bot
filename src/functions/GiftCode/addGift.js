@@ -1,6 +1,6 @@
 const { ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const { giftCodeQueries, allianceQueries, playerQueries } = require('../utility/database');
-const { createRedeemProcess } = require('./redeemFunction');
+const { createRedeemProcess, classifyGiftCodeValidationResult } = require('./redeemFunction');
 const { parseGameScopedGiftCode } = require('./gameScopedGiftCode');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
@@ -245,6 +245,24 @@ async function handleGiftCodeModal(interaction) {
             } catch (dbError) {
                 await handleError(interaction, lang, dbError, 'handleGiftCodeModal_dbError');
             }
+        } else {
+            const validationResult = validationOutcome?.results?.[0];
+            const disposition = classifyGiftCodeValidationResult(validationResult);
+            const errorMessage = disposition === 'invalid'
+                ? lang.giftCode.addGiftCode.errors.invalidGiftCode
+                : lang.giftCode.addGiftCode.errors.validationUnavailable;
+            const errorContainer = [
+                new ContainerBuilder()
+                    .setAccentColor(0xe74c3c)
+                    .addTextDisplayComponents(
+                        new TextDisplayBuilder().setContent(errorMessage)
+                    )
+            ];
+
+            await interaction.editReply({
+                components: updateComponentsV2AfterSeparator(interaction, errorContainer),
+                flags: MessageFlags.IsComponentsV2
+            });
         }
     } catch (error) {
         await handleError(interaction, lang, error, 'handleGiftCodeModal');

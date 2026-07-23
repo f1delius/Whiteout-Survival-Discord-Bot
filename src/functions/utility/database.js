@@ -251,6 +251,7 @@ const schemas = {
             game_type TEXT NOT NULL DEFAULT 'wos',
             id INTEGER NOT NULL CHECK (id <= 2),
             fid INTEGER NOT NULL,
+            state INTEGER,
             is_default BOOLEAN DEFAULT 0,
             set_by TEXT,
             set_at TEXT,
@@ -558,6 +559,7 @@ try {
         const testIdCols = db.prepare('PRAGMA table_info(test_ids)').all();
         const hasTestIdGameType = testIdCols.some(c => c.name === 'game_type');
         const hasTestIdCompositePk = testIdCols.filter(c => c.pk > 0).length > 1;
+        const hasTestIdState = testIdCols.some(c => c.name === 'state');
         if (!hasTestIdGameType || !hasTestIdCompositePk) {
             db.exec(`
                 ALTER TABLE test_ids RENAME TO test_ids_legacy;
@@ -565,16 +567,19 @@ try {
                     game_type TEXT NOT NULL DEFAULT 'wos',
                     id INTEGER NOT NULL CHECK (id <= 2),
                     fid INTEGER NOT NULL,
+                    state INTEGER,
                     is_default BOOLEAN DEFAULT 0,
                     set_by TEXT,
                     set_at TEXT,
                     PRIMARY KEY (game_type, id)
                 );
-                INSERT INTO test_ids (game_type, id, fid, is_default, set_by, set_at)
-                SELECT 'wos', id, fid, is_default, set_by, set_at
+                INSERT INTO test_ids (game_type, id, fid, state, is_default, set_by, set_at)
+                SELECT 'wos', id, fid, NULL, is_default, set_by, set_at
                 FROM test_ids_legacy;
                 DROP TABLE test_ids_legacy;
             `);
+        } else if (!hasTestIdState) {
+            db.exec('ALTER TABLE test_ids ADD COLUMN state INTEGER');
         }
     } catch (e) {
         console.error('Database migration: failed to migrate test_ids to game-scoped schema', e);
@@ -710,11 +715,15 @@ try {
 
     // Initialize default test IDs
     ['wos', 'ks'].forEach((gameType) => {
-        db.prepare(`INSERT OR IGNORE INTO test_ids (game_type, id, fid, is_default, set_by, set_at) VALUES (?, 1, 40393986, 1, 'system', ?)`)
-            .run(gameType, getCurrentTimestamp());
-        db.prepare(`INSERT OR IGNORE INTO test_ids (game_type, id, fid, is_default, set_by, set_at) VALUES (?, 2, 40393986, 0, NULL, NULL)`)
-            .run(gameType);
+        const defaultFid = gameType === 'ks' ? 47576897 : 40393986;
+        const defaultState = gameType === 'ks' ? 259 : 437;
+        db.prepare(`INSERT OR IGNORE INTO test_ids (game_type, id, fid, state, is_default, set_by, set_at) VALUES (?, 1, ?, ?, 1, 'system', ?)`)
+            .run(gameType, defaultFid, defaultState, getCurrentTimestamp());
+        db.prepare(`INSERT OR IGNORE INTO test_ids (game_type, id, fid, state, is_default, set_by, set_at) VALUES (?, 2, ?, NULL, 0, NULL, NULL)`)
+            .run(gameType, defaultFid);
     });
+    db.prepare(`UPDATE test_ids SET state = 437 WHERE game_type = 'wos' AND id = 1 AND set_by = 'system'`).run();
+    db.prepare(`UPDATE test_ids SET fid = 47576897, state = 259 WHERE game_type = 'ks' AND id = 1 AND set_by = 'system'`).run();
 
     // Ensure `feature_access` column exists in settings (safe migration)
     try {
@@ -1591,7 +1600,7 @@ const testIdQueries = {
     getAllTestIds: db.prepare('SELECT * FROM test_ids WHERE game_type = ? ORDER BY id'),
 
     // Update user test ID (id = 2)
-    updateUserTestId: db.prepare('UPDATE test_ids SET fid = ?, set_by = ?, set_at = ? WHERE game_type = ? AND id = 2')
+    updateUserTestId: db.prepare('UPDATE test_ids SET fid = ?, state = ?, set_by = ?, set_at = ? WHERE game_type = ? AND id = 2')
 };
 
 // Settings queries
@@ -1985,7 +1994,7 @@ module.exports = {
         getDefaultTestId: (gameType = getDefaultGameType()) => testIdQueries.getDefaultTestId.get(resolveGameType(gameType)),
         getUserTestId: (gameType = getDefaultGameType()) => testIdQueries.getUserTestId.get(resolveGameType(gameType)),
         getAllTestIds: (gameType = getDefaultGameType()) => testIdQueries.getAllTestIds.all(resolveGameType(gameType)),
-        updateUserTestId: (fid, setBy, gameType = getDefaultGameType()) => testIdQueries.updateUserTestId.run(fid, setBy, getCurrentTimestamp(), resolveGameType(gameType))
+        updateUserTestId: (fid, state, setBy, gameType = getDefaultGameType()) => testIdQueries.updateUserTestId.run(fid, state, setBy, getCurrentTimestamp(), resolveGameType(gameType))
     },
     settingsQueries,
     migrationQueries,

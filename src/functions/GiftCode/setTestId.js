@@ -1,5 +1,5 @@
 const { ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
-const { adminQueries, testIdQueries, systemLogQueries, playerQueries, allianceQueries } = require('../utility/database');
+const { testIdQueries, systemLogQueries } = require('../utility/database');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
 const { getComponentEmoji, getEmojiMapForUser } = require('../utility/emojis');
@@ -12,7 +12,7 @@ function buildSetTestIdModal(userId, lang = {}) {
         .setTitle(lang.giftCode.giftSetTestId.modal.title);
 
     const selectedGameType = getDefaultGameType();
-    const currentTestId = getTestIdForValidation(selectedGameType);
+    const currentTestId = getTestIdRecordForValidation(selectedGameType);
 
     if (isMultiGameModeEnabled()) {
         const gameTypeSelect = new StringSelectMenuBuilder()
@@ -47,7 +47,7 @@ function buildSetTestIdModal(userId, lang = {}) {
         .setRequired(true);
 
     if (!isMultiGameModeEnabled()) {
-        testIdInput.setValue(String(currentTestId));
+        testIdInput.setValue(String(currentTestId?.fid || ''));
     }
 
     const testIdLabel = new LabelBuilder()
@@ -55,6 +55,24 @@ function buildSetTestIdModal(userId, lang = {}) {
         .setTextInputComponent(testIdInput);
 
     modal.addLabelComponents(testIdLabel);
+
+    const stateInput = new TextInputBuilder()
+        .setCustomId('test_id_state')
+        .setPlaceholder(lang.giftCode.giftSetTestId.modal.stateInput.placeholder)
+        .setStyle(TextInputStyle.Short)
+        .setMinLength(1)
+        .setMaxLength(10)
+        .setRequired(true);
+
+    if (!isMultiGameModeEnabled() && currentTestId?.state) {
+        stateInput.setValue(String(currentTestId.state));
+    }
+
+    const stateLabel = new LabelBuilder()
+        .setLabel(lang.giftCode.giftSetTestId.modal.stateInput.label)
+        .setTextInputComponent(stateInput);
+
+    modal.addLabelComponents(stateLabel);
 
     return modal;
 }
@@ -144,11 +162,18 @@ async function handleTestIdModal(interaction) {
         // Get the test ID value
         const testIdValue = interaction.fields.getTextInputValue('test_id_value').trim();
 
-        // Validate it's a number
-        const fid = parseInt(testIdValue);
-        if (isNaN(fid) || fid <= 0) {
+        const fid = Number(testIdValue);
+        if (!Number.isSafeInteger(fid) || fid <= 0) {
             return await interaction.reply({
                 content: lang.giftCode.giftSetTestId.errors.invalidTestId,
+                ephemeral: true
+            });
+        }
+
+        const state = Number(interaction.fields.getTextInputValue('test_id_state').trim());
+        if (!Number.isSafeInteger(state) || state <= 0) {
+            return await interaction.reply({
+                content: lang.giftCode.giftSetTestId.errors.invalidState,
                 ephemeral: true
             });
         }
@@ -172,34 +197,7 @@ async function handleTestIdModal(interaction) {
             flags: MessageFlags.IsComponentsV2
         });
 
-        // The games no longer expose player profiles. The test ID must be an
-        // existing local player so its alliance supplies the required state.
-        const playerData = playerQueries.getPlayer(fid, gameType);
-        const alliance = playerData
-            ? allianceQueries.getAllianceById(playerData.alliance_id, gameType)
-            : null;
-
-        if (!playerData || !alliance || !Number.isSafeInteger(alliance.state) || alliance.state <= 0) {
-            const containerError = [
-                new ContainerBuilder()
-                    .setAccentColor(0xe74c3c) // red
-                    .addTextDisplayComponents(
-                        new TextDisplayBuilder().setContent(
-                            `${lang.giftCode.giftSetTestId.errors.invalidTestId}`
-                        )
-                    )
-            ];
-
-            const contentError = updateComponentsV2AfterSeparator(interaction, containerError);
-
-            return await interaction.editReply({
-                components: contentError,
-                flags: MessageFlags.IsComponentsV2
-            });
-        }
-
-        // Valid player ID - update the database
-        testIdQueries.updateUserTestId(fid, interaction.user.id, gameType);
+        testIdQueries.updateUserTestId(fid, state, interaction.user.id, gameType);
 
         // Log the update
         systemLogQueries.addLog(
@@ -208,7 +206,7 @@ async function handleTestIdModal(interaction) {
             JSON.stringify({
                 new_fid: fid,
                 game_type: gameType,
-                state: alliance.state,
+                state,
                 updated_by: interaction.user.id,
                 updated_by_tag: interaction.user.tag
             })
@@ -224,7 +222,7 @@ async function handleTestIdModal(interaction) {
                         `\n${lang.giftCode.giftSetTestId.content.playerInfoField.name}` +
                         `\n${lang.giftCode.giftSetTestId.content.playerInfoField.value}`
                             .replace('{playerId}', fid)
-                            .replace('{state}', alliance.state)
+                            .replace('{state}', state)
                     )
                 )
         ];
@@ -247,34 +245,36 @@ async function handleTestIdModal(interaction) {
  * Tries user-set ID first, falls back to default
  * @returns {number} FID to use for testing
  */
+function getTestIdRecordForValidation(gameType) {
+    const userTestId = testIdQueries.getUserTestId(gameType);
+    if (userTestId?.set_by) return userTestId;
+    return testIdQueries.getDefaultTestId(gameType);
+}
+
 function getTestIdForValidation(gameType) {
     try {
-        const userTestId = testIdQueries.getUserTestId(gameType);
-
-        // If user has set a test ID, use it
-        if (userTestId && userTestId.set_by) {
-            return userTestId.fid;
-        }
-
-        // Otherwise use default
-        const defaultTestId = testIdQueries.getDefaultTestId(gameType);
-        return defaultTestId.fid;
+        return getTestIdRecordForValidation(gameType)?.fid
+            || (gameType === 'ks' ? 47576897 : 40393986);
     } catch (error) {
         handleError(null, null, error, 'getTestIdForValidation', false);
         // Return hard-coded default as last resort
-        return gameType === 'ks' ? 103893494 : 40393986;
+        return gameType === 'ks' ? 47576897 : 40393986;
     }
 }
 
 function getTestPlayerForValidation(gameType) {
-    const fid = getTestIdForValidation(gameType);
-    const player = playerQueries.getPlayer(fid, gameType);
-    if (!player) return null;
+    try {
+        const testId = getTestIdRecordForValidation(gameType);
+        if (!testId?.fid) return null;
 
-    const alliance = allianceQueries.getAllianceById(player.alliance_id, gameType);
-    if (!alliance || !Number.isSafeInteger(alliance.state) || alliance.state <= 0) return null;
+        const state = Number(testId.state);
 
-    return { fid, state: alliance.state };
+        if (!Number.isSafeInteger(state) || state <= 0) return null;
+        return { fid: testId.fid, state };
+    } catch (error) {
+        handleError(null, null, error, 'getTestPlayerForValidation', false);
+        return null;
+    }
 }
 
 module.exports = {

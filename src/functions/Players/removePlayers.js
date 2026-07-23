@@ -32,7 +32,7 @@ function buildPlayerCountMap(alliances) {
 }
 
 function createRemovePlayersSessionToken() {
-    return randomBytes(6).toString('base64url');
+    return randomBytes(6).toString('hex');
 }
 
 function setRemovePlayersSession(client, userId, sessionData) {
@@ -591,7 +591,7 @@ async function handleRemovePlayersConfirm(interaction) {
         const session = getRemovePlayersSession(interaction.client, interaction.user.id, sessionToken);
         if (!session?.players?.length || !session.allianceId) {
             return await interaction.reply({
-                content: lang.common.error,
+                content: lang.players.removePlayer.errors.sessionExpired,
                 ephemeral: true
             });
         }
@@ -603,7 +603,7 @@ async function handleRemovePlayersConfirm(interaction) {
 
         if (playersToRemove.length === 0) {
             return await interaction.reply({
-                content: lang.common.error,
+                content: lang.players.removePlayer.errors.playersNotFound,
                 ephemeral: true
             });
         }
@@ -861,7 +861,7 @@ async function handleRemovePlayersCancel(interaction) {
 
         if (!session?.allianceId) {
             return await interaction.reply({
-                content: lang.common.error,
+                content: lang.players.removePlayer.errors.sessionExpired,
                 ephemeral: true
             });
         }
@@ -884,6 +884,7 @@ async function handleRemovePlayersCancel(interaction) {
 }
 
 module.exports = {
+    createRemovePlayersSessionToken,
     createRemovePlayersButton,
     handleRemovePlayersButton,
     handleRemovePlayersGameSelection,

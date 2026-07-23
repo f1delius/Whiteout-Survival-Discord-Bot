@@ -72,7 +72,7 @@ const API_STATUS_MAP = {
     'SUCCESS': { success: true, giftCodeActive: true },
     'RECEIVED': { success: true, giftCodeActive: true, errCode: 40008 },
     'SAME TYPE EXCHANGE': { success: true, giftCodeActive: true, errCode: 40011 },
-    'USED': { success: true, giftCodeActive: false, errCode: 40005 },
+    'USED': { success: true, giftCodeActive: true, errCode: 40005 },
     'TIME ERROR': { success: true, giftCodeActive: false, errCode: 40007 },
     'CDK NOT FOUND': { success: true, giftCodeActive: false, errCode: 40014 },
     'STOVE_LV ERROR': { success: true, giftCodeActive: true, errCode: 40006 },
@@ -410,10 +410,8 @@ async function createRedeemProcess(redeemData, options = {}) {
             if (shouldAwaitCompletion && completion.results && completion.results.length > 0) {
                 const validationResult = completion.results[0];
 
-                // A gift code is valid if:
-                // 1. giftCodeActive is true (code exists and can be used)
-                // 2. OR it returned a success status indicating the code is valid (like SAME TYPE EXCHANGE, RECEIVED, SUCCESS, etc.)
-                const isValidGiftCode = validationResult.giftCodeActive === true;
+                const validationDisposition = classifyGiftCodeValidationResult(validationResult);
+                const isValidGiftCode = validationDisposition === 'active';
 
                 return {
                     success: isValidGiftCode,
