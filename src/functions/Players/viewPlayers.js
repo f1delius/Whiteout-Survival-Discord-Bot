@@ -15,6 +15,7 @@ const { getUserInfo, assertUserMatches, handleError, hasPermission, updateCompon
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
+const { formatPlayerLine } = require('./playerDisplay');
 
 const PLAYERS_PER_PAGE = 10;
 
@@ -96,11 +97,9 @@ function createPlayerListContainer(interaction, players, lang, alliance, page = 
     const totalPages = Math.max(1, Math.ceil(sortedPlayers.length / PLAYERS_PER_PAGE));
     const startIndex = page * PLAYERS_PER_PAGE;
     const currentPagePlayers = sortedPlayers.slice(startIndex, startIndex + PLAYERS_PER_PAGE);
-    // Build player list text
+    // Build player list text (nickname primary, game ID secondary when set)
     const playerLines = currentPagePlayers.map(player =>
-        lang.players.viewPlayers.content.playerField.value
-            .replace('{fid}', player.fid)
-            .replace('{state}', player.state || 'Unknown')
+        formatPlayerLine(player, alliance.state, lang)
     );
 
     const titleText = lang.players.viewPlayers.content.title.playerList

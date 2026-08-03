@@ -426,7 +426,9 @@
                 },
                 "selectGameDescription": "Choisissez les alliances du jeu dont vous voulez voir les joueurs.",
                 "playerField": {
-                    "value": "- **ID {fid}**\n  - État assigné : {state}"
+                    "withNickname": "- **{nickname}**\n  - ID du jeu : {fid}\n  - État assigné : {state}",
+                    "withoutNickname": "- **ID {fid}**\n  - État assigné : {state}",
+                    "overrideMarker": " (remplacement)"
                 }
             },
             "buttons": {
@@ -445,6 +447,20 @@
                 "noAvailableAlliances": "{emoji.1050} Aucune alliance avec des joueurs trouvée.",
                 "noAvailableAlliancesForGame": "{emoji.1050} Aucune alliance avec des joueurs trouvée pour ce jeu.",
                 "noPlayersInAlliance": "{emoji.1050} Aucun joueur trouvé dans cette alliance."
+            }
+        },
+        "setPlayer": {
+            "content": {
+                "nicknameSet": "{emoji.1004} Le pseudo de {player} est maintenant **{nickname}**.",
+                "stateSet": "{emoji.1004} Remplacement d'État pour {player} défini sur **{state}**. Il sera utilisé à la place de l'État de l'alliance lors de l'échange.",
+                "stateCleared": "{emoji.1004} Remplacement d'État pour {player} supprimé. L'État de l'alliance sera de nouveau utilisé."
+            },
+            "errors": {
+                "playerNotFound": "{emoji.1050} Joueur introuvable dans le jeu sélectionné.",
+                "invalidState": "{emoji.1050} L'État doit être un nombre positif (ou clear/none pour supprimer le remplacement).",
+                "nicknameTooLong": "{emoji.1050} Le pseudo doit contenir {max} caractères ou moins.",
+                "noAccessToPlayer": "{emoji.1050} Vous ne pouvez gérer que les joueurs de vos alliances assignées.",
+                "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide."
             }
         },
         "addPlayer": {
@@ -670,7 +686,7 @@
                     "name": "- **Alliances différentes détectées**",
                     "value": "  - Certains joueurs appartiennent à différentes alliances. Voulez-vous quand même les déplacer ?"
                 },
-                "listEntry": "  - ID {fid}",
+                "listEntry": "  - {player}",
                 "andMore": "  - ... et {n} de plus"
             },
             "buttons": {
@@ -889,7 +905,9 @@
                 "giftCodeExists": "{emoji.1050} Ce code cadeau existe déjà.",
                 "invalidGameType": "{emoji.1050} Choisissez d'abord un jeu valide.",
                 "gameTypeMismatch": "{emoji.1050} Le jeu sélectionné ne correspond pas au préfixe du code cadeau.",
-                "validationUnavailable": "{emoji.1050} La validation du code cadeau n'a pas pu être effectuée. Définissez un ID de test valide avec le bon État, puis réessayez."
+                "validationUnavailable": "{emoji.1050} La validation du code cadeau n'a pas pu être effectuée. Définissez un ID de test valide avec le bon État, puis réessayez.",
+                "validationNetwork": "{emoji.1050} La validation du code cadeau n'a pas pu être effectuée car le serveur du jeu est inaccessible. Vérifiez vos paramètres réseau/proxy, puis réessayez.",
+                "validationRateLimited": "{emoji.1050} La validation du code cadeau est temporairement limitée. Veuillez patienter, puis réessayez."
             }
         },
         "giftSetTestId": {
@@ -1108,6 +1126,8 @@
                 "alreadyExists": "{emoji.1017} Le code cadeau **{giftCode}** existe déjà dans la base de données.",
                 "invalid": "{emoji.1050} Le code cadeau **{giftCode}** est invalide ou expiré.",
                 "validationUnavailable": "{emoji.1050} La validation du code cadeau n'a pas pu être effectuée. Un administrateur doit définir un ID de test valide avec le bon État.",
+                "validationNetwork": "{emoji.1050} La validation du code cadeau n'a pas pu être effectuée car le serveur du jeu est inaccessible. Vérifiez vos paramètres réseau/proxy, puis réessayez.",
+                "validationRateLimited": "{emoji.1050} La validation du code cadeau est temporairement limitée. Veuillez patienter, puis réessayez.",
                 "redeemFailed": "{emoji.1050} Code cadeau ajouté, mais le remboursement automatique a échoué. Vérifiez les processus."
             },
             "errors": {

@@ -20,7 +20,7 @@ const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { notificationScheduler } = require('./notificationScheduler');
 const { createUniversalPaginationButtons, parsePaginationCustomId } = require('../Pagination/universalPagination');
 const { getUserInfo, assertUserMatches, handleError, hasPermission, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
-const { parseMentions, convertTagsToMentions, parseDateParts, parseTimeParts } = require('./notificationUtils');
+const { parseMentions, convertTagsToMentions, parseDateParts, parseTimeParts, hasSendableNotificationContent } = require('./notificationUtils');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
 const { checkFeatureAccess } = require('../utility/checkAccess');
 
@@ -128,6 +128,10 @@ async function handleTypeSelection(interaction) {
             })
         };
 
+        // Resolving channel and creator names for a full page can exceed
+        // Discord's interaction deadline, so acknowledge the click first.
+        await interaction.deferUpdate();
+
         // Get filtered notifications using helper function
         const notifications = getFilteredNotifications(type, interaction.user.id, adminData, interaction.guild?.id);
 
@@ -136,7 +140,7 @@ async function handleTypeSelection(interaction) {
                 ? lang.notification.editNotification.errors.noServerNotifications
                 : lang.notification.editNotification.errors.noPrivateNotifications;
 
-            return await interaction.update({
+            return await interaction.editReply({
                 components: updateComponentsV2AfterSeparator(interaction, [
                     new ContainerBuilder()
                         .setAccentColor(3447003) // blue
@@ -250,6 +254,8 @@ async function handleEditNotificationPagination(interaction) {
         const type = subtype; // 'server' or 'private'
 
         if (!(await assertUserMatches(interaction, userId, lang))) return;
+
+        await interaction.deferUpdate();
 
         // Get filtered notifications using helper function
         const notifications = getFilteredNotifications(type, interaction.user.id, adminData, interaction.guild?.id);
@@ -939,6 +945,15 @@ async function handleSaveButton(interaction) {
             })
         };
 
+        if (!hasSendableNotificationContent(notification)) {
+            return await interaction.reply({
+                content: notification.embed_toggle
+                    ? lang.notification.createNotification.errors.embedRequiresContent
+                    : lang.notification.createNotification.errors.messageContentRequired,
+                ephemeral: true
+            });
+        }
+
         // Update scheduler if notification is active
         if (notification.is_active) {
             await notificationScheduler.removeNotification(parseInt(notificationId));
@@ -955,21 +970,11 @@ async function handleSaveButton(interaction) {
             })
         );
 
-        // Update message to show success
-        await interaction.update({
+        // Keep the editor visible so saving never looks like the notification disappeared.
+        await interaction.reply({
             content: lang.notification.editNotification.content.saved,
-            embeds: [],
-            components: []
+            ephemeral: true
         });
-
-        // Delete message after 3 seconds
-        setTimeout(async () => {
-            try {
-                await interaction.deleteReply();
-            } catch (error) {
-                // Silently fail if message was already deleted
-            }
-        }, 3000);
 
     } catch (error) {
         await handleError(interaction, lang, error, 'handleSaveButton');

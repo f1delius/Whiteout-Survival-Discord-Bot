@@ -7,7 +7,6 @@ const crypto = require('crypto');
 const { getGameProxyAgent } = require('./proxySupport');
 const { getDefaultGameType } = require('./gameRuntime');
 
-const isDevMode = process.env.WOSLAND_DEV_MODE === '1';
 const http = require('http');
 const https = require('https');
 const { API_CONFIG, getApiConfig } = require('./apiConfig');
@@ -199,7 +198,7 @@ async function nativePost(url, payload, label, gameTypeOrConfig = null) {
         });
 
         req.on('error', (error) => {
-            if (isDevMode) console.error(`${label} request failed:`, error.message);
+            console.error(`${label} request failed: ${error.message} — ${url}`);
             reject(error);
         });
 

@@ -426,7 +426,9 @@
                 },
                 "selectGameDescription": "Choose which game's alliances you want to view players from.",
                 "playerField": {
-                    "value": "- **ID {fid}**\n  - Assigned State: {state}"
+                    "withNickname": "- **{nickname}**\n  - Game ID: {fid}\n  - Assigned State: {state}",
+                    "withoutNickname": "- **ID {fid}**\n  - Assigned State: {state}",
+                    "overrideMarker": " (override)"
                 }
             },
             "buttons": {
@@ -445,6 +447,20 @@
                 "noAvailableAlliances": "{emoji.1050} No alliances with players found.",
                 "noAvailableAlliancesForGame": "{emoji.1050} No alliances with players found for that game.",
                 "noPlayersInAlliance": "{emoji.1050} No players in this alliance yet."
+            }
+        },
+        "setPlayer": {
+            "content": {
+                "nicknameSet": "{emoji.1004} Nickname for {player} updated to **{nickname}**.",
+                "stateSet": "{emoji.1004} State override for {player} set to **{state}**. It will be used instead of the alliance state when redeeming.",
+                "stateCleared": "{emoji.1004} State override for {player} cleared. The alliance state will be used again."
+            },
+            "errors": {
+                "playerNotFound": "{emoji.1050} Player not found in the selected game.",
+                "invalidState": "{emoji.1050} State must be a positive number (or clear/none to remove the override).",
+                "nicknameTooLong": "{emoji.1050} Nickname must be {max} characters or fewer.",
+                "noAccessToPlayer": "{emoji.1050} You can only manage players in your assigned alliances.",
+                "invalidGameType": "{emoji.1050} Pick a valid game first."
             }
         },
         "addPlayer": {
@@ -670,7 +686,7 @@
                     "name": "- **Different Alliances**",
                     "value": "  - Some players are from other alliances. Move them anyway?"
                 },
-                "listEntry": "  - ID {fid}",
+                "listEntry": "  - {player}",
                 "andMore": "  - ... and {n} more"
             },
             "buttons": {
@@ -889,7 +905,9 @@
                 "giftCodeExists": "{emoji.1050} This gift code already exists.",
                 "invalidGameType": "{emoji.1050} Pick a valid game first.",
                 "gameTypeMismatch": "{emoji.1050} The selected game does not match the gift code prefix.",
-                "validationUnavailable": "{emoji.1050} Gift code validation could not be completed. Set a valid test ID with the correct state, then try again."
+                "validationUnavailable": "{emoji.1050} Gift code validation could not be completed. Set a valid test ID with the correct state, then try again.",
+                "validationNetwork": "{emoji.1050} Gift code validation could not be completed because the game server could not be reached. Check your network/proxy settings and try again.",
+                "validationRateLimited": "{emoji.1050} Gift code validation is rate-limited right now. Please wait a moment and try again."
             }
         },
         "giftSetTestId": {
@@ -1108,6 +1126,8 @@
                 "alreadyExists": "{emoji.1017} Gift code **{giftCode}** already exists.",
                 "invalid": "{emoji.1050} Gift code **{giftCode}** is invalid or expired.",
                 "validationUnavailable": "{emoji.1050} Gift code validation could not be completed. An administrator must set a valid test ID with the correct state.",
+                "validationNetwork": "{emoji.1050} Gift code validation could not be completed because the game server could not be reached. Check your network/proxy settings and try again.",
+                "validationRateLimited": "{emoji.1050} Gift code validation is rate-limited right now. Please wait a moment and try again.",
                 "redeemFailed": "{emoji.1050} Code added, but auto-redeem failed. Check processes."
             },
             "errors": {

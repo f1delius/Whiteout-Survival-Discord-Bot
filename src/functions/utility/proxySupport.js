@@ -56,8 +56,8 @@ function isCenturyGameUrl(input) {
     }
 }
 
-function getGameProxyAgent(url) {
-    if (!isCenturyGameUrl(url)) return null;
+function getProxyAgent(url) {
+    if (!url) return null;
 
     const proxyUrl = getConfiguredProxyUrl();
     if (!proxyUrl) return null;
@@ -74,14 +74,26 @@ function getGameProxyAgent(url) {
     }
 
     if (!proxyWasLogged) {
-        console.log(`[proxy] Century Games API traffic routed through: ${proxyUrl}`);
+        console.log(`[proxy] Outbound API traffic routed through: ${proxyUrl}`);
         proxyWasLogged = true;
     }
 
     return agentCache.get(cacheKey);
 }
 
+function getGameProxyAgent(url) {
+    if (!isCenturyGameUrl(url)) return null;
+    return getProxyAgent(url);
+}
+
+function isProxyConfiguredFor(url) {
+    return isCenturyGameUrl(url) && !!getConfiguredProxyUrl();
+}
+
 module.exports = {
     getGameProxyAgent,
+    getProxyAgent,
+    getConfiguredProxyUrl,
+    isProxyConfiguredFor,
     isCenturyGameUrl
 };

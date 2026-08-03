@@ -152,6 +152,37 @@ function calculateEmbedSize(embedData) {
 }
 
 /**
+ * Check whether a notification contains anything Discord can send.
+ * A color by itself does not count as embed content.
+ * @param {object} notification - Notification database row
+ * @returns {boolean} Whether the notification has message or embed content
+ */
+function hasSendableNotificationContent(notification) {
+    if (notification.message_content && notification.message_content.trim()) return true;
+    if (!notification.embed_toggle) return false;
+
+    const embedValues = [
+        notification.title,
+        notification.description,
+        notification.image_url,
+        notification.thumbnail_url,
+        notification.footer,
+        notification.author
+    ];
+    if (embedValues.some(value => typeof value === 'string' && value.trim())) return true;
+
+    if (!notification.fields) return false;
+    try {
+        const fields = typeof notification.fields === 'string'
+            ? JSON.parse(notification.fields)
+            : notification.fields;
+        return Array.isArray(fields) && fields.some(field => field?.name?.trim() && field?.value?.trim());
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Parse and validate date string in DD/MM/YYYY format
  * @param {string} dateStr - Date string to parse
  * @returns {{ day: number, month: number, year: number } | null} Parsed date with 0-indexed month, or null if invalid
@@ -200,6 +231,7 @@ module.exports = {
     convertMentionsToTags,
     parseMentions,
     calculateEmbedSize,
+    hasSendableNotificationContent,
     parseDateParts,
     parseTimeParts
 };

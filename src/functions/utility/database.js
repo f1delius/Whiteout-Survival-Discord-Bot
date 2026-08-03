@@ -116,6 +116,7 @@ const schemas = {
             nickname TEXT,
             furnace_level INTEGER,
             state INTEGER,
+            state_override INTEGER,
             image_url TEXT,
             alliance_id INTEGER,
             added_by TEXT NOT NULL,
@@ -412,6 +413,7 @@ try {
                     nickname TEXT,
                     furnace_level INTEGER,
                     state INTEGER,
+                    state_override INTEGER,
                     image_url TEXT,
                     alliance_id INTEGER,
                     added_by TEXT NOT NULL,
@@ -428,6 +430,15 @@ try {
         }
     } catch (e) {
         console.error('Database migration: failed to migrate players to game-scoped schema', e);
+    }
+
+    try {
+        const playerCols = db.prepare('PRAGMA table_info(players)').all();
+        if (!playerCols.some(c => c.name === 'state_override')) {
+            db.exec('ALTER TABLE players ADD COLUMN state_override INTEGER');
+        }
+    } catch (e) {
+        console.error('Database migration: failed to add state_override column to players', e);
     }
 
     try {
@@ -712,6 +723,7 @@ try {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_id_channels_game_alliance ON id_channels (game_type, alliance_id)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_id_channels_game_channel ON id_channels (game_type, channel_id)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_players_game_alliance_exist ON players (game_type, alliance_id, exist)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_players_nickname ON players (game_type, nickname)`);
 
     // Initialize default test IDs
     ['wos', 'ks'].forEach((gameType) => {
@@ -1054,6 +1066,29 @@ const playerQueries = {
     // Update player alliance
     updatePlayerAlliance: db.prepare('UPDATE players SET alliance_id = ?, state = ? WHERE game_type = ? AND fid = ?'),
 
+    // Update player state override (NULL = follow alliance state)
+    updatePlayerStateOverride: db.prepare('UPDATE players SET state_override = ? WHERE game_type = ? AND fid = ?'),
+
+    // Update player nickname
+    updatePlayerNickname: db.prepare('UPDATE players SET nickname = ? WHERE game_type = ? AND fid = ?'),
+
+    // Search players by FID or nickname within a set of alliances (for autocomplete)
+    searchPlayersByQuery: (query, allianceIds, gameType) => {
+        const like = `%${query}%`;
+        return db.prepare(`
+            SELECT p.fid, p.nickname, p.state, p.state_override, p.alliance_id, p.game_type,
+                   a.name AS alliance_name, a.priority AS alliance_priority
+            FROM players p
+            LEFT JOIN alliance a ON a.id = p.alliance_id AND a.game_type = p.game_type
+            WHERE p.game_type = ?
+              AND p.exist < 3
+              AND p.alliance_id IN (SELECT value FROM json_each(?))
+              AND (CAST(p.fid AS TEXT) LIKE ? OR p.nickname LIKE ? COLLATE NOCASE)
+            ORDER BY p.nickname IS NULL, p.nickname COLLATE NOCASE ASC, p.fid ASC
+            LIMIT 25
+        `).all(gameType, JSON.stringify(allianceIds), like, like);
+    },
+
     // Delete player
     deletePlayer: db.prepare('DELETE FROM players WHERE game_type = ? AND fid = ?'),
 
@@ -1270,6 +1305,12 @@ const notificationQueries = {
         message_content = ?, title = ?, description = ?, color = ?, image_url = ?, thumbnail_url = ?, 
         footer = ?, author = ?, fields = ?, pattern = ?, mention = ?, repeat_status = ?, repeat_frequency = ?, 
         embed_toggle = ?, is_active = ?, last_trigger = ?, next_trigger = ? WHERE id = ?
+    `),
+
+    // Complete a scheduled occurrence without overwriting content edited while it was running
+    updateNotificationScheduleState: db.prepare(`
+        UPDATE notifications SET is_active = ?, last_trigger = ?, next_trigger = ?
+        WHERE id = ? AND next_trigger = ?
     `),
 
     // Update notification active status
@@ -1790,6 +1831,9 @@ module.exports = {
         getPlayerCountsByAllianceIds: (allianceIds, gameType = getDefaultGameType()) => playerQueries.getPlayerCountsByAllianceIds.all(resolveGameType(gameType), JSON.stringify(allianceIds)),
         getDistinctStates: (allianceIds, gameType = getDefaultGameType()) => playerQueries.getDistinctStates.all(resolveGameType(gameType), JSON.stringify(allianceIds)).map(r => r.state),
         updatePlayerAlliance: (fid, allianceId, state, gameType = getDefaultGameType()) => playerQueries.updatePlayerAlliance.run(allianceId, state, resolveGameType(gameType), fid),
+        updatePlayerStateOverride: (fid, stateOverride, gameType = getDefaultGameType()) => playerQueries.updatePlayerStateOverride.run(stateOverride, resolveGameType(gameType), fid),
+        updatePlayerNickname: (fid, nickname, gameType = getDefaultGameType()) => playerQueries.updatePlayerNickname.run(nickname, resolveGameType(gameType), fid),
+        searchPlayersByQuery: (query, allianceIds, gameType = getDefaultGameType()) => playerQueries.searchPlayersByQuery(query, allianceIds, resolveGameType(gameType)),
         deletePlayer: (fid, gameType = getDefaultGameType()) => {
             const resolvedGameType = resolveGameType(gameType);
             playerQueries.deleteFurnaceChanges.run(resolvedGameType, fid);
@@ -1801,7 +1845,9 @@ module.exports = {
         countPlayers: (gameType = getDefaultGameType()) => playerQueries.countPlayers.get(resolveGameType(gameType))?.count || 0,
         getPlayersForExport: (filters, gameType = getDefaultGameType()) => {
             // Build dynamic SQL query based on provided filters
-            let query = 'SELECT p.fid, a.name as alliance_name, p.state FROM players p LEFT JOIN alliance a ON p.alliance_id = a.id WHERE p.game_type = ? AND p.exist < 3';
+            let query = `SELECT p.fid, p.nickname, p.state, p.state_override, a.name as alliance_name, a.state as alliance_state
+                         FROM players p LEFT JOIN alliance a ON p.alliance_id = a.id
+                         WHERE p.game_type = ? AND p.exist < 3`;
             const params = [resolveGameType(gameType)];
 
             // Add state filter
@@ -1840,7 +1886,15 @@ module.exports = {
     },
     nicknameChangeQueries: {
         // Raw insert for migrations (allows custom timestamps)
-        rawInsert: nicknameChangeQueries.addNicknameChange
+        rawInsert: nicknameChangeQueries.addNicknameChange,
+        addNicknameChange: (fid, oldNickname, newNickname, gameType = getDefaultGameType()) =>
+            nicknameChangeQueries.addNicknameChange.run(
+                resolveGameType(gameType),
+                fid,
+                oldNickname,
+                newNickname,
+                getCurrentTimestamp()
+            )
     },
     giftCodeQueries: {
         ...giftCodeQueries,
@@ -1909,6 +1963,8 @@ module.exports = {
         getActivePrivateNotificationsExcludingUsers: (userIds) => notificationQueries.getActivePrivateNotificationsExcludingUsers.all(JSON.stringify(userIds)),
         updateNotification: (id, name, guildId, channelId, hour, minute, messageContent, title, description, color, imageUrl, thumbnailUrl, footer, author, fields, pattern, mention, repeatStatus, repeatFrequency, embedToggle, isActive, lastTrigger, nextTrigger) =>
             notificationQueries.updateNotification.run(name, guildId, channelId, hour, minute, messageContent, title, description, color, imageUrl, thumbnailUrl, footer, author, fields, pattern, mention, repeatStatus, repeatFrequency, embedToggle ? 1 : 0, isActive ? 1 : 0, lastTrigger, nextTrigger, id),
+        updateNotificationScheduleState: (id, scheduledTime, isActive, lastTrigger, nextTrigger) =>
+            notificationQueries.updateNotificationScheduleState.run(isActive ? 1 : 0, lastTrigger, nextTrigger, id, scheduledTime),
         updateNotificationActiveStatus: (id, isActive) => notificationQueries.updateNotificationActiveStatus.run(isActive ? 1 : 0, id),
         updateNotificationCompletedStatus: (id, completed) => notificationQueries.updateNotificationCompletedStatus.run(completed ? 1 : 0, id),
         deleteNotification: (id) => notificationQueries.deleteNotification.run(id)

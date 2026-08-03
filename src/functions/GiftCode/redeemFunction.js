@@ -13,6 +13,8 @@ const { getTestPlayerForValidation } = require('./setTestId');
 const { API_CONFIG, getApiConfig } = require('../utility/apiConfig');
 const { getDefaultGameType } = require('../utility/gameRuntime');
 const { nativePost } = require('../utility/apiClient');
+const { isProxyConfiguredFor } = require('../utility/proxySupport');
+const { formatPlayerWithId } = require('../Players/playerDisplay');
 
 const isDevMode = process.env.WOSLAND_DEV_MODE === '1';
 function devLog(...args) {
@@ -64,6 +66,22 @@ const ALREADY_REDEEMED_STATUSES = ['RECEIVED', 'SAME TYPE EXCHANGE'];
 const VIP_RESTRICTION_STATUSES = ['RECHARGE_MONEY ERROR', 'RECHARGE_MONEY_VIP ERROR'];
 const LEVEL_RESTRICTION_STATUSES = ['STOVE_LV ERROR'];
 const WRONG_STATE_STATUS = 'USER INFO ERROR';
+const FAILURE_STATUS_LABELS = {
+    NETWORK_ERROR: 'Network',
+    PROXY_ERROR: 'Proxy/Network',
+    HTTP_ERROR: 'HTTP',
+    EMPTY_RESPONSE: 'Empty response',
+    UNKNOWN_API_RESPONSE: 'Unknown response',
+    STATE_REQUIRED: 'State required',
+    UNHANDLED_ERROR: 'Unhandled',
+    ANALYSIS_ERROR: 'Analysis',
+    'TIMEOUT RETRY': 'Timeout',
+    'ROLE NOT EXIST': 'Player missing',
+    'NOT LOGIN': 'Not logged in',
+    'SIGN ERROR': 'Sign error'
+};
+// Discord embed field limits: 1024 chars per value; cap groups shown to keep it readable.
+const MAX_FAILURE_GROUPS = 8;
 
 // API status code mapping for response analysis with error codes
 const API_STATUS_MAP = {
@@ -192,6 +210,48 @@ function classifyGiftCodeValidationResult(result) {
     if (result.giftCodeActive === true) return 'active';
     if (result.success === true && result.giftCodeActive === false) return 'invalid';
     return 'retry';
+}
+
+// Transport/server statuses that mean validation could not get a definitive answer
+const NETWORK_FAILURE_STATUSES = new Set([
+    'NETWORK_ERROR',
+    'PROXY_ERROR',
+    'HTTP_ERROR',
+    'EMPTY_RESPONSE',
+    'UNKNOWN_API_RESPONSE'
+]);
+
+const NETWORK_ERROR_CODES = new Set([
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'EPIPE'
+]);
+
+function isNetworkError(error) {
+    return !!error && (
+        NETWORK_ERROR_CODES.has(error.code) ||
+        /timed out|socket hang up|proxy|tunnel/i.test(error.message || '')
+    );
+}
+
+/**
+ * Classifies a validation result into a user-facing failure kind:
+ * 'active' | 'invalid' | 'network' | 'rateLimit' | 'testId' | 'unknown'
+ */
+function getValidationFailureKind(result) {
+    const disposition = classifyGiftCodeValidationResult(result);
+    if (disposition === 'active') return 'active';
+    if (disposition === 'invalid') return 'invalid';
+    if (!result) return 'unknown';
+    if (result.rateLimited || result.retry) return 'rateLimit';
+    if (result.wrongState || result.playerNotExist || result.status === 'STATE_REQUIRED' || result.status === 'TEST_ID_REQUIRED') return 'testId';
+    if (NETWORK_FAILURE_STATUSES.has(result.status)) return 'network';
+    return 'unknown';
 }
 
 /**
@@ -680,6 +740,31 @@ async function executeRedeemOperation(processId) {
             return current.pending.includes(identifier);
         });
 
+        // Apply per-player state overrides (admin-set via /set player) once per process.
+        // Effective state = player override ?? alliance state when redeeming.
+        const redeemFids = itemsToProcess
+            .filter((item) => item.status === 'redeem' && item.id)
+            .map((item) => String(item.id));
+        if (redeemFids.length > 0) {
+            try {
+                const stateOverrideByFid = new Map();
+                for (const player of playerQueries.getPlayersByFids(redeemFids, redeemContext.gameType)) {
+                    if (player?.state_override != null) {
+                        stateOverrideByFid.set(String(player.fid), player.state_override);
+                    }
+                }
+                for (const item of itemsToProcess) {
+                    if (item.status === 'redeem' && item.id && stateOverrideByFid.has(String(item.id))) {
+                        item.effectiveState = stateOverrideByFid.get(String(item.id));
+                    }
+                }
+            } catch (error) {
+                // Overrides are an optimization for correctness; without them the
+                // alliance state applies, so never let a lookup failure abort the run.
+                await handleError(null, null, error, 'executeRedeemOperation_stateOverrides', false);
+            }
+        }
+
         // Retry queue system: rate-limited players are set aside
         // and other players continue processing. This mirrors the Python bot's approach
         // and avoids blocking the entire pipeline on a single 60s rate limit.
@@ -741,8 +826,12 @@ async function executeRedeemOperation(processId) {
                 }
             }
 
-            // Process this redeem item
-            const outcome = await processSingleRedeemItem(item, redeemContext.gameType, redeemContext.alliance?.state);
+            // Process this redeem item (player state override wins over the alliance state)
+            const outcome = await processSingleRedeemItem(
+                item,
+                redeemContext.gameType,
+                item.effectiveState ?? redeemContext.alliance?.state
+            );
 
             // Rate-limited: put in retry queue and immediately process the next player
             // Rate limits don't increment cycle — they aren't the player's fault
@@ -1065,6 +1154,7 @@ async function validateGiftCode(giftCode, gameType = getDefaultGameType()) {
         if (!testPlayer) {
             return {
                 success: false,
+                status: 'TEST_ID_REQUIRED',
                 message: 'Set the test ID to an existing player in an alliance with a valid state',
                 is_vip: false
             };
@@ -1184,6 +1274,8 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation, options = {}) {
 
     const maxAttempts = apiConfig.MAX_REDEEM_ATTEMPTS || apiConfig.MAX_RETRIES || 3;
     let lastResult = null;
+    let lastError = null;
+    const proxyConfigured = isProxyConfiguredFor(apiConfig.GIFT_CODE_URL);
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
@@ -1227,10 +1319,18 @@ async function makeGiftCodeAPIRequest(fid, giftCode, operation, options = {}) {
                 return result;
             }
         } catch (error) {
-            lastResult = createErrorResult('NETWORK_ERROR', error.message, false);
+            lastError = error;
+            const status = proxyConfigured && isNetworkError(error) ? 'PROXY_ERROR' : 'NETWORK_ERROR';
+            lastResult = createErrorResult(status, error.message, false);
         }
 
         if (attempt < maxAttempts) await wait(apiConfig.RETRY_DELAY);
+    }
+
+    if (lastError) {
+        // Surface transport failures in production logs/system log so proxy/network
+        // outages are visible instead of silently showing up as failed players.
+        await handleError(null, null, lastError, `makeGiftCodeAPIRequest_${operation}`, false);
     }
 
     return { ...lastResult, attempts: maxAttempts };
@@ -1344,6 +1444,10 @@ function computeRedeemStats(redeemContext, results, current) {
             ? redeemContext.items.filter((item) => item.status === 'redeem')
             : [];
 
+    // Failed excludes outcomes that have their own dedicated result group.
+    const isFailedEntry = (entry) =>
+        !entry.preFiltered && entry.success === false && !entry.vipSkipped && entry.status !== WRONG_STATE_STATUS;
+
     const total = allRedeemItems.length;
     const processedResults = Array.isArray(results)
         ? results.filter((entry) => entry.operation === 'redeem')
@@ -1379,10 +1483,16 @@ function computeRedeemStats(redeemContext, results, current) {
         .map((entry) => String(entry.playerId || entry.identifier || ''))
         .filter(Boolean))];
 
-    // Failed excludes outcomes that have their own dedicated result group.
-    const failed = processedResults.filter((entry) =>
-        !entry.preFiltered && entry.success === false && !entry.vipSkipped && entry.status !== WRONG_STATE_STATUS
-    ).length;
+    const failed = processedResults.filter(isFailedEntry).length;
+
+    // Break down failed players by status so embeds can explain WHY they failed.
+    const failedByStatus = {};
+    for (const entry of processedResults) {
+        if (isFailedEntry(entry)) {
+            const statusKey = entry.status || 'UNKNOWN';
+            failedByStatus[statusKey] = (failedByStatus[statusKey] || 0) + 1;
+        }
+    }
 
     // Total pending = items that still need processing (NOT pre-filtered, NOT processed yet)
     const totalPending = current && Array.isArray(current.pending)
@@ -1400,6 +1510,7 @@ function computeRedeemStats(redeemContext, results, current) {
         restricted,
         wrongStateIds,
         failed,
+        failedByStatus,
         percent
     };
 }
@@ -1461,8 +1572,13 @@ async function updateRedeemProgressEmbed(processId, embedState, stats, context, 
 
         if (force && stats.wrongStateIds?.length && !embedState.wrongStateReportSent) {
             const configuredState = context?.alliance?.state;
-            const heading = `**${WRONG_STATE_STATUS}** — ${stats.wrongStateIds.length} ID(s) do not match${configuredState ? ` state ${configuredState}` : ' the configured alliance state'}.`;
-            const idList = stats.wrongStateIds.join('\n');
+            const gameType = context?.alliance?.gameType || getDefaultGameType();
+            const wrongStatePlayers = playerQueries.getPlayersByFids(stats.wrongStateIds, gameType);
+            const playerById = new Map(wrongStatePlayers.map(p => [String(p.fid), p]));
+            const idList = stats.wrongStateIds
+                .map(id => formatPlayerWithId(playerById.get(String(id)) || { fid: id }))
+                .join('\n');
+            const heading = `**${WRONG_STATE_STATUS}** — ${stats.wrongStateIds.length} player(s) do not match${configuredState ? ` state ${configuredState}` : ' the configured alliance state'}.`;
 
             if (heading.length + idList.length + 1 <= 2000) {
                 await channel.send({ content: `${heading}\n${idList}` });
@@ -1524,6 +1640,28 @@ function buildRedeemProgressEmbed(stats, context) {
         fields.push({
             name: `Wrong State • ${WRONG_STATE_STATUS} (${stats.wrongStateIds.length})`,
             value: ids.length > 1024 ? `${ids.slice(0, 1020)}...` : ids
+        });
+    }
+
+    if (stats.failed > 0) {
+        const failureGroups = Object.entries(stats.failedByStatus || {})
+            .map(([status, count]) => {
+                const label = status.startsWith('SKIPPED_')
+                    ? 'Skipped'
+                    : (FAILURE_STATUS_LABELS[status] || status);
+                return `${label}: ${count}`;
+            })
+            .sort();
+        const shownGroups = failureGroups.slice(0, MAX_FAILURE_GROUPS);
+        if (failureGroups.length > MAX_FAILURE_GROUPS) {
+            shownGroups.push(`+${failureGroups.length - MAX_FAILURE_GROUPS} more`);
+        }
+        let value = shownGroups.join(' • ') || String(stats.failed);
+        if (value.length > 1024) value = `${value.slice(0, 1020)}...`;
+        fields.push({
+            name: 'Failure reasons',
+            value,
+            inline: false
         });
     }
 
@@ -1618,6 +1756,7 @@ module.exports = {
     makeGiftCodeAPIRequest,
     analyzeAPIResponse,
     classifyGiftCodeValidationResult,
+    getValidationFailureKind,
     computeRedeemStats,
     handleVipTracking
 };

@@ -4,6 +4,7 @@ const { allianceQueries, playerQueries } = require('../utility/database');
 const languages = require('../../i18n');
 const { handleError, getUserInfo } = require('../utility/commonFunctions');
 const { getComponentEmoji, getGlobalEmojiMap } = require('../utility/emojis');
+const { formatPlayerWithId, getEffectivePlayerState } = require('./playerDisplay');
 
 const PROGRESS_UPDATE_INTERVAL = 10;
 
@@ -465,7 +466,9 @@ class PlayerDataProcessor {
                 if (player) {
                     added.push({
                         fid: playerId,
+                        nickname: player.nickname,
                         state: player.state,
+                        state_override: player.state_override,
                         game_type: player.game_type || alliance.game_type
                     });
                 }
@@ -476,7 +479,9 @@ class PlayerDataProcessor {
                 if (player) {
                     existing.push({
                         fid: playerId,
+                        nickname: player.nickname,
                         state: player.state,
+                        state_override: player.state_override,
                         game_type: player.game_type || alliance.game_type
                     });
                 }
@@ -509,8 +514,8 @@ class PlayerDataProcessor {
                 const displayedAdded = added.slice(0, 10);
                 const addedList = displayedAdded
                     .map(p => lang.players.addPlayer.content.addedField.value
-                            .replace('{id}', p.fid)
-                            .replace('{state}', p.state))
+                            .replace('{id}', formatPlayerWithId(p))
+                            .replace('{state}', getEffectivePlayerState(p, alliance.state) ?? p.state ?? 'Unknown'))
                     .join('\n');
 
                 let addedValue = addedList;
@@ -531,8 +536,8 @@ class PlayerDataProcessor {
                 const displayedExisting = existing.slice(0, 10);
                 const existingList = displayedExisting
                     .map(p => lang.players.addPlayer.content.alreadyExistField.value
-                            .replace('{id}', p.fid)
-                            .replace('{state}', p.state))
+                            .replace('{id}', formatPlayerWithId(p))
+                            .replace('{state}', getEffectivePlayerState(p, alliance.state) ?? p.state ?? 'Unknown'))
                     .join('\n');
 
                 let existingValue = existingList;

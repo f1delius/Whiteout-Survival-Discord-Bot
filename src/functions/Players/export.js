@@ -9,6 +9,7 @@ const path = require('path');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
+const { getEffectivePlayerState } = require('./playerDisplay');
 
 /**
  * Creates an export button
@@ -432,11 +433,12 @@ async function handleGenerate(interaction) {
         }
 
         // Generate CSV
-        const headers = ['Player ID', 'Alliance Name', 'Assigned State'];
+        const headers = ['Player ID', 'Nickname', 'Alliance Name', 'Assigned State'];
         const rows = players.map(p => [
             p.fid,
+            p.nickname || '',
             p.alliance_name || '',
-            p.state,
+            getEffectivePlayerState(p, p.alliance_state) ?? p.state ?? '',
         ]);
 
         const csvContent = [

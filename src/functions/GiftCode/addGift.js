@@ -1,6 +1,6 @@
 const { ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, LabelBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const { giftCodeQueries, allianceQueries, playerQueries } = require('../utility/database');
-const { createRedeemProcess, classifyGiftCodeValidationResult } = require('./redeemFunction');
+const { createRedeemProcess, getValidationFailureKind } = require('./redeemFunction');
 const { parseGameScopedGiftCode } = require('./gameScopedGiftCode');
 const { PERMISSIONS } = require('../Settings/admin/permissions');
 const { hasPermission, handleError, getUserInfo, assertUserMatches, updateComponentsV2AfterSeparator } = require('../utility/commonFunctions');
@@ -247,10 +247,15 @@ async function handleGiftCodeModal(interaction) {
             }
         } else {
             const validationResult = validationOutcome?.results?.[0];
-            const disposition = classifyGiftCodeValidationResult(validationResult);
-            const errorMessage = disposition === 'invalid'
-                ? lang.giftCode.addGiftCode.errors.invalidGiftCode
-                : lang.giftCode.addGiftCode.errors.validationUnavailable;
+            const failureKind = getValidationFailureKind(validationResult);
+            const errors = lang.giftCode.addGiftCode.errors;
+            const errorMessage = failureKind === 'invalid'
+                ? errors.invalidGiftCode
+                : failureKind === 'network'
+                    ? errors.validationNetwork
+                    : failureKind === 'rateLimit'
+                        ? errors.validationRateLimited
+                        : errors.validationUnavailable;
             const errorContainer = [
                 new ContainerBuilder()
                     .setAccentColor(0xe74c3c)

@@ -9,6 +9,7 @@ const { replaceEmojiPlaceholders, getGlobalEmojiMap } = require('../utility/emoj
 const { getGiftCodeApiConfig } = require('../utility/apiConfig');
 const { getActiveGameTypes, getDefaultGameType } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
+const { getProxyAgent } = require('../utility/proxySupport');
 
 const isDevMode = process.env.WOSLAND_DEV_MODE === '1';
 
@@ -26,8 +27,9 @@ class GiftCodeAPI {
         this.apiUrl = giftCodeApiConfig.API_URL;
         this.apiKey = giftCodeApiConfig.API_KEY;
 
-        // Keep-alive HTTP agent for connection pooling
-        this.httpAgent = new http.Agent({
+        // Keep-alive HTTP agent for connection pooling; uses the configured proxy
+        // (same as game API traffic) so proxy-only hosts can reach the sync API.
+        this.httpAgent = getProxyAgent(this.apiUrl) || new http.Agent({
             keepAlive: true,
             keepAliveMsecs: 30000,
             maxSockets: 4
@@ -289,7 +291,7 @@ class GiftCodeAPI {
 
                 if (response.status !== 200) {
                     const backoffTime = await this.handleApiError(response, responseText);
-                    if (isDevMode) console.warn(`API request failed, backing off for ${(backoffTime / 1000).toFixed(1)} seconds`);
+                    console.warn(`API request failed (${response.status}), backing off for ${(backoffTime / 1000).toFixed(1)} seconds`);
                     await this.sleep(backoffTime);
                     return false;
                 }
@@ -506,7 +508,7 @@ class GiftCodeAPI {
                     return false;
                 }
             } catch (fetchError) {
-                if (isDevMode) await handleError(null, null, fetchError, 'syncWithAPI_fetchError', false);
+                await handleError(null, null, fetchError, 'syncWithAPI_fetchError', false);
                 return false;
             }
         } catch (error) {

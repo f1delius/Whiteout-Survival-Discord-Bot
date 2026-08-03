@@ -22,6 +22,7 @@ const { getUserInfo, assertUserMatches, handleError, hasPermission, updateCompon
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
 const { getEmojiMapForUser, getComponentEmoji } = require('../utility/emojis');
+const { formatPlayerSelectOption, formatPlayerWithId, getEffectivePlayerState } = require('./playerDisplay');
 
 function buildPlayerCountMap(alliances) {
     const playerCountMap = {};
@@ -231,14 +232,18 @@ function createPlayerSelectionEmbed(interaction, players, lang, alliance, page =
 
     // Third row: Select menu (if there are players)
     if (currentPagePlayers.length > 0) {
-        const options = currentPagePlayers.map(player => ({
-            label: `ID ${player.fid}`,
-            value: player.fid.toString(),
-            description: (lang.players.removePlayer.selectMenu.playerSelect.description)
-                .replace('{id}', player.fid)
-                .replace('{state}', player.state || "Unknown"),
-            emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1026')
-        }));
+        const options = currentPagePlayers.map(player => {
+            const stateText = getEffectivePlayerState(player, alliance.state) ?? player.state ?? 'Unknown';
+            const option = formatPlayerSelectOption(
+                player,
+                lang.players.removePlayer.selectMenu.playerSelect.description.replace('{state}', stateText)
+            );
+            return {
+                ...option,
+                value: player.fid.toString(),
+                emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1026')
+            };
+        });
 
         const playerSelect = new StringSelectMenuBuilder()
             .setCustomId(`remove_players_player_select_${interaction.user.id}_${alliance.id}_${page}_${totalRemovedCount}`)
@@ -280,8 +285,8 @@ function createPlayerSelectionEmbed(interaction, players, lang, alliance, page =
  */
 function createRemovalConfirmationEmbed(players, alliance, interaction, lang) {
     const playerList = players.map(player => lang.players.removePlayer.content.playersToRemoveField.value
-        .replace('{id}', player.fid)
-        .replace('{state}', player.state || "Unknown")
+        .replace('{id}', formatPlayerWithId(player))
+        .replace('{state}', (getEffectivePlayerState(player, alliance.state) ?? player.state) || 'Unknown')
     ).join('\n');
 
     // Truncate if too long for embed

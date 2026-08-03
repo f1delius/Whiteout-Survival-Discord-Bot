@@ -31,6 +31,7 @@ const { formatAllianceStateDescription } = require('../Alliance/allianceStateDes
 const { getDefaultGameType, isMultiGameModeEnabled } = require('../utility/gameRuntime');
 const { normalizeGameType } = require('../utility/gameProfiles');
 const { getComponentEmoji, getEmojiMapForUser } = require('../utility/emojis');
+const { formatPlayerSelectOption, formatPlayerWithId, getEffectivePlayerState } = require('./playerDisplay');
 
 function buildPlayerCountMap(alliances) {
     const playerCountMap = {};
@@ -468,14 +469,18 @@ function createPlayerSelectionEmbed(players, lang, sourceAlliance, destAlliance,
 
     // Second row: Select menu (if there are players)
     if (currentPagePlayers.length > 0) {
-        const options = currentPagePlayers.map(player => ({
-            label: `ID ${player.fid}`,
-            value: player.fid.toString(),
-            description: lang.players.movePlayer.selectMenu.playerSelection.description
-                .replace('{id}', player.fid)
-                .replace('{state}', player.state || 'Unknown'),
-            emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1026')
-        }));
+        const options = currentPagePlayers.map(player => {
+            const stateText = getEffectivePlayerState(player, sourceAlliance.state) ?? player.state ?? 'Unknown';
+            const option = formatPlayerSelectOption(
+                player,
+                lang.players.movePlayer.selectMenu.playerSelection.description.replace('{state}', stateText)
+            );
+            return {
+                ...option,
+                value: player.fid.toString(),
+                emoji: getComponentEmoji(getEmojiMapForUser(interaction.user.id), '1026')
+            };
+        });
 
         const playerSelect = new StringSelectMenuBuilder()
             .setCustomId(`move_players_player_select_${interaction.user.id}_${sourceId}_${destId}_${page}_${totalMovedCount}${resolvedGameType ? `_${resolvedGameType}` : ''}`)
@@ -968,7 +973,7 @@ async function handleMovePlayersIdsModal(interaction) {
             const movedList = buildPlayerList(
                 foundPlayers,
                 1200,
-                p => lc.listEntry.replace('{fid}', p.fid.toString()),
+                p => lc.listEntry.replace('{player}', formatPlayerWithId(p)),
                 lc.andMore
             );
             if (movedList) responseContent += '\n' + movedList;
@@ -1005,7 +1010,7 @@ async function handleMovePlayersIdsModal(interaction) {
             const wrongList = buildPlayerList(
                 wrongAlliancePlayers,
                 800,
-                item => `  - ID ${item.player.fid} (${item.alliance ? item.alliance.name : lang.common.unknown})`,
+                item => `  - ${formatPlayerWithId(item.player)} • ${item.alliance ? item.alliance.name : lang.common.unknown}`,
                 lc.andMore
             );
             if (wrongList) responseContent += '\n' + wrongList;
@@ -1122,7 +1127,7 @@ async function handleMovePlayersConfirmWrong(interaction) {
         const movedList = buildPlayerList(
             movedPlayerObjects,
             1200,
-            p => lc.listEntry.replace('{fid}', p.fid.toString()),
+            p => lc.listEntry.replace('{player}', formatPlayerWithId(p)),
             lc.andMore
         );
         if (movedList) successText += '\n' + movedList;

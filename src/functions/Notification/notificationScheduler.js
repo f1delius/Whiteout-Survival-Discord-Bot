@@ -2,6 +2,7 @@ const { EmbedBuilder } = require('discord.js');
 const { notificationQueries, systemLogQueries } = require('../utility/database');
 const { handleError } = require('../utility/commonFunctions');
 const { trackSentMessage } = require('./autoClean');
+const { hasSendableNotificationContent } = require('./notificationUtils');
 
 const isDevMode = process.env.WOSLAND_DEV_MODE === '1';
 /** Grace period (seconds) for sending missed one-time notifications on reconnect */
@@ -448,6 +449,10 @@ class NotificationScheduler {
                 return;
             }
 
+            if (!hasSendableNotificationContent(currentNotification)) {
+                throw new Error(`Notification ${notification.id} has no message or embed content; edit it before sending`);
+            }
+
             // Build message content with mentions and time placeholders
             const mentions = parseMentions(currentNotification.mention);
             const rawMessageContent = currentNotification.message_content;
@@ -465,22 +470,38 @@ class NotificationScheduler {
                     scheduledTime
                 );
 
-                embed = new EmbedBuilder()
-                    .setColor(currentNotification.color || '#0099ff')
-                    .setTitle(currentNotification.title)
-                    .setDescription(embedDescription);
+                const embedBuilder = new EmbedBuilder();
+                try {
+                    embedBuilder.setColor(currentNotification.color || '#0099ff');
+                } catch {
+                    embedBuilder.setColor('#0099ff');
+                }
+                let hasEmbedContent = false;
+
+                if (currentNotification.title && currentNotification.title.trim()) {
+                    embedBuilder.setTitle(currentNotification.title);
+                    hasEmbedContent = true;
+                }
+                if (embedDescription && embedDescription.trim()) {
+                    embedBuilder.setDescription(embedDescription);
+                    hasEmbedContent = true;
+                }
 
                 if (currentNotification.image_url && currentNotification.image_url.trim()) {
-                    embed.setImage(currentNotification.image_url);
+                    embedBuilder.setImage(currentNotification.image_url);
+                    hasEmbedContent = true;
                 }
                 if (currentNotification.thumbnail_url && currentNotification.thumbnail_url.trim()) {
-                    embed.setThumbnail(currentNotification.thumbnail_url);
+                    embedBuilder.setThumbnail(currentNotification.thumbnail_url);
+                    hasEmbedContent = true;
                 }
                 if (currentNotification.footer && currentNotification.footer.trim()) {
-                    embed.setFooter({ text: currentNotification.footer });
+                    embedBuilder.setFooter({ text: currentNotification.footer });
+                    hasEmbedContent = true;
                 }
                 if (currentNotification.author && currentNotification.author.trim()) {
-                    embed.setAuthor({ name: currentNotification.author });
+                    embedBuilder.setAuthor({ name: currentNotification.author });
+                    hasEmbedContent = true;
                 }
 
                 if (currentNotification.fields) {
@@ -488,13 +509,14 @@ class NotificationScheduler {
                         const fields = JSON.parse(currentNotification.fields);
                         if (Array.isArray(fields) && fields.length > 0) {
                             fields.forEach((field, index) => {
-                                if (field.name && field.value) {
+                                if (field.name?.trim() && field.value?.trim()) {
                                     const fieldComponent = `field_${index}`;
                                     const fieldValue = replaceTimePlaceholder(
                                         convertTagsToMentions(field.value, mentions, fieldComponent),
                                         scheduledTime
                                     );
-                                    embed.addFields({ name: field.name, value: fieldValue, inline: field.inline || false });
+                                    embedBuilder.addFields({ name: field.name, value: fieldValue, inline: field.inline || false });
+                                    hasEmbedContent = true;
                                 }
                             });
                         }
@@ -502,6 +524,15 @@ class NotificationScheduler {
                         await handleError(null, null, error, 'NotificationScheduler.sendNotification - parsing fields');
                     }
                 }
+
+                if (hasEmbedContent) embed = embedBuilder;
+            }
+
+            const sendableMessageContent = typeof messageContent === 'string' && messageContent.trim()
+                ? messageContent
+                : null;
+            if (!sendableMessageContent && !embed) {
+                throw new Error(`Notification ${notification.id} produced an empty Discord payload; edit it before sending`);
             }
 
             // Resolve target and send
@@ -529,7 +560,7 @@ class NotificationScheduler {
 
             // Send the notification
             const sentMsg = await target.send({
-                content: messageContent,
+                content: sendableMessageContent,
                 embeds: embed ? [embed] : []
             });
 
@@ -603,28 +634,35 @@ class NotificationScheduler {
      */
     async handleNotificationCompletion(notification, scheduledTime) {
         try {
+            const currentNotification = notificationQueries.getNotificationById(notification.id);
+            if (!currentNotification || !currentNotification.is_active) return;
+
+            // An edit may have moved this notification while the send was in flight.
+            // Do not let the old occurrence overwrite the new schedule.
+            if (Math.floor(currentNotification.next_trigger || 0) !== Math.floor(scheduledTime)) return;
+
             const currentTime = Math.floor(Date.now() / 1000);
 
             // Calculate next trigger based on repeat settings
             let nextTrigger = null;
-            let isActive = notification.is_active;
+            let isActive = currentNotification.is_active;
 
 
-            if (notification.repeat_status === 1 && notification.repeat_frequency) {
+            if (currentNotification.repeat_status === 1 && currentNotification.repeat_frequency) {
                 // Has repeat - calculate next trigger
                 let nextTriggerCalc;
 
-                if (this.isWeeklyRepeat(notification.repeat_frequency)) {
+                if (this.isWeeklyRepeat(currentNotification.repeat_frequency)) {
                     // Weekly repeat - find next matching day after current time
                     nextTriggerCalc = this.calculateNextWeeklyTrigger(
-                        notification.hour,
-                        notification.minute,
-                        this.parseWeeklyDays(notification.repeat_frequency),
+                        currentNotification.hour,
+                        currentNotification.minute,
+                        this.parseWeeklyDays(currentNotification.repeat_frequency),
                         currentTime
                     );
                 } else {
                     // Seconds-based repeat (ensure integer timestamps)
-                    const frequency = Math.floor(notification.repeat_frequency);
+                    const frequency = Math.floor(currentNotification.repeat_frequency);
                     nextTriggerCalc = scheduledTime + frequency;
 
                     // Make sure next trigger is in the future
@@ -643,32 +681,15 @@ class NotificationScheduler {
                 isActive = false;
             }
 
-            // Update notification in database
-            notificationQueries.updateNotification(
+            // Only update scheduler-owned columns. Editing content must never be rolled back.
+            const updateResult = notificationQueries.updateNotificationScheduleState(
                 notification.id,
-                notification.name,
-                notification.guild_id,
-                notification.channel_id,
-                notification.hour,
-                notification.minute,
-                notification.message_content,
-                notification.title,
-                notification.description,
-                notification.color,
-                notification.image_url,
-                notification.thumbnail_url,
-                notification.footer,
-                notification.author,
-                notification.fields,
-                notification.pattern,
-                notification.mention,
-                notification.repeat_status,
-                notification.repeat_frequency,
-                notification.embed_toggle,
-                isActive,            // Deactivate if no repeat
-                currentTime,         // last_trigger
-                nextTrigger          // next_trigger
+                scheduledTime,
+                isActive,
+                currentTime,
+                nextTrigger
             );
+            if (updateResult.changes === 0) return;
 
             // Remove from scheduled map (will be re-added if repeating)
             this.scheduledNotifications.delete(notification.id);
@@ -680,9 +701,9 @@ class NotificationScheduler {
             }
 
             // Update any schedule boards for this guild
-            if (notification.guild_id) {
+            if (currentNotification.guild_id) {
                 const { updateBoardsForGuild } = require('./scheduleView');
-                updateBoardsForGuild(notification.guild_id, this.client).catch(() => {});
+                updateBoardsForGuild(currentNotification.guild_id, this.client).catch(() => {});
             }
 
         } catch (error) {
