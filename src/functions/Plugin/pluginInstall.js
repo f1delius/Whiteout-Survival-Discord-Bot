@@ -29,9 +29,12 @@ const i18n = require('../../i18n');
 // INSTALL-SPECIFIC CONSTANTS & UTILITIES
 // ============================================================
 
-const PLUGIN_REPO = 'whiteout-project/wosJS-plugins';
-const PLUGIN_REGISTRY_PROXY_URL = process.env.PLUGIN_REGISTRY_PROXY_URL || 'https://wosland.com/api/plugins/registry';
-const PLUGIN_UPDATE_PROXY_URL = process.env.PLUGIN_UPDATE_CHECK_PROXY_URL || 'https://wosland.com/api/updates/plugins';
+const PLUGIN_REPO = process.env.PLUGIN_REPO || 'f1delius/wosJS-plugins';
+const PLUGIN_REPO_BRANCH = process.env.PLUGIN_REPO_BRANCH || 'main';
+const PLUGIN_REGISTRY_URL = process.env.PLUGIN_REGISTRY_URL
+    || `https://raw.githubusercontent.com/${PLUGIN_REPO}/${PLUGIN_REPO_BRANCH}/registry.json`;
+const PLUGIN_ARCHIVE_BASE_URL = process.env.PLUGIN_ARCHIVE_BASE_URL
+    || `https://raw.githubusercontent.com/${PLUGIN_REPO}/${PLUGIN_REPO_BRANCH}/plugins`;
 
 const MAX_REDIRECTS = 5;
 
@@ -62,53 +65,6 @@ function httpsGetJSON(url, remainingRedirects = MAX_REDIRECTS, headers = {}) {
         });
         req.on('error', () => resolve(null));
         req.setTimeout(10000, () => { req.destroy(); resolve(null); });
-    });
-}
-
-function requestPluginUpdatesViaProxy(installedPlugins) {
-    return new Promise((resolve) => {
-        try {
-            const body = JSON.stringify({ plugins: installedPlugins });
-            const parsedUrl = new URL(PLUGIN_UPDATE_PROXY_URL);
-            const httpModule = parsedUrl.protocol === 'http:' ? require('http') : require('https');
-
-            const req = httpModule.request(parsedUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(body),
-                    'User-Agent': 'WhiteoutSurvivalBot'
-                }
-            }, (res) => {
-                let responseBody = '';
-                res.on('data', chunk => responseBody += chunk);
-                res.on('end', () => {
-                    if (res.statusCode < 200 || res.statusCode >= 300) {
-                        resolve(null);
-                        return;
-                    }
-
-                    try {
-                        const parsed = JSON.parse(responseBody);
-                        if (Array.isArray(parsed?.updates)) {
-                            resolve(parsed);
-                            return;
-                        }
-                    } catch {
-                        // Ignore parse errors and fall back to local error path.
-                    }
-
-                    resolve(null);
-                });
-            });
-
-            req.on('error', () => resolve(null));
-            req.setTimeout(10000, () => { req.destroy(); resolve(null); });
-            req.write(body);
-            req.end();
-        } catch {
-            resolve(null);
-        }
     });
 }
 
@@ -517,6 +473,60 @@ function compareVersions(a, b) {
     return 0;
 }
 
+function getDefaultPluginArchiveUrl(archiveName) {
+    return `${PLUGIN_ARCHIVE_BASE_URL}/${encodeURIComponent(archiveName)}`;
+}
+
+function resolveRegistryDownloadUrl(entry) {
+    if (!entry) return null;
+
+    if (!entry.downloadUrl) {
+        return getDefaultPluginArchiveUrl(entry.archiveName || `${entry.name}.zip`);
+    }
+
+    try {
+        return new URL(entry.downloadUrl, PLUGIN_REGISTRY_URL).toString();
+    } catch {
+        return null;
+    }
+}
+
+function normalizeRegistryEntry(entry) {
+    const normalized = typeof entry === 'string' ? { name: entry } : entry;
+    if (!normalized?.name) return null;
+
+    const rawName = String(normalized.name);
+    const archiveName = normalized.archiveName || `${rawName}.zip`;
+    const pluginName = rawName;
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(pluginName) || !/^[a-zA-Z0-9_.-]+\.zip$/i.test(archiveName)) {
+        return null;
+    }
+
+    const registryEntry = {
+        ...normalized,
+        name: pluginName,
+        archiveName
+    };
+
+    return {
+        ...registryEntry,
+        downloadUrl: resolveRegistryDownloadUrl(registryEntry)
+    };
+}
+
+function normalizeRegistry(registry) {
+    const plugins = Array.isArray(registry) ? registry : registry?.plugins;
+    if (!Array.isArray(plugins)) return null;
+
+    return {
+        ...(Array.isArray(registry) ? {} : registry),
+        plugins: plugins
+            .map(normalizeRegistryEntry)
+            .filter(Boolean)
+    };
+}
+
 const ITEMS_PER_PAGE = 5;
 
 /**
@@ -566,7 +576,7 @@ function buildInstallSection({ userId, pluginLang, lang, available, registryErro
                     new TextDisplayBuilder().setContent(
                         `**${plugin.name}**\n` +
                         `- ${plugin.description || '—'}\n` +
-                        `- \`v${plugin.version}\``
+                        `- \`${plugin.version ? `v${plugin.version}` : 'latest'}\``
                     )
                 );
 
@@ -804,14 +814,10 @@ async function handlePluginInstall(interaction) {
 
 /**
  * Fetches the remote plugin registry (list of available plugins)
- * @returns {Promise<Object[]|null>} Array of plugin entries or null on error
+ * @returns {Promise<Object|null>} Registry object or null on error
  */
 async function fetchRegistry() {
-    const registry = await httpsGetJSON(PLUGIN_REGISTRY_PROXY_URL);
-    if (registry?.plugins && Array.isArray(registry.plugins)) {
-        return registry;
-    }
-    return null;
+    return normalizeRegistry(await httpsGetJSON(PLUGIN_REGISTRY_URL));
 }
 
 /**
@@ -845,7 +851,7 @@ async function installPlugin(pluginName, registrar, options = {}) {
 
         const downloadUrl = entry.downloadUrl;
         if (!downloadUrl) {
-            return { success: false, message: `Plugin "${pluginName}" is missing a release download URL from the central proxy.` };
+            return { success: false, message: `Plugin "${pluginName}" is missing a download URL in the GitHub registry.` };
         }
         const { zipPath, extractDir, pluginRoot } = await downloadAndExtractPluginArchive(pluginName, downloadUrl);
 
@@ -885,11 +891,45 @@ async function installPlugin(pluginName, registrar, options = {}) {
  */
 async function checkPluginUpdates() {
     const installedPlugins = getInstalledPluginManifests();
-    const proxyPayload = await requestPluginUpdatesViaProxy(installedPlugins);
-    if (proxyPayload?.updates) {
-        return { updates: proxyPayload.updates };
+    if (installedPlugins.length === 0) {
+        return { updates: [] };
     }
-    return { updates: [], error: 'Could not check plugin updates.' };
+
+    const registry = await fetchRegistry();
+    if (!registry || !Array.isArray(registry.plugins)) {
+        return { updates: [], error: 'Could not check plugin updates.' };
+    }
+
+    const registryByName = new Map(registry.plugins.map(plugin => [plugin.name, plugin]));
+    const updates = [];
+    for (const plugin of installedPlugins.filter(plugin => plugin?.name && plugin?.version)) {
+        const registryEntry = registryByName.get(plugin.name);
+        if (!registryEntry) continue;
+
+        let latestVersion = registryEntry.version;
+        if (!latestVersion) {
+            let archive = null;
+            try {
+                archive = await downloadAndExtractPluginArchive(plugin.name, registryEntry.downloadUrl);
+                const manifest = JSON.parse(fs.readFileSync(path.join(archive.pluginRoot, 'plugin.json'), 'utf8'));
+                latestVersion = manifest.version;
+            } catch (error) {
+                console.warn(`[PLUGINS] Warning: could not inspect latest version for ${plugin.name}: ${error.message}`);
+            } finally {
+                cleanupTempPaths(archive?.extractDir, archive?.zipPath);
+            }
+        }
+
+        if (latestVersion && compareVersions(latestVersion, plugin.version) > 0) {
+            updates.push({
+                name: plugin.name,
+                current: plugin.version,
+                latest: latestVersion
+            });
+        }
+    }
+
+    return { updates };
 }
 
 /**
@@ -929,7 +969,7 @@ async function updatePlugin(pluginName, registrar) {
 
         const downloadUrl = entry.downloadUrl;
         if (!downloadUrl) {
-            return { success: false, message: `Plugin "${pluginName}" is missing a release download URL from the central proxy.` };
+            return { success: false, message: `Plugin "${pluginName}" is missing a download URL in the GitHub registry.` };
         }
         const archive = await downloadAndExtractPluginArchive(pluginName, downloadUrl);
         zipPath = archive.zipPath;
