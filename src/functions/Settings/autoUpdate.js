@@ -24,8 +24,6 @@ const {
 const PENDING_UPDATE_PATH = path.join(__dirname, '..', '..', 'database', 'pending_update.json');
 const AUTO_UPDATE_INTERVAL_MS = 5 * 60 * 1000;
 const UPDATE_CHECK_PROXY_URL = process.env.UPDATE_CHECK_PROXY_URL || 'https://wosland.com/api/updates/latest';
-const PLUGIN_UPDATE_PROXY_URL = process.env.PLUGIN_UPDATE_CHECK_PROXY_URL
-    || new URL('/api/updates/plugins', UPDATE_CHECK_PROXY_URL).toString();
 
 let autoUpdateInterval = null;
 let lastNotifiedVersion = null;
@@ -71,37 +69,7 @@ function requestJson(url, { method = 'GET', timeoutMs = 5000, headers = {}, body
     });
 }
 
-function getInstalledPluginVersions() {
-    if (typeof global.pluginManager?.getInstalled !== 'function') return [];
-
-    return global.pluginManager.getInstalled()
-        .filter(plugin => plugin?.name && plugin?.version)
-        .map(plugin => ({
-            name: plugin.name,
-            version: plugin.version
-        }));
-}
-
-async function checkPluginUpdatesViaProxy() {
-    const installedPlugins = getInstalledPluginVersions();
-    if (installedPlugins.length === 0) {
-        return { updates: [] };
-    }
-
-    const payload = await requestJson(PLUGIN_UPDATE_PROXY_URL, {
-        method: 'POST',
-        timeoutMs: 5000,
-        headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'WhiteoutSurvivalBot'
-        },
-        body: JSON.stringify({ plugins: installedPlugins })
-    });
-
-    if (payload && Array.isArray(payload.updates)) {
-        return { updates: payload.updates };
-    }
-
+async function checkPluginUpdatesViaRegistry() {
     if (typeof global.pluginManager?.checkUpdates === 'function') {
         return global.pluginManager.checkUpdates();
     }
@@ -358,7 +326,7 @@ async function handleAutoUpdateCheck(interaction) {
 
         // Check for plugin updates
         let pluginUpdates = [];
-        const pluginResult = await checkPluginUpdatesViaProxy();
+        const pluginResult = await checkPluginUpdatesViaRegistry();
         if (pluginResult && pluginResult.updates.length > 0) {
             pluginUpdates = pluginResult.updates;
             statusText += settingsLang.pluginUpdates.title;
@@ -1266,7 +1234,7 @@ function startAutoUpdateScheduler(client) {
             }
 
             // ── 2. Check plugin update availability ───────────────────────
-            const { updates: pluginUpdates = [] } = await checkPluginUpdatesViaProxy();
+            const { updates: pluginUpdates = [] } = await checkPluginUpdatesViaRegistry();
             const newPluginUpdates = pluginUpdates.filter(pu => lastNotifiedPluginVersions.get(pu.name) !== pu.latest);
 
             const hasBotUpdate = botUpdateAvailable && latestVersion;
