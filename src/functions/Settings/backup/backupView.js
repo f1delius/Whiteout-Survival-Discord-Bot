@@ -1,8 +1,7 @@
 const { ButtonBuilder, ButtonStyle, ContainerBuilder, MessageFlags, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = require('discord.js');
 const { getUserInfo, assertUserMatches, handleError, updateComponentsV2AfterSeparator } = require('../../utility/commonFunctions');
 const { getComponentEmoji, getEmojiMapForUser } = require('../../utility/emojis');
-const { settingsQueries } = require('../../utility/database');
-const { getAuthenticatedDriveClient } = require('./backupCreate');
+const { getAuthenticatedDriveClient, isGDriveConfigured } = require('./backupCreate');
 
 /**
  * Creates the view backups button
@@ -35,10 +34,8 @@ async function handleBackupViewButton(interaction) {
 			});
 		}
 
-		// Check if Google Drive token exists
-		const tokenResult = settingsQueries.getGDriveToken.get();
-
-		if (!tokenResult || !tokenResult.gdrive_token) {
+		// Check if Google Drive is configured
+		if (!isGDriveConfigured()) {
 			return await interaction.reply({
 				content: lang.settings.backup.backupView.errors.noToken,
 				ephemeral: true

@@ -128,6 +128,9 @@ Set these in your `.env` file:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `TOKEN` | Yes | Your Discord bot token |
+| `GDRIVE_CLIENT_ID` | No | Google Drive OAuth client ID, for backups. Set alongside `GDRIVE_CLIENT_SECRET` and `GDRIVE_REFRESH_TOKEN` to configure Google Drive backups via env vars instead of the in-Discord OAuth setup. Useful on hosts with an ephemeral filesystem/database (e.g. Railway free trial redeploys), since the credentials survive a redeploy instead of being wiped with the database. |
+| `GDRIVE_CLIENT_SECRET` | No | Google Drive OAuth client secret (see above) |
+| `GDRIVE_REFRESH_TOKEN` | No | Google Drive OAuth refresh token (see above). Obtain it once via the normal in-Discord OAuth setup flow, then copy the `refreshToken` value from the `gdrive_token` column of the `settings` table and set it here. |
 
 The following are set automatically by the compose file and should not be changed:
 

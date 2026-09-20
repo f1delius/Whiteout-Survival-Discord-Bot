@@ -1,11 +1,39 @@
 const { ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, MediaGalleryItemBuilder, ContainerBuilder, MessageFlags, MediaGalleryBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, LabelBuilder } = require('discord.js');
 const { google } = require('googleapis');
-const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const { getUserInfo, assertUserMatches, handleError, updateComponentsV2AfterSeparator } = require('../../utility/commonFunctions');
 const { getComponentEmoji, getEmojiMapForUser } = require('../../utility/emojis');
 const { settingsQueries } = require('../../utility/database');
+const { ensureTempDir, createBackupArchive } = require('./backupBundle');
+
+/**
+ * Check whether Google Drive OAuth credentials are supplied via environment variables.
+ * Lets a host with an ephemeral filesystem (e.g. Railway free trial redeploys) keep
+ * backups working without redoing the Discord modal OAuth flow after every redeploy.
+ * @returns {boolean}
+ */
+function hasEnvGDriveCredentials() {
+	return !!(process.env.GDRIVE_CLIENT_ID && process.env.GDRIVE_CLIENT_SECRET && process.env.GDRIVE_REFRESH_TOKEN);
+}
+
+/**
+ * Check whether Google Drive backup is configured, either via env vars or a stored refresh token
+ * @returns {boolean}
+ */
+function isGDriveConfigured() {
+	if (hasEnvGDriveCredentials()) return true;
+
+	const tokenResult = settingsQueries.getGDriveToken.get();
+	if (!tokenResult || !tokenResult.gdrive_token) return false;
+
+	try {
+		const tokenData = JSON.parse(tokenResult.gdrive_token);
+		return !!tokenData.refreshToken;
+	} catch (e) {
+		return false;
+	}
+}
 
 /**
  * Creates the create backup button
@@ -38,30 +66,32 @@ async function handleBackupCreateButton(interaction) {
 			});
 		}
 
-		// Check if Google Drive token exists
-		const tokenResult = settingsQueries.getGDriveToken.get();
+		// Check if Google Drive is configured via env vars; if not, fall back to the stored token
+		if (!hasEnvGDriveCredentials()) {
+			const tokenResult = settingsQueries.getGDriveToken.get();
 
-		// Check if token is complete (has refreshToken) or incomplete (just OAuth state)
-		let hasCompleteToken = false;
-		if (tokenResult && tokenResult.gdrive_token) {
-			try {
-				const tokenData = JSON.parse(tokenResult.gdrive_token);
-				// Only consider it valid if it has a refreshToken (not just OAuth state with clientId/Secret)
-				hasCompleteToken = !!tokenData.refreshToken;
-			} catch (e) {
-				// Invalid JSON - reset it
+			// Check if token is complete (has refreshToken) or incomplete (just OAuth state)
+			let hasCompleteToken = false;
+			if (tokenResult && tokenResult.gdrive_token) {
+				try {
+					const tokenData = JSON.parse(tokenResult.gdrive_token);
+					// Only consider it valid if it has a refreshToken (not just OAuth state with clientId/Secret)
+					hasCompleteToken = !!tokenData.refreshToken;
+				} catch (e) {
+					// Invalid JSON - reset it
+					settingsQueries.clearGDriveToken.run();
+				}
+			}
+
+			// If incomplete OAuth state exists, clear it and start fresh
+			if (tokenResult && tokenResult.gdrive_token && !hasCompleteToken) {
 				settingsQueries.clearGDriveToken.run();
 			}
-		}
 
-		// If incomplete OAuth state exists, clear it and start fresh
-		if (tokenResult && tokenResult.gdrive_token && !hasCompleteToken) {
-			settingsQueries.clearGDriveToken.run();
-		}
-
-		if (!hasCompleteToken) {
-			// No token - show OAuth setup guide
-			return await showOAuthSetupGuide(interaction, lang);
+			if (!hasCompleteToken) {
+				// No token - show OAuth setup guide
+				return await showOAuthSetupGuide(interaction, lang);
+			}
 		}
 
 		// Token exists - proceed with backup creation
@@ -564,6 +594,17 @@ async function handleOAuthCodeModal(interaction) {
 				components: content,
 				flags: MessageFlags.IsComponentsV2
 			});
+
+			// Send the credentials as a private follow-up so they can be copied into
+			// env vars (e.g. on Railway) without needing direct access to the SQLite database
+			await interaction.followUp({
+				content: `${lang.settings.backup.backupCreate.content.envVars.title}\n` +
+					`${lang.settings.backup.backupCreate.content.envVars.description
+						.replace('{clientId}', oauthState.clientId)
+						.replace('{clientSecret}', oauthState.clientSecret)
+						.replace('{refreshToken}', credentials.refresh_token)}`,
+				ephemeral: true
+			});
 			// TODO: Add admin log entry
 		} catch (outerError) {
 			// Only catch unexpected errors here (e.g., database errors)
@@ -575,12 +616,91 @@ async function handleOAuthCodeModal(interaction) {
 }
 
 /**
+ * Creates the show credentials button
+ * @param {string} userId - ID of the user who can interact with this button
+ * @param {Object} lang - Language object for localized text
+ * @returns {ButtonBuilder} The show credentials button
+ */
+function createBackupShowCredsButton(userId, lang = {}) {
+	return new ButtonBuilder()
+		.setCustomId(`db_backup_show_creds_${userId}`)
+		.setLabel(lang.settings.backup.mainPage.buttons.showCreds)
+		.setStyle(ButtonStyle.Secondary)
+		.setEmoji(getComponentEmoji(getEmojiMapForUser(userId), '1011'));
+}
+
+/**
+ * Handle show credentials button - privately displays the stored Google Drive
+ * OAuth credentials so they can be copied into env vars (e.g. on Railway),
+ * since the SQLite database isn't directly accessible on most hosts.
+ * @param {import('discord.js').ButtonInteraction} interaction
+ */
+async function handleBackupShowCredsButton(interaction) {
+	const { adminData, lang } = getUserInfo(interaction.user.id);
+	try {
+		const expectedUserId = interaction.customId.split('_')[4];
+		if (!(await assertUserMatches(interaction, expectedUserId, lang))) return;
+
+		if (!adminData?.is_owner) {
+			return await interaction.reply({
+				content: lang.common.noPermission,
+				ephemeral: true
+			});
+		}
+
+		if (hasEnvGDriveCredentials()) {
+			return await interaction.reply({
+				content: lang.settings.backup.backupCreate.content.envVars.usingEnv,
+				ephemeral: true
+			});
+		}
+
+		const tokenResult = settingsQueries.getGDriveToken.get();
+		let tokenData = null;
+		if (tokenResult && tokenResult.gdrive_token) {
+			try {
+				tokenData = JSON.parse(tokenResult.gdrive_token);
+			} catch (e) {
+				tokenData = null;
+			}
+		}
+
+		if (!tokenData || !tokenData.refreshToken) {
+			return await interaction.reply({
+				content: lang.settings.backup.backupCreate.errors.notConfigured,
+				ephemeral: true
+			});
+		}
+
+		await interaction.reply({
+			content: `${lang.settings.backup.backupCreate.content.envVars.title}\n` +
+				`${lang.settings.backup.backupCreate.content.envVars.description
+					.replace('{clientId}', tokenData.clientId)
+					.replace('{clientSecret}', tokenData.clientSecret)
+					.replace('{refreshToken}', tokenData.refreshToken)}`,
+			ephemeral: true
+		});
+	} catch (error) {
+		await handleError(interaction, lang, error, 'handleBackupShowCredsButton');
+	}
+}
+
+/**
  * Get authenticated Google Drive client using stored token
  * @returns {google.drive_v3.Drive} Authenticated Drive client
  * @throws {Error} If no valid token is stored
  */
 function getAuthenticatedDriveClient() {
 	const OOB_REDIRECT_URI = 'urn:ietf:wg:oauth:2.0:oob';
+
+	// Prefer env-based credentials so backups survive redeploys on hosts with an
+	// ephemeral filesystem/database (e.g. Railway free trial).
+	if (hasEnvGDriveCredentials()) {
+		const oauth2Client = new google.auth.OAuth2(process.env.GDRIVE_CLIENT_ID, process.env.GDRIVE_CLIENT_SECRET, OOB_REDIRECT_URI);
+		oauth2Client.setCredentials({ refresh_token: process.env.GDRIVE_REFRESH_TOKEN });
+		return google.drive({ version: 'v3', auth: oauth2Client });
+	}
+
 	const tokenResult = settingsQueries.getGDriveToken.get();
 
 	if (!tokenResult || !tokenResult.gdrive_token) {
@@ -686,93 +806,20 @@ async function cleanupOldBackups(drive, folderId) {
  * @returns {Promise<Object>} Result object with success status and file details
  */
 async function createAndUploadBackup() {
+	let tempBackupPath = null;
 	try {
-		const stream = require('stream');
-
-		// Get database path (from src/functions/Settings/backup to src/database)
-		const dbPath = path.join(__dirname, '../../../database/Database.db');
-
-		// Check if database file exists
-		if (!fs.existsSync(dbPath)) {
-			throw new Error('Database file not found');
-		}
-
-		// Check database file size
-		const stats = fs.statSync(dbPath);
-		if (stats.size === 0) {
-			throw new Error('Database file is empty');
-		}
-
-		// Validate database integrity
-		try {
-			const db = new Database(dbPath, { readonly: true });
-			const integrityResult = db.pragma('integrity_check');
-			db.close();
-
-			// integrity_check returns array of objects with 'integrity_check' property
-			// If OK, returns [{ integrity_check: 'ok' }]
-			if (!integrityResult || integrityResult.length === 0) {
-				throw new Error('Database integrity check returned no results');
-			}
-
-			const firstResult = integrityResult[0];
-			const checkValue = typeof firstResult === 'object' ? firstResult.integrity_check : firstResult;
-
-			if (checkValue !== 'ok') {
-				// Log full error details for debugging
-				console.error('[Backup] Integrity check failed:', JSON.stringify(integrityResult));
-				throw new Error(`Database integrity check failed: ${JSON.stringify(integrityResult.slice(0, 3))}`);
-			}
-		} catch (error) {
-			// If the error is from our throw statements, pass it through
-			if (error.message.includes('integrity check')) {
-				throw error;
-			}
-			throw new Error(`Database validation failed: ${error.message}`);
-		}
-
 		// Create backup filename with timestamp
 		const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').split('.')[0];
-		const backupFilename = `WOS_Backup_${timestamp}.db`;
+		const backupFilename = `WOS_Backup_${timestamp}.zip`;
 
-		// Create temporary backup path
-		const tempDir = path.join(__dirname, '../../../temp');
-		if (!fs.existsSync(tempDir)) {
-			fs.mkdirSync(tempDir, { recursive: true });
-		}
-		const tempBackupPath = path.join(tempDir, backupFilename);
+		const tempDir = ensureTempDir();
+		tempBackupPath = path.join(tempDir, backupFilename);
 
-		// Use SQLite's backup API to create a consistent snapshot (handles WAL correctly)
-		// This ensures we get a transactionally-consistent copy even while the database is in use
-		const sourceDb = new Database(dbPath, { readonly: true });
-		const backupDb = new Database(tempBackupPath);
-
-		try {
-			await new Promise((resolve, reject) => {
-				try {
-					sourceDb.backup(tempBackupPath)
-						.then(() => {
-							sourceDb.close();
-							backupDb.close();
-							resolve();
-						})
-						.catch(reject);
-				} catch (error) {
-					reject(error);
-				}
-			});
-		} catch (backupError) {
-			// Clean up source connection on error
-			try { sourceDb.close(); } catch (e) { }
-			try { backupDb.close(); } catch (e) { }
-			throw new Error(`SQLite backup failed: ${backupError.message}`);
-		}
-
-		// Read the completed backup file
-		const dbBuffer = fs.readFileSync(tempBackupPath);
-
-		// Clean up temporary backup file
-		fs.unlinkSync(tempBackupPath);
+		// Build the archive: core database + every plugin database + manifest.
+		// Integrity is validated inside; a bad core database aborts, a bad plugin
+		// database is skipped.
+		const archive = await createBackupArchive(tempBackupPath);
+		console.log(`[Backup] Bundled core database + ${archive.plugins.length} plugin database(s)`);
 
 		// Get authenticated Drive client
 		const drive = getAuthenticatedDriveClient();
@@ -783,13 +830,13 @@ async function createAndUploadBackup() {
 		// Upload to Google Drive in the wosland_backups folder
 		const fileMetadata = {
 			name: backupFilename,
-			mimeType: 'application/x-sqlite3',
+			mimeType: 'application/zip',
 			parents: [folderId]
 		};
 
 		const media = {
-			mimeType: 'application/x-sqlite3',
-			body: stream.Readable.from(dbBuffer)
+			mimeType: 'application/zip',
+			body: fs.createReadStream(tempBackupPath)
 		};
 
 		const file = await drive.files.create({
@@ -797,6 +844,10 @@ async function createAndUploadBackup() {
 			media: media,
 			fields: 'id, name, size, createdTime, webViewLink'
 		});
+
+		// Clean up temporary backup file
+		try { fs.unlinkSync(tempBackupPath); } catch { /* ignore */ }
+		tempBackupPath = null;
 
 		// Clean up old backups to maintain MAX_BACKUPS limit
 		await cleanupOldBackups(drive, folderId);
@@ -807,9 +858,14 @@ async function createAndUploadBackup() {
 			fileName: file.data.name,
 			fileSize: parseInt(file.data.size),
 			createdTime: file.data.createdTime,
-			webViewLink: file.data.webViewLink
+			webViewLink: file.data.webViewLink,
+			pluginCount: archive.plugins.length,
+			skippedPlugins: archive.skipped
 		};
 	} catch (error) {
+		if (tempBackupPath) {
+			try { fs.unlinkSync(tempBackupPath); } catch { /* ignore */ }
+		}
 		await handleError(null, null, new Error(`Backup creation error: ${error.message}`), 'createAndUploadBackup', false);
 		return {
 			success: false,
@@ -819,6 +875,8 @@ async function createAndUploadBackup() {
 }
 
 module.exports = {
+	hasEnvGDriveCredentials,
+	isGDriveConfigured,
 	createBackupCreateButton,
 	handleBackupCreateButton,
 	showOAuthSetupGuide,
@@ -831,6 +889,8 @@ module.exports = {
 	showAuthorizationStep,
 	handleOAuthCodeSubmitButton,
 	handleOAuthCodeModal,
+	createBackupShowCredsButton,
+	handleBackupShowCredsButton,
 	getAuthenticatedDriveClient,
 	createAndUploadBackup
 };

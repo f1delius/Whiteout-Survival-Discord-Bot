@@ -2263,13 +2263,18 @@
                     "resetOAuthField": {
                         "name": "- **Réinitialiser l'OAuth Google Drive**",
                         "value": "  - Réinitialisez votre autorisation Google Drive. Utilisez cette option si vous souhaitez connecter un autre compte Google Drive ou si vous rencontrez des problèmes avec la connexion actuelle."
+                    },
+                    "showCredsField": {
+                        "name": "- **Afficher les identifiants**",
+                        "value": "  - Affichez vos identifiants Google Drive pour les enregistrer comme variables d'environnement, afin que les sauvegardes survivent à un redéploiement sur un hébergeur avec une base de données temporaire (ex. l'essai gratuit de Railway)."
                     }
                 },
                 "buttons": {
                     "create": "Créer",
                     "view": "Voir",
                     "restore": "Restaurer",
-                    "resetOAuth": "Réinitialiser"
+                    "resetOAuth": "Réinitialiser",
+                    "showCreds": "Afficher les identifiants"
                 }
             },
             "backupCreate": {
@@ -2289,6 +2294,11 @@
                     "createdField": {
                         "name": "- **Détails de la sauvegarde**",
                         "value": "  - Nom du fichier : {backupName}\n  - Créé à : {createdAt}\n  - Taille du fichier : {fileSize} Mo\n  - Lien Google Drive : [Voir la sauvegarde]({backupLink})"
+                    },
+                    "envVars": {
+                        "title": "### {emoji.1011} À enregistrer pour les redéploiements",
+                        "description": "Copiez ces valeurs dans les variables d'environnement de votre hébergeur (ex. Railway → Variables) pour que les sauvegardes continuent de fonctionner après un redéploiement, même si la base de données est réinitialisée :\n```\nGDRIVE_CLIENT_ID={clientId}\nGDRIVE_CLIENT_SECRET={clientSecret}\nGDRIVE_REFRESH_TOKEN={refreshToken}\n```\n{emoji.1050} Traitez ceci comme un mot de passe — quiconque le possède peut accéder à votre Google Drive.",
+                        "usingEnv": "{emoji.1004} Google Drive est déjà configuré via des variables d'environnement (`GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN`) sur l'hébergeur, il n'y a donc rien de nouveau à afficher — vous avez déjà ces valeurs là où vous les avez définies."
                     },
                     "step1": {
                         "title": "### Étape 1 : Créer un projet Google Cloud",
@@ -2349,7 +2359,8 @@
                     "invalidCode": "{emoji.1050} Format de code d'autorisation invalide. Assurez-vous d'avoir copié le code complet.",
                     "stateNotFound": "{emoji.1050} État OAuth introuvable. Recommencez la configuration.",
                     "authFailed": "{emoji.1050} **Dépannage :**\n1. Assurez-vous que le code n'a pas expiré (copier et soumettre dans les 10 minutes)\n2. Vérifiez que votre ID client et votre secret sont corrects\n3. Réessayez le processus de configuration depuis le début\n4. Redémarrez l'assistant en cliquant à nouveau sur le bouton « Créer une sauvegarde »",
-                    "noRefreshToken": "{emoji.1050} Échec de l'autorisation - aucun jeton d'actualisation reçu. Réessayez et assurez-vous de cliquer sur « Autoriser » pour accorder l'accès."
+                    "noRefreshToken": "{emoji.1050} Échec de l'autorisation - aucun jeton d'actualisation reçu. Réessayez et assurez-vous de cliquer sur « Autoriser » pour accorder l'accès.",
+                    "notConfigured": "{emoji.1050} Google Drive n'est pas encore connecté. Utilisez « Créer une sauvegarde » pour le configurer d'abord."
                 }
             },
             "backupView": {

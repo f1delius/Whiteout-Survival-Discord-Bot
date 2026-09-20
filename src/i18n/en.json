@@ -2263,13 +2263,18 @@
                     "resetOAuthField": {
                         "name": "- **Reset Google Drive OAuth**",
                         "value": "  - Reset your Google Drive connection. Use this to switch accounts or fix connection issues."
+                    },
+                    "showCredsField": {
+                        "name": "- **Show Credentials**",
+                        "value": "  - View your Google Drive credentials to save as environment variables, so backups survive a redeploy on hosts with a temporary database (e.g. Railway's free trial)."
                     }
                 },
                 "buttons": {
                     "create": "Create Backup",
                     "view": "View Backups",
                     "restore": "Restore Backup",
-                    "resetOAuth": "Reset OAuth"
+                    "resetOAuth": "Reset OAuth",
+                    "showCreds": "Show Credentials"
                 }
             },
             "backupCreate": {
@@ -2289,6 +2294,11 @@
                     "createdField": {
                         "name": "- **Backup Details**",
                         "value": "  - File Name: {backupName}\n  - Created At: {createdAt}\n  - File Size: {fileSize} MB\n  - Google Drive Link: [View Backup]({backupLink})"
+                    },
+                    "envVars": {
+                        "title": "### {emoji.1011} Save These For Redeploys",
+                        "description": "Copy these into your hosting platform's environment variables (e.g. Railway → Variables) so backups keep working after a redeploy, even if the database gets wiped:\n```\nGDRIVE_CLIENT_ID={clientId}\nGDRIVE_CLIENT_SECRET={clientSecret}\nGDRIVE_REFRESH_TOKEN={refreshToken}\n```\n{emoji.1050} Treat this like a password — whoever has it can access your Google Drive.",
+                        "usingEnv": "{emoji.1004} Google Drive is already configured via environment variables (`GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN`) on the host, so there's nothing new to show — you already have these values wherever you set them."
                     },
                     "step1": {
                         "title": "### Step 1: Create Google Cloud Project",
@@ -2349,7 +2359,8 @@
                     "invalidCode": "{emoji.1050} Invalid authorization code format. Make sure you copied the full code.",
                     "stateNotFound": "{emoji.1050} OAuth state not found. Start setup again.",
                     "authFailed": "{emoji.1050} **Troubleshooting:**\n1. Make sure the code hasn't expired (copy and submit within 10 minutes)\n2. Check that your Client ID and Secret are correct\n3. Try the setup process again from scratch\n4. Restart the wizard by clicking 'Create Backup' again",
-                    "noRefreshToken": "{emoji.1050} Authorization failed, no refresh token received. Try again and make sure you click \"Allow\" to grant access."
+                    "noRefreshToken": "{emoji.1050} Authorization failed, no refresh token received. Try again and make sure you click \"Allow\" to grant access.",
+                    "notConfigured": "{emoji.1050} Google Drive isn't connected yet. Use Create Backup to set it up first."
                 }
             },
             "backupView": {

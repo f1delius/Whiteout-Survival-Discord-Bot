@@ -10,12 +10,11 @@ const {
 } = require('discord.js');
 const { getUserInfo, assertUserMatches, handleError } = require('../../utility/commonFunctions');
 const { getEmojiMapForUser, getComponentEmoji } = require('../../utility/emojis');
-const { createBackupCreateButton } = require('./backupCreate');
+const { createBackupCreateButton, createBackupShowCredsButton, isGDriveConfigured } = require('./backupCreate');
 const { createBackupViewButton } = require('./backupView');
 const { createBackupRestoreButton } = require('./backupRestore');
 const { createBackupResetOAuthButton } = require('./backup_reauth');
 const { createBackToSettingsButton } = require('../backToSettings');
-const { settingsQueries } = require('../../utility/database');
 
 /**
  * Creates the backup management button for settings
@@ -71,24 +70,15 @@ async function handleBackupButton(interaction) {
 function createBackupContainer(interaction, lang, adminData) {
 	const userId = interaction.user.id;
 
-	// Check if Google Drive token exists AND is complete (has refreshToken, not just OAuth state)
-	const tokenResult = settingsQueries.getGDriveToken.get();
-	let hasCompleteToken = false;
-	if (tokenResult && tokenResult.gdrive_token) {
-		try {
-			const tokenData = JSON.parse(tokenResult.gdrive_token);
-			// Only consider it valid if it has a refreshToken (not just OAuth state with clientId/Secret)
-			hasCompleteToken = !!tokenData.refreshToken;
-		} catch (e) {
-			hasCompleteToken = false;
-		}
-	}
+	// Check if Google Drive is configured (via env vars or a stored refresh token)
+	const hasCompleteToken = isGDriveConfigured();
 
 	// Backup buttons
 	const backupCreateBtn = createBackupCreateButton(userId, lang);
 	const backupViewBtn = createBackupViewButton(userId, lang);
 	const backupRestoreBtn = createBackupRestoreButton(userId, lang);
 	const backupResetOAuthBtn = createBackupResetOAuthButton(userId, lang);
+	const backupShowCredsBtn = createBackupShowCredsButton(userId, lang);
 	const backToSettingsBtn = createBackToSettingsButton(userId, lang);
 
 	// Disable buttons if not owner
@@ -97,20 +87,26 @@ function createBackupContainer(interaction, lang, adminData) {
 		backupViewBtn.setDisabled(true);
 		backupRestoreBtn.setDisabled(true);
 		backupResetOAuthBtn.setDisabled(true);
+		backupShowCredsBtn.setDisabled(true);
 	} else {
-		// If owner, disable view/restore/reset buttons when no complete token exists
+		// If owner, disable view/restore/reset/showCreds buttons when no complete token exists
 		if (!hasCompleteToken) {
 			backupViewBtn.setDisabled(true);
 			backupRestoreBtn.setDisabled(true);
 			backupResetOAuthBtn.setDisabled(true);
+			backupShowCredsBtn.setDisabled(true);
 		}
 	}
 
-	const actionRow = new ActionRowBuilder().addComponents(
+	const actionRow1 = new ActionRowBuilder().addComponents(
 		backupCreateBtn,
 		backupViewBtn,
 		backupRestoreBtn,
 		backupResetOAuthBtn,
+		backupShowCredsBtn
+	);
+
+	const actionRow2 = new ActionRowBuilder().addComponents(
 		backToSettingsBtn
 	);
 
@@ -132,13 +128,16 @@ function createBackupContainer(interaction, lang, adminData) {
 					`${lang.settings.backup.mainPage.content.restoreBackupField.value}\n` +
 
 					`${lang.settings.backup.mainPage.content.resetOAuthField.name}\n` +
-					`${lang.settings.backup.mainPage.content.resetOAuthField.value}`
+					`${lang.settings.backup.mainPage.content.resetOAuthField.value}\n` +
+
+					`${lang.settings.backup.mainPage.content.showCredsField.name}\n` +
+					`${lang.settings.backup.mainPage.content.showCredsField.value}`
 				)
 			)
 			.addSeparatorComponents(
 				new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
 			)
-			.addActionRowComponents(actionRow)
+			.addActionRowComponents(actionRow1, actionRow2)
 	];
 
 	return { components: container };

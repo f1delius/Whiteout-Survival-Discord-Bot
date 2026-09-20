@@ -1,5 +1,10 @@
 node_modules/
 src/.env
 src/database/
-./plugins/
+plugins/
 .npmrc
+.claude/
+Whiteout-Survival-Discord-Bot-1.0.44/
+mul.tar.gz
+mulv1.tar.gz
+mul.zip

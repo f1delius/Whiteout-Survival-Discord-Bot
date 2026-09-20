@@ -1,10 +1,9 @@
 const cron = require('node-cron');
 const path = require('path');
 const fs = require('fs');
-const Database = require('better-sqlite3');
-const { settingsQueries } = require('../../utility/database');
-const { getAuthenticatedDriveClient } = require('./backupCreate');
+const { getAuthenticatedDriveClient, isGDriveConfigured } = require('./backupCreate');
 const { findOrCreateBackupFolder } = require('./backupView');
+const { ensureTempDir, createBackupArchive } = require('./backupBundle');
 
 let scheduledTask = null;
 let client = null;
@@ -42,10 +41,8 @@ function initializeBackupScheduler(discordClient) {
  */
 async function performScheduledBackup() {
 	try {
-		// Check if Google Drive token exists
-		const tokenResult = settingsQueries.getGDriveToken.get();
-
-		if (!tokenResult || !tokenResult.gdrive_token) {
+		// Check if Google Drive is configured
+		if (!isGDriveConfigured()) {
 			return;
 		}
 
@@ -83,79 +80,18 @@ async function performScheduledBackup() {
 }
 
 /**
- * Creates an uncompressed backup of the database
- * @returns {Promise<string>} Path to the created backup file
+ * Creates a backup archive (core database + every plugin database).
+ * @returns {Promise<string>} Path to the created .zip backup file
  */
 async function createDatabaseBackup() {
-	const dbPath = path.join(__dirname, '../../../database/Database.db');
-	const tempDir = path.join(__dirname, '../../../temp');
+	const tempDir = ensureTempDir();
 
-	// Ensure temp directory exists
-	if (!fs.existsSync(tempDir)) {
-		fs.mkdirSync(tempDir, { recursive: true });
-	}
+	// Format: 2026-02-08T00-00-00
+	const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('.')[0];
+	const backupPath = path.join(tempDir, `wosland_backup_${timestamp}.zip`);
 
-	// Check if database exists
-	if (!fs.existsSync(dbPath)) {
-		throw new Error('Database file not found');
-	}
-
-	// Check database file size
-	const dbStats = fs.statSync(dbPath);
-	if (dbStats.size === 0) {
-		throw new Error('Database file is empty');
-	}
-
-	// Validate database integrity
-	try {
-		const db = new Database(dbPath, { readonly: true });
-		const integrityResult = db.pragma('integrity_check');
-		db.close();
-
-		// integrity_check returns array of objects with 'integrity_check' property
-		if (!integrityResult || integrityResult.length === 0) {
-			throw new Error('Database integrity check returned no results');
-		}
-
-		const firstResult = integrityResult[0];
-		const checkValue = typeof firstResult === 'object' ? firstResult.integrity_check : firstResult;
-
-		if (checkValue !== 'ok') {
-			console.error('[Backup Scheduler] Integrity check failed:', JSON.stringify(integrityResult));
-			throw new Error(`Database integrity check failed: ${JSON.stringify(integrityResult.slice(0, 3))}`);
-		}
-	} catch (error) {
-		if (error.message.includes('integrity check')) {
-			throw error;
-		}
-		throw new Error(`Database validation failed: ${error.message}`);
-	}
-
-	// Create backup filename with timestamp
-	const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('.')[0]; // Format: 2026-02-08T00-00-00
-	const backupFileName = `wosland_backup_${timestamp}.db`;
-	const backupPath = path.join(tempDir, backupFileName);
-
-	// Use SQLite's backup API to create a safe copy (works while database is in use)
-	const sourceDb = new Database(dbPath, { readonly: true });
-	const backupDb = new Database(backupPath);
-
-	await new Promise((resolve, reject) => {
-		try {
-			sourceDb.backup(backupPath)
-				.then(() => {
-					sourceDb.close();
-					backupDb.close();
-					resolve();
-				})
-				.catch(reject);
-		} catch (error) {
-			reject(error);
-		}
-	});
-
-	const stats = fs.statSync(backupPath);
-	const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+	const result = await createBackupArchive(backupPath);
+	console.log(`[Backup Scheduler] Bundled core database + ${result.plugins.length} plugin database(s)`);
 
 	return backupPath;
 }
@@ -179,7 +115,7 @@ async function uploadBackupToDrive(backupPath) {
 			parents: [folderId]
 		},
 		media: {
-			mimeType: 'application/x-sqlite3',
+			mimeType: 'application/zip',
 			body: fs.createReadStream(backupPath)
 		},
 		fields: 'id, name, size'
@@ -245,12 +181,9 @@ async function triggerManualBackup() {
  * @returns {Object} Scheduler status information
  */
 function getSchedulerStatus() {
-	const tokenResult = settingsQueries.getGDriveToken.get();
-	const hasToken = tokenResult && tokenResult.gdrive_token;
-
 	return {
 		isRunning: scheduledTask !== null,
-		isConfigured: hasToken,
+		isConfigured: isGDriveConfigured(),
 		schedule: '00:00 UTC daily',
 		maxBackups: MAX_BACKUPS,
 		nextRun: scheduledTask ? 'Next midnight UTC' : 'Not scheduled'

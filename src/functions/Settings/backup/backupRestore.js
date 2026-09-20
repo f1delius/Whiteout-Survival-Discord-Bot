@@ -1,9 +1,9 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = require('discord.js');
 const { getUserInfo, assertUserMatches, handleError, updateComponentsV2AfterSeparator } = require('../../utility/commonFunctions');
 const { getComponentEmoji, getEmojiMapForUser } = require('../../utility/emojis');
-const { settingsQueries } = require('../../utility/database');
-const { getAuthenticatedDriveClient } = require('./backupCreate');
+const { getAuthenticatedDriveClient, isGDriveConfigured } = require('./backupCreate');
 const { findOrCreateBackupFolder, listBackupFiles } = require('./backupView');
+const { ensureTempDir, extractBackupArchive, restorePluginDatabases, createBackupArchive, CORE_DB_PATH } = require('./backupBundle');
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
@@ -39,10 +39,8 @@ async function handleBackupRestoreButton(interaction) {
 			});
 		}
 
-		// Check if Google Drive token exists
-		const tokenResult = settingsQueries.getGDriveToken.get();
-
-		if (!tokenResult || !tokenResult.gdrive_token) {
+		// Check if Google Drive is configured
+		if (!isGDriveConfigured()) {
 			return await interaction.reply({
 				content: lang.settings.backup.backupRestore.error.noToken,
 				ephemeral: true
@@ -297,39 +295,23 @@ async function handleRestoreExecuteButton(interaction) {
 			flags: MessageFlags.IsComponentsV2
 		});
 
-		const tempDir = path.join(__dirname, '../../../temp');
+		const tempDir = ensureTempDir();
 
-		// Ensure temp directory exists
-		if (!fs.existsSync(tempDir)) {
-			fs.mkdirSync(tempDir, { recursive: true });
+		// Create safety backup of the current state (core + plugin databases) so a
+		// bad restore is fully recoverable. Non-fatal: proceed even if it fails.
+		const dbPath = CORE_DB_PATH;
+		try {
+			const safetyBackupPath = path.join(tempDir, `pre-restore-backup_${Date.now()}.zip`);
+			await createBackupArchive(safetyBackupPath);
+			console.log(`[Database Restore] Safety backup written to ${safetyBackupPath}`);
+		} catch (safetyError) {
+			console.warn(`[Database Restore] Safety backup failed (continuing): ${safetyError.message}`);
 		}
-
-		// Create safety backup of current database
-		const dbPath = path.join(__dirname, '../../../database/Database.db');
-		const safetyBackupPath = path.join(tempDir, `pre-restore-backup_${Date.now()}.db`);
-
-		// Use SQLite's backup API to create a safe copy (works while database is in use)
-		const sourceDb = new Database(dbPath, { readonly: true });
-		const backupDb = new Database(safetyBackupPath);
-
-		// Safely backup the database
-		await new Promise((resolve, reject) => {
-			try {
-				sourceDb.backup(safetyBackupPath)
-					.then(() => {
-						sourceDb.close();
-						backupDb.close();
-						resolve();
-					})
-					.catch(reject);
-			} catch (error) {
-				reject(error);
-			}
-		});
 
 		// Download the backup file from Google Drive
 		const downloadExt = isZipFile ? '.zip' : '.db';
 		const downloadPath = path.join(tempDir, `restore_temp_${Date.now()}${downloadExt}`);
+		const extractDir = path.join(tempDir, `restore_extract_${Date.now()}`);
 		const dest = fs.createWriteStream(downloadPath);
 
 		const response = await drive.files.get(
@@ -354,10 +336,6 @@ async function handleRestoreExecuteButton(interaction) {
 			throw new Error('Download failed: file is empty');
 		}
 
-		// New backup format - use directly
-		restoredDbPath = downloadPath;
-
-
 		const container2 = [
 			new ContainerBuilder()
 				.setAccentColor(0xe67e22)
@@ -374,26 +352,36 @@ async function handleRestoreExecuteButton(interaction) {
 			flags: MessageFlags.IsComponentsV2
 		});
 
-		await restoreDatabase(dbPath, downloadPath);
+		let pluginRestoreSummary = { restored: [], skipped: [] };
 
-		// Clean up temp files
 		if (isZipFile) {
-			// For old zip backups, delete both zip and extracted directory
-			if (fs.existsSync(downloadPath)) {
-				fs.unlinkSync(downloadPath);
-			}
-			const extractPath = path.dirname(downloadPath);
-			if (fs.existsSync(extractPath)) {
-				fs.rmSync(extractPath, { recursive: true, force: true });
+			// Archive backup: extract, restore the core database, then plugin databases.
+			const { coreDbPath, pluginDbs } = extractBackupArchive(downloadPath, extractDir);
+			await restoreDatabase(dbPath, coreDbPath);
+			pluginRestoreSummary = restorePluginDatabases(pluginDbs);
+			if (pluginRestoreSummary.restored.length) {
+				console.log(`[Database Restore] Restored plugin databases: ${pluginRestoreSummary.restored.join(', ')}`);
 			}
 		} else {
-			// For new .db backups, just delete the downloaded file
-			if (fs.existsSync(downloadPath)) {
-				fs.unlinkSync(downloadPath);
+			// Legacy backup: a bare core .db file.
+			await restoreDatabase(dbPath, downloadPath);
+		}
+
+		// Clean up temp files
+		try { fs.existsSync(downloadPath) && fs.unlinkSync(downloadPath); } catch { /* ignore */ }
+		try { fs.existsSync(extractDir) && fs.rmSync(extractDir, { recursive: true, force: true }); } catch { /* ignore */ }
+
+		// Show success message
+		let pluginLine = '';
+		if (isZipFile) {
+			if (pluginRestoreSummary.restored.length) {
+				pluginLine = `\nPlugin databases restored: ${pluginRestoreSummary.restored.length}`;
+			}
+			if (pluginRestoreSummary.skipped.length) {
+				pluginLine += `\nPlugin databases skipped: ${pluginRestoreSummary.skipped.join(', ')}`;
 			}
 		}
 
-		// Show success message
 		const successContainer = [
 			new ContainerBuilder()
 				.setAccentColor(0x27ae60)
@@ -402,7 +390,8 @@ async function handleRestoreExecuteButton(interaction) {
 						`${lang.settings.backup.backupRestore.content.title.success}\n` +
 						`${lang.settings.backup.backupRestore.content.description.success}\n` +
 						`${lang.settings.backup.backupRestore.content.restartingField.name}\n` +
-						`${lang.settings.backup.backupRestore.content.restartingField.value}`
+						`${lang.settings.backup.backupRestore.content.restartingField.value}` +
+						pluginLine
 					)
 				)
 		];

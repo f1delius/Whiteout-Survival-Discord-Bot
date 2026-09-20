@@ -127,6 +127,7 @@ const buttonHandlers = [
     { pattern: /^db_backup_reset_oauth_confirm_/, fn: backupReAuth.handleResetOAuthConfirm },
     { pattern: /^db_backup_reset_oauth_cancel_/, fn: backupReAuth.handleResetOAuthCancel },
     { pattern: /^db_backup_reset_oauth_/, fn: backupReAuth.handleResetOAuthButton },
+    { pattern: /^db_backup_show_creds_/, fn: backUpCreate.handleBackupShowCredsButton },
     { pattern: /^emoji_theme_create_/, fn: emojisCreate.handleEmojiCreateButton },
     { pattern: /^emoji_theme_edit_/, fn: emojisEdit.handleEmojiEditButton },
     { pattern: /^pagination_emoji_edit_/, fn: emojisEdit.handleEmojiEditPagination },
