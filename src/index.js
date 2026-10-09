@@ -250,6 +250,10 @@ async function ensureTokenAndLogin() {
 // Initialize the bot
 async function init() {
     try {
+        // Fresh database + Google Drive env credentials: pull the latest backup before going online
+        const { autoRestoreIfEmpty } = require('./functions/Settings/backup/backupRestore');
+        if (await autoRestoreIfEmpty()) return;
+
         await ensureTokenAndLogin();
     } catch (error) {
         console.error('Failed to initialize bot:', error);

@@ -1,9 +1,10 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder, ContainerBuilder, MessageFlags, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = require('discord.js');
 const { getUserInfo, assertUserMatches, handleError, updateComponentsV2AfterSeparator } = require('../../utility/commonFunctions');
 const { getComponentEmoji, getEmojiMapForUser } = require('../../utility/emojis');
-const { getAuthenticatedDriveClient, isGDriveConfigured } = require('./backupCreate');
+const { getAuthenticatedDriveClient, isGDriveConfigured, hasEnvGDriveCredentials } = require('./backupCreate');
 const { findOrCreateBackupFolder, listBackupFiles } = require('./backupView');
-const { ensureTempDir, extractBackupArchive, restorePluginDatabases, createBackupArchive, CORE_DB_PATH } = require('./backupBundle');
+const { ensureTempDir, extractBackupArchive, restorePluginDatabases, createBackupArchive, checkIntegrity, CORE_DB_PATH } = require('./backupBundle');
+const { db } = require('../../utility/database');
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
@@ -299,7 +300,6 @@ async function handleRestoreExecuteButton(interaction) {
 
 		// Create safety backup of the current state (core + plugin databases) so a
 		// bad restore is fully recoverable. Non-fatal: proceed even if it fails.
-		const dbPath = CORE_DB_PATH;
 		try {
 			const safetyBackupPath = path.join(tempDir, `pre-restore-backup_${Date.now()}.zip`);
 			await createBackupArchive(safetyBackupPath);
@@ -309,32 +309,7 @@ async function handleRestoreExecuteButton(interaction) {
 		}
 
 		// Download the backup file from Google Drive
-		const downloadExt = isZipFile ? '.zip' : '.db';
-		const downloadPath = path.join(tempDir, `restore_temp_${Date.now()}${downloadExt}`);
-		const extractDir = path.join(tempDir, `restore_extract_${Date.now()}`);
-		const dest = fs.createWriteStream(downloadPath);
-
-		const response = await drive.files.get(
-			{ fileId: fileId, alt: 'media' },
-			{ responseType: 'stream' }
-		);
-
-		await new Promise((resolve, reject) => {
-			response.data
-				.on('error', reject)
-				.pipe(dest)
-				.on('finish', resolve)
-				.on('error', reject);
-		});
-
-		// Verify download completed successfully
-		if (!fs.existsSync(downloadPath)) {
-			throw new Error('Download failed: file not found');
-		}
-		const downloadStats = fs.statSync(downloadPath);
-		if (downloadStats.size === 0) {
-			throw new Error('Download failed: file is empty');
-		}
+		const downloadPath = await downloadBackupFile(drive, fileId, fileName);
 
 		const container2 = [
 			new ContainerBuilder()
@@ -352,24 +327,7 @@ async function handleRestoreExecuteButton(interaction) {
 			flags: MessageFlags.IsComponentsV2
 		});
 
-		let pluginRestoreSummary = { restored: [], skipped: [] };
-
-		if (isZipFile) {
-			// Archive backup: extract, restore the core database, then plugin databases.
-			const { coreDbPath, pluginDbs } = extractBackupArchive(downloadPath, extractDir);
-			await restoreDatabase(dbPath, coreDbPath);
-			pluginRestoreSummary = restorePluginDatabases(pluginDbs);
-			if (pluginRestoreSummary.restored.length) {
-				console.log(`[Database Restore] Restored plugin databases: ${pluginRestoreSummary.restored.join(', ')}`);
-			}
-		} else {
-			// Legacy backup: a bare core .db file.
-			await restoreDatabase(dbPath, downloadPath);
-		}
-
-		// Clean up temp files
-		try { fs.existsSync(downloadPath) && fs.unlinkSync(downloadPath); } catch { /* ignore */ }
-		try { fs.existsSync(extractDir) && fs.rmSync(extractDir, { recursive: true, force: true }); } catch { /* ignore */ }
+		const pluginRestoreSummary = await applyBackupFile(downloadPath);
 
 		// Show success message
 		let pluginLine = '';
@@ -415,11 +373,139 @@ async function handleRestoreExecuteButton(interaction) {
 }
 
 /**
+ * Download a backup file from Google Drive into the temp directory
+ * @param {import('googleapis').drive_v3.Drive} drive - Authenticated Drive client
+ * @param {string} fileId - Drive file ID
+ * @param {string} fileName - Drive file name (decides archive vs legacy .db)
+ * @returns {Promise<string>} Path of the downloaded file
+ */
+async function downloadBackupFile(drive, fileId, fileName) {
+	const downloadExt = fileName.endsWith('.zip') ? '.zip' : '.db';
+	const downloadPath = path.join(ensureTempDir(), `restore_temp_${Date.now()}${downloadExt}`);
+	const dest = fs.createWriteStream(downloadPath);
+
+	const response = await drive.files.get(
+		{ fileId: fileId, alt: 'media' },
+		{ responseType: 'stream' }
+	);
+
+	await new Promise((resolve, reject) => {
+		response.data
+			.on('error', reject)
+			.pipe(dest)
+			.on('finish', resolve)
+			.on('error', reject);
+	});
+
+	// Verify download completed successfully
+	if (!fs.existsSync(downloadPath)) {
+		throw new Error('Download failed: file not found');
+	}
+	if (fs.statSync(downloadPath).size === 0) {
+		throw new Error('Download failed: file is empty');
+	}
+
+	return downloadPath;
+}
+
+/**
+ * Restore the core database (and plugin databases, for archive backups) from a
+ * downloaded backup file, then remove the downloaded and extracted temp files
+ * @param {string} downloadPath - Path returned by downloadBackupFile
+ * @returns {Promise<{ restored: string[], skipped: string[] }>} Plugin database restore summary
+ */
+async function applyBackupFile(downloadPath) {
+	const extractDir = path.join(ensureTempDir(), `restore_extract_${Date.now()}`);
+	let pluginRestoreSummary = { restored: [], skipped: [] };
+
+	try {
+		if (downloadPath.endsWith('.zip')) {
+			// Archive backup: extract, restore the core database, then plugin databases.
+			const { coreDbPath, pluginDbs } = extractBackupArchive(downloadPath, extractDir);
+			await restoreDatabase(CORE_DB_PATH, coreDbPath);
+			pluginRestoreSummary = restorePluginDatabases(pluginDbs);
+			if (pluginRestoreSummary.restored.length) {
+				console.log(`[Database Restore] Restored plugin databases: ${pluginRestoreSummary.restored.join(', ')}`);
+			}
+		} else {
+			// Legacy backup: a bare core .db file.
+			await restoreDatabase(CORE_DB_PATH, downloadPath);
+		}
+	} finally {
+		// Clean up temp files
+		try { fs.existsSync(downloadPath) && fs.unlinkSync(downloadPath); } catch { /* ignore */ }
+		try { fs.existsSync(extractDir) && fs.rmSync(extractDir, { recursive: true, force: true }); } catch { /* ignore */ }
+	}
+
+	return pluginRestoreSummary;
+}
+
+/**
+ * Count the rows that only exist once the bot has been set up
+ * @returns {number}
+ */
+function countSetupRows() {
+	return db.prepare(`
+		SELECT (SELECT COUNT(*) FROM admins) + (SELECT COUNT(*) FROM alliance) + (SELECT COUNT(*) FROM players) AS total
+	`).get().total;
+}
+
+/**
+ * On startup, restore the latest Google Drive backup when the database is empty
+ * and Drive credentials are supplied through env vars. Lets a host with an
+ * ephemeral filesystem get its data back by itself after a redeploy.
+ * Never touches a database that already holds data.
+ * @returns {Promise<boolean>} True when a backup was restored and the bot is restarting
+ */
+async function autoRestoreIfEmpty() {
+	if (!hasEnvGDriveCredentials()) return false;
+	if (countSetupRows() > 0) return false;
+
+	try {
+		console.log('[Auto Restore] Database is empty, checking Google Drive for a backup...');
+		const drive = getAuthenticatedDriveClient();
+		const folderId = await findOrCreateBackupFolder(drive);
+		const [latest] = await listBackupFiles(drive, folderId);
+		if (!latest) {
+			console.log('[Auto Restore] No backup found on Google Drive, starting with an empty database.');
+			return false;
+		}
+
+		console.log(`[Auto Restore] Restoring ${latest.name} (created ${latest.createdTime})...`);
+		const downloadPath = await downloadBackupFile(drive, latest.id, latest.name);
+		await applyBackupFile(downloadPath);
+	} catch (error) {
+		console.error(`[Auto Restore] Failed, starting with an empty database: ${error.message}`);
+		return false;
+	}
+
+	// A backup with no data would otherwise restore and restart forever.
+	if (countSetupRows() === 0) {
+		console.warn('[Auto Restore] The latest backup holds no data, starting with an empty database.');
+		return false;
+	}
+
+	if (typeof global.restartBot !== 'function') {
+		console.warn('[Auto Restore] Backup restored. Auto-restart unavailable, please restart manually.');
+		return false;
+	}
+
+	console.log('[Auto Restore] Backup restored, restarting to load it...');
+	global.restartBot();
+	return true;
+}
+
+/**
  * Restore database from backup while preserving custom_emojis and settings tables
  * @param {string} currentDbPath - Path to current database
  * @param {string} backupDbPath - Path to backup database
  */
 async function restoreDatabase(currentDbPath, backupDbPath) {
+	const backupCheck = checkIntegrity(backupDbPath);
+	if (!backupCheck.ok) {
+		throw new Error(`Backup database integrity check failed: ${backupCheck.detail}`);
+	}
+
 	const currentDb = new Database(currentDbPath);
 	const backupDb = new Database(backupDbPath);
 
@@ -481,5 +567,6 @@ module.exports = {
 	handleBackupRestoreButton,
 	handleRestoreConfirmButton,
 	handleRestoreCancelButton,
-	handleRestoreExecuteButton
+	handleRestoreExecuteButton,
+	autoRestoreIfEmpty
 };
