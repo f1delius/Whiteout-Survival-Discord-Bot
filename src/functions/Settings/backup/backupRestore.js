@@ -3,7 +3,8 @@ const { getUserInfo, assertUserMatches, handleError, updateComponentsV2AfterSepa
 const { getComponentEmoji, getEmojiMapForUser } = require('../../utility/emojis');
 const { getAuthenticatedDriveClient, isGDriveConfigured, hasEnvGDriveCredentials } = require('./backupCreate');
 const { findOrCreateBackupFolder, listBackupFiles } = require('./backupView');
-const { ensureTempDir, extractBackupArchive, restorePluginDatabases, createBackupArchive, checkIntegrity, CORE_DB_PATH } = require('./backupBundle');
+const { ensureTempDir, extractBackupArchive, restorePluginDatabases, createBackupArchive, checkIntegrity, CORE_DB_PATH, PLUGINS_DIR } = require('./backupBundle');
+const { installPlugin } = require('../../Plugin/pluginInstall');
 const { db } = require('../../utility/database');
 const path = require('path');
 const fs = require('fs');
@@ -412,17 +413,19 @@ async function downloadBackupFile(drive, fileId, fileName) {
  * Restore the core database (and plugin databases, for archive backups) from a
  * downloaded backup file, then remove the downloaded and extracted temp files
  * @param {string} downloadPath - Path returned by downloadBackupFile
+ * @param {{ installMissingPlugins?: boolean }} [options] - Reinstall the backup's plugins first when they are not on disk
  * @returns {Promise<{ restored: string[], skipped: string[] }>} Plugin database restore summary
  */
-async function applyBackupFile(downloadPath) {
+async function applyBackupFile(downloadPath, { installMissingPlugins = false } = {}) {
 	const extractDir = path.join(ensureTempDir(), `restore_extract_${Date.now()}`);
 	let pluginRestoreSummary = { restored: [], skipped: [] };
 
 	try {
 		if (downloadPath.endsWith('.zip')) {
 			// Archive backup: extract, restore the core database, then plugin databases.
-			const { coreDbPath, pluginDbs } = extractBackupArchive(downloadPath, extractDir);
+			const { coreDbPath, pluginDbs, manifest } = extractBackupArchive(downloadPath, extractDir);
 			await restoreDatabase(CORE_DB_PATH, coreDbPath);
+			if (installMissingPlugins) await installBackedUpPlugins(manifest);
 			pluginRestoreSummary = restorePluginDatabases(pluginDbs);
 			if (pluginRestoreSummary.restored.length) {
 				console.log(`[Database Restore] Restored plugin databases: ${pluginRestoreSummary.restored.join(', ')}`);
@@ -438,6 +441,25 @@ async function applyBackupFile(downloadPath) {
 	}
 
 	return pluginRestoreSummary;
+}
+
+/**
+ * Install, from the plugin registry, every plugin the backup was taken with that
+ * is missing on disk, so its database has somewhere to be restored to. Plugin
+ * modules are not registered: the caller restarts the bot, which loads them.
+ * Backups made before the manifest listed installed plugins only name the
+ * plugins that had a database.
+ * @param {object|null} manifest - Backup manifest
+ */
+async function installBackedUpPlugins(manifest) {
+	const pluginNames = manifest?.installedPlugins
+		|| [...new Set((manifest?.plugins || []).map(entry => entry.plugin))];
+
+	for (const pluginName of pluginNames) {
+		if (fs.existsSync(path.join(PLUGINS_DIR, pluginName))) continue;
+		const result = await installPlugin(pluginName, null);
+		console.log(`[Auto Restore] Plugin ${pluginName}: ${result.message}`);
+	}
 }
 
 /**
@@ -473,7 +495,7 @@ async function autoRestoreIfEmpty() {
 
 		console.log(`[Auto Restore] Restoring ${latest.name} (created ${latest.createdTime})...`);
 		const downloadPath = await downloadBackupFile(drive, latest.id, latest.name);
-		await applyBackupFile(downloadPath);
+		await applyBackupFile(downloadPath, { installMissingPlugins: true });
 	} catch (error) {
 		console.error(`[Auto Restore] Failed, starting with an empty database: ${error.message}`);
 		return false;

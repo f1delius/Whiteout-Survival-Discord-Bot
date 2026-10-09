@@ -822,7 +822,7 @@ async function fetchRegistry() {
  * Installs a plugin from the remote registry by name.
  * Downloads the plugin ZIP from GitHub, extracts it, and loads it.
  * @param {string} pluginName - Plugin name from registry
- * @param {Object} registrar - Register functions from index.js
+ * @param {Object|null} registrar - Register functions from index.js, or null to install the files without loading the plugin
  * @returns {Promise<{ success: boolean, message: string }>}
  */
 async function installPlugin(pluginName, registrar, options = {}) {
@@ -876,7 +876,7 @@ async function installPlugin(pluginName, registrar, options = {}) {
             return { success: false, message: validation.error };
         }
 
-        registerPluginModules(destDir, manifest, registrar);
+        if (registrar) registerPluginModules(destDir, manifest, registrar);
         console.log(`[PLUGINS] Installed: ${manifest.name} v${manifest.version}`);
 
         return { success: true, message: `Plugin "${manifest.name}" v${manifest.version} installed successfully.` };

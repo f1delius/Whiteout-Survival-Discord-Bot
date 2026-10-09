@@ -113,6 +113,17 @@ function discoverPluginDatabases(pluginsDir = PLUGINS_DIR) {
 }
 
 /**
+ * List the names of every installed plugin (directories holding a plugin.json).
+ * @returns {string[]}
+ */
+function listInstalledPlugins(pluginsDir = PLUGINS_DIR) {
+	if (!fs.existsSync(pluginsDir)) return [];
+	return fs.readdirSync(pluginsDir, { withFileTypes: true })
+		.filter(entry => entry.isDirectory() && fs.existsSync(path.join(pluginsDir, entry.name, 'plugin.json')))
+		.map(entry => entry.name);
+}
+
+/**
  * Build the backup ZIP: core database + every plugin database + manifest.
  * The core database is validated and a failed check aborts the backup; a plugin
  * database that fails its check is skipped (logged) so one broken plugin cannot
@@ -174,7 +185,8 @@ async function createBackupArchive(archivePath, { coreDbPath = CORE_DB_PATH, plu
 			format: ARCHIVE_FORMAT,
 			createdAt: new Date().toISOString(),
 			coreDb: CORE_ARCHIVE_PATH,
-			plugins: manifestPlugins
+			plugins: manifestPlugins,
+			installedPlugins: listInstalledPlugins(pluginsDir)
 		};
 		zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
 
