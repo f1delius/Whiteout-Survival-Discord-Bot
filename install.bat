@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 REM WOSLandJS Discord Bot - Windows Docker Installer
 REM Usage: Download and double-click, or run from Command Prompt
 
-set "REPO=whiteout-project/Whiteout-Survival-Discord-Bot"
+set "REPO=f1delius/Whiteout-Survival-Discord-Bot"
 set "INSTALL_DIR=%USERPROFILE%\woslandjs"
 set "COMPOSE_URL=https://raw.githubusercontent.com/%REPO%/main/docker-compose.yml"
 

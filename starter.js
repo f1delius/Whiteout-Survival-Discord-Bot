@@ -255,9 +255,9 @@ if (!ALLOWED_NODE_MAJORS.includes(_currentNodeMajor)) {
 // PRE-FLIGHT CHECKS: Dependencies, Files, and Version
 // ============================================================
 
-const GITHUB_REPO = 'whiteout-project/Whiteout-Survival-Discord-Bot';
+const GITHUB_REPO = 'f1delius/Whiteout-Survival-Discord-Bot';
 const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
-const UPDATE_PROXY_URL = process.env.UPDATE_CHECK_PROXY_URL || 'https://wosland.com/api/updates/latest';
+const UPDATE_PROXY_URL = process.env.UPDATE_CHECK_PROXY_URL || '';
 const UPDATE_PROXY_TIMEOUT_MS = parseInt(process.env.UPDATE_PROXY_TIMEOUT_MS, 10) || 4000;
 const GITHUB_FALLBACK_INTERVAL_MS = 30 * 60 * 1000;
 let lastGitHubFallbackAttemptAt = 0;

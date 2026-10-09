@@ -103,7 +103,7 @@ function hasDockerSocket() {
 async function checkDockerUpdate() {
     const dockerSelfUpdate = require('./dockerSelfUpdate');
     const botContainer = process.env.BOT_CONTAINER || 'woslandjs';
-    const botImage = process.env.BOT_IMAGE || 'ghcr.io/whiteout-project/whiteout-survival-discord-bot';
+    const botImage = process.env.BOT_IMAGE || 'ghcr.io/f1delius/whiteout-survival-discord-bot';
 
     return dockerSelfUpdate.checkDockerUpdate({
         targetContainer: botContainer,
@@ -120,7 +120,7 @@ async function checkDockerUpdate() {
 async function applyDockerUpdate() {
     const { scheduleDockerUpdate } = require('./dockerSelfUpdate');
     const botContainer = process.env.BOT_CONTAINER || 'woslandjs';
-    const botImage = process.env.BOT_IMAGE || 'ghcr.io/whiteout-project/whiteout-survival-discord-bot';
+    const botImage = process.env.BOT_IMAGE || 'ghcr.io/f1delius/whiteout-survival-discord-bot';
 
     return scheduleDockerUpdate({
         targetContainer: botContainer,

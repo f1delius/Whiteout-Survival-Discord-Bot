@@ -3,7 +3,7 @@ const http = require('http');
 
 const DOCKER_SOCKET = '/var/run/docker.sock';
 const DEFAULT_CONTAINER = 'woslandjs';
-const DEFAULT_IMAGE = 'ghcr.io/whiteout-project/whiteout-survival-discord-bot';
+const DEFAULT_IMAGE = 'ghcr.io/f1delius/whiteout-survival-discord-bot';
 const DEFAULT_TAG = 'latest';
 const HELPER_DELAY_MS = 2500;
 

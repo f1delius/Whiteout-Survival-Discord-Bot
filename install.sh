@@ -2,9 +2,9 @@
 set -e
 
 # WOSLandJS Discord Bot - Docker Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/whiteout-project/Whiteout-Survival-Discord-Bot/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/f1delius/Whiteout-Survival-Discord-Bot/main/install.sh | bash
 
-REPO="whiteout-project/Whiteout-Survival-Discord-Bot"
+REPO="f1delius/Whiteout-Survival-Discord-Bot"
 INSTALL_DIR="$HOME/woslandjs"
 COMPOSE_URL="https://raw.githubusercontent.com/${REPO}/main/docker-compose.yml"
 

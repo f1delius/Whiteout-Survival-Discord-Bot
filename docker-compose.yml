@@ -1,6 +1,6 @@
 services:
   bot:
-    image: ghcr.io/whiteout-project/whiteout-survival-discord-bot:latest
+    image: ghcr.io/f1delius/whiteout-survival-discord-bot:latest
     container_name: woslandjs
     restart: unless-stopped
     volumes:
@@ -14,4 +14,4 @@ services:
       - .env
     environment:
       - BOT_CONTAINER=woslandjs
-      - BOT_IMAGE=ghcr.io/whiteout-project/whiteout-survival-discord-bot
+      - BOT_IMAGE=ghcr.io/f1delius/whiteout-survival-discord-bot
